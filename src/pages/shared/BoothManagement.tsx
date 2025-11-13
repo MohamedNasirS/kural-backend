@@ -21,8 +21,8 @@ interface Booth {
 }
 
 const initialBooths: Booth[] = [
-  { id: 1, boothId: 'BID-001', name: 'Government School, Main Road', ac: 118, address: 'Main Road, Thondamuthur', voters: 854, agents: 2 },
-  { id: 2, boothId: 'BID-002', name: 'Community Hall, West Street', ac: 118, address: 'West Street, Thondamuthur', voters: 723, agents: 3 },
+  { id: 1, boothId: 'BID-001', name: 'Government School, Main Road', ac: 119, address: 'Main Road, Thondamuthur', voters: 854, agents: 2 },
+  { id: 2, boothId: 'BID-002', name: 'Community Hall, West Street', ac: 119, address: 'West Street, Thondamuthur', voters: 723, agents: 3 },
   { id: 3, boothId: 'BID-003', name: 'Primary School, East Area', ac: 119, address: 'East Area, Coimbatore', voters: 912, agents: 1 },
 ];
 
@@ -38,7 +38,7 @@ export const BoothManagement = () => {
   const [newBooth, setNewBooth] = useState({
     boothId: '',
     name: '',
-    ac: user?.role === 'L2' ? user.assignedAC : 118,
+    ac: user?.role === 'L2' ? user.assignedAC : 119,
     address: '',
     voters: 0,
   });
@@ -46,7 +46,7 @@ export const BoothManagement = () => {
   const [editBooth, setEditBooth] = useState({
     boothId: '',
     name: '',
-    ac: 118,
+    ac: 119,
     address: '',
     voters: 0,
   });
@@ -72,7 +72,7 @@ export const BoothManagement = () => {
       setNewBooth({
         boothId: '',
         name: '',
-        ac: user?.role === 'L2' ? user!.assignedAC : 118,
+        ac: user?.role === 'L2' ? user!.assignedAC : 119,
         address: '',
         voters: 0,
       });
@@ -187,7 +187,7 @@ export const BoothManagement = () => {
                         <SelectValue placeholder="Select AC" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="118">118 - Thondamuthur</SelectItem>
+                        <SelectItem value="119">119 - Thondamuthur</SelectItem>
                         <SelectItem value="119">119 - Coimbatore North</SelectItem>
                         <SelectItem value="120">120 - Coimbatore South</SelectItem>
                       </SelectContent>
@@ -316,7 +316,7 @@ export const BoothManagement = () => {
                       <SelectValue placeholder="Select AC" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="118">118 - Thondamuthur</SelectItem>
+                      <SelectItem value="119">119 - Thondamuthur</SelectItem>
                       <SelectItem value="119">119 - Coimbatore North</SelectItem>
                       <SelectItem value="120">120 - Coimbatore South</SelectItem>
                     </SelectContent>

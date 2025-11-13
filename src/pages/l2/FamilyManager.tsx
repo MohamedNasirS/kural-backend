@@ -17,7 +17,7 @@ const mockFamilies = [
 
 export const FamilyManager = () => {
   const { user } = useAuth();
-  const acNumber = user?.assignedAC || 118;
+  const acNumber = user?.assignedAC || 119;
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [boothFilter, setBoothFilter] = useState<string>('all');
   const [selectedFamily, setSelectedFamily] = useState<any>(null);

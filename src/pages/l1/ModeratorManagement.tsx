@@ -18,14 +18,14 @@ interface Moderator {
 }
 
 const mockModerators: Moderator[] = [
-  { id: 1, name: 'ACI Moderator', email: 'aci@ac118.com', assignedAC: '118 - Thondamuthur', status: 'Active' },
+  { id: 1, name: 'ACI Moderator', email: 'aci@ac119.com', assignedAC: '119 - Thondamuthur', status: 'Active' },
   { id: 2, name: 'Priya Sharma', email: 'priya@ac119.com', assignedAC: '119 - Coimbatore North', status: 'Active' },
   { id: 3, name: 'Arun Patel', email: 'arun@ac120.com', assignedAC: '120 - Coimbatore South', status: 'Active' },
   { id: 4, name: 'Deepa Singh', email: 'deepa@ac121.com', assignedAC: '121 - Singanallur', status: 'Inactive' },
 ];
 
 const acOptions = [
-  { value: '118', label: '118 - Thondamuthur' },
+  { value: '119', label: '119 - Thondamuthur' },
   { value: '119', label: '119 - Coimbatore North' },
   { value: '120', label: '120 - Coimbatore South' },
   { value: '121', label: '121 - Singanallur' },

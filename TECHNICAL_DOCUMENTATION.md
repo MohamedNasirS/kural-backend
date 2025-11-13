@@ -465,7 +465,7 @@ const acData: Record<string, {
   booths: number;
   completion: number;
 }> = {
-  '118': { name: 'Thondamuthur', voters: 1247, ... },
+  '119': { name: 'Thondamuthur', voters: 1247, ... },
   // ... 20 more ACs
 };
 ```

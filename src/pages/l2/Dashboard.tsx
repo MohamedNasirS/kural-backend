@@ -5,10 +5,61 @@ import { Card } from '@/components/ui/card';
 import { Users, Home, FileCheck, MapPin, Activity } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/contexts/AuthContext';
+import { useEffect, useState } from 'react';
+import API_BASE_URL from '@/lib/api';
+
+interface DashboardStats {
+  acId: number;
+  totalVoters: number;
+  totalFamilies: number;
+  surveysCompleted: number;
+  totalBooths: number;
+  boothStats: Array<{
+    boothNo: number;
+    boothName: string;
+    boothId: string;
+    voters: number;
+  }>;
+}
 
 export const L2Dashboard = () => {
   const { user } = useAuth();
-  const acNumber = user?.assignedAC || 118;
+  const acNumber = user?.assignedAC || 119;
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchDashboardStats();
+  }, [acNumber]);
+
+  const fetchDashboardStats = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const response = await fetch(`${API_BASE_URL}/dashboard/stats/${acNumber}`, {
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch dashboard statistics');
+      }
+
+      const data = await response.json();
+      setStats(data);
+    } catch (err) {
+      console.error('Error fetching dashboard stats:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load dashboard data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Format number with commas
+  const formatNumber = (num: number) => {
+    return num.toLocaleString();
+  };
 
   return (
     <DashboardLayout>
@@ -18,12 +69,38 @@ export const L2Dashboard = () => {
           <p className="text-xl text-muted-foreground">Assembly Constituency {acNumber} - Thondamuthur</p>
         </div>
 
+        {error && (
+          <div className="bg-destructive/10 border border-destructive text-destructive px-4 py-3 rounded">
+            {error}
+          </div>
+        )}
+
         {/* Overview Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <StatCard title="Total Voters" value="1,247" icon={Users} variant="primary" />
-          <StatCard title="Total Families" value="342" icon={Home} variant="primary" />
-          <StatCard title="Surveys Completed" value="156" icon={FileCheck} variant="success" />
-          <StatCard title="Total Booths" value="89" icon={MapPin} variant="warning" />
+          <StatCard 
+            title="Total Voters" 
+            value={loading ? "Loading..." : formatNumber(stats?.totalVoters || 0)} 
+            icon={Users} 
+            variant="primary" 
+          />
+          <StatCard 
+            title="Total Families" 
+            value={loading ? "Loading..." : formatNumber(stats?.totalFamilies || 0)} 
+            icon={Home} 
+            variant="primary" 
+          />
+          <StatCard 
+            title="Surveys Completed" 
+            value={loading ? "Loading..." : formatNumber(stats?.surveysCompleted || 0)} 
+            icon={FileCheck} 
+            variant="success" 
+          />
+          <StatCard 
+            title="Total Booths" 
+            value={loading ? "Loading..." : formatNumber(stats?.totalBooths || 0)} 
+            icon={MapPin} 
+            variant="warning" 
+          />
         </div>
 
         <Separator />
@@ -71,31 +148,37 @@ export const L2Dashboard = () => {
                   <tr>
                     <th className="px-4 py-3 text-left text-sm font-semibold">Booth #</th>
                     <th className="px-4 py-3 text-left text-sm font-semibold">Location</th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold">Assigned Agent</th>
                     <th className="px-4 py-3 text-left text-sm font-semibold">Voters</th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold">Surveys</th>
                     <th className="px-4 py-3 text-left text-sm font-semibold">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {[
-                    { booth: '1', location: 'Government School, Main Road', agent: 'Rajesh Kumar', voters: 145, surveys: 89, status: 'Active' },
-                    { booth: '2', location: 'Community Hall, West Street', agent: 'Priya Sharma', voters: 132, surveys: 76, status: 'Active' },
-                    { booth: '3', location: 'Primary School, East Area', agent: 'Arun Patel', voters: 156, surveys: 92, status: 'Active' },
-                  ].map((row) => (
-                    <tr key={row.booth} className="hover:bg-muted/50">
-                      <td className="px-4 py-3 text-sm font-medium">{row.booth}</td>
-                      <td className="px-4 py-3 text-sm">{row.location}</td>
-                      <td className="px-4 py-3 text-sm">{row.agent}</td>
-                      <td className="px-4 py-3 text-sm">{row.voters}</td>
-                      <td className="px-4 py-3 text-sm">{row.surveys}</td>
-                      <td className="px-4 py-3">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-success/10 text-success">
-                          {row.status}
-                        </span>
+                  {loading ? (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">
+                        Loading booth data...
                       </td>
                     </tr>
-                  ))}
+                  ) : stats?.boothStats && stats.boothStats.length > 0 ? (
+                    stats.boothStats.map((booth) => (
+                      <tr key={booth.boothId || booth.boothNo} className="hover:bg-muted/50">
+                        <td className="px-4 py-3 text-sm font-medium">{booth.boothNo}</td>
+                        <td className="px-4 py-3 text-sm">{booth.boothName || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm">{formatNumber(booth.voters)}</td>
+                        <td className="px-4 py-3">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-success/10 text-success">
+                            Active
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">
+                        No booth data available
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

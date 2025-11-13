@@ -6,11 +6,11 @@ import { Search, Activity, Clock } from 'lucide-react';
 import { useState } from 'react';
 
 const liveSurveys = [
-  { id: 1, voter: 'Rajesh Kumar', booth: 'Booth 1', ac: '118 - Thondamuthur', agent: 'Rajesh Kumar', timestamp: '2 mins ago', question: 'Which party will you vote for?', answer: 'Party A' },
-  { id: 2, voter: 'Priya Sharma', booth: 'Booth 2', ac: '118 - Thondamuthur', agent: 'Priya Sharma', timestamp: '5 mins ago', question: 'What is your primary concern?', answer: 'Healthcare' },
   { id: 3, voter: 'Arun Patel', booth: 'Booth 1', ac: '119 - Coimbatore North', agent: 'Arun Patel', timestamp: '8 mins ago', question: 'Rate government performance', answer: '7/10' },
   { id: 4, voter: 'Meena Devi', booth: 'Booth 3', ac: '120 - Coimbatore South', agent: 'Deepa Singh', timestamp: '12 mins ago', question: 'Which party will you vote for?', answer: 'Party B' },
-  { id: 5, voter: 'Suresh Babu', booth: 'Booth 1', ac: '118 - Thondamuthur', agent: 'Rajesh Kumar', timestamp: '15 mins ago', question: 'What is your primary concern?', answer: 'Employment' },
+  { id: 1, voter: 'Rajesh Kumar', booth: 'Booth 1', ac: '119 - Thondamuthur', agent: 'Rajesh Kumar', timestamp: '2 mins ago', question: 'Which party will you vote for?', answer: 'Party A' },
+  { id: 2, voter: 'Priya Sharma', booth: 'Booth 2', ac: '119 - Thondamuthur', agent: 'Priya Sharma', timestamp: '5 mins ago', question: 'What is your primary concern?', answer: 'Healthcare' },
+  { id: 5, voter: 'Suresh Babu', booth: 'Booth 1', ac: '119 - Thondamuthur', agent: 'Rajesh Kumar', timestamp: '15 mins ago', question: 'What is your primary concern?', answer: 'Employment' },
 ];
 
 // Get unique questions for filter options

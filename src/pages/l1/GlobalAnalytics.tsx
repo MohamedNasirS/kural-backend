@@ -14,7 +14,7 @@ import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 
 const acPerformance = [
-  { ac: '118 - Thondamuthur', acNumber: 118, voters: 1247, completion: 12.5, activity: 'Medium' },
+  { ac: '119 - Thondamuthur', acNumber: 119, voters: 1247, completion: 12.5, activity: 'Medium' },
   { ac: '119 - Coimbatore North', acNumber: 119, voters: 2340, completion: 18.1, activity: 'High' },
   { ac: '120 - Coimbatore South', acNumber: 120, voters: 1890, completion: 15.3, activity: 'High' },
   { ac: '121 - Singanallur', acNumber: 121, voters: 1678, completion: 8.2, activity: 'Low' },

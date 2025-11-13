@@ -16,7 +16,7 @@ import { ComparisonMetrics } from '@/components/ComparisonMetrics';
 
 // Expanded mock data for all 21 ACs
 const acData: Record<string, { name: string; voters: number; families: number; surveys: number; booths: number; completion: number }> = {
-  '118': { name: 'Thondamuthur', voters: 1247, families: 342, surveys: 156, booths: 89, completion: 78 },
+  '119': { name: 'Thondamuthur', voters: 1247, families: 342, surveys: 156, booths: 89, completion: 78 },
   '119': { name: 'Coimbatore North', voters: 2340, families: 678, surveys: 423, booths: 112, completion: 85 },
   '120': { name: 'Coimbatore South', voters: 1890, families: 534, surveys: 289, booths: 95, completion: 72 },
   '121': { name: 'Singanallur', voters: 2145, families: 598, surveys: 387, booths: 108, completion: 91 },
@@ -74,7 +74,7 @@ const timeSeriesData = [
 export const ACDetailedDashboard = () => {
   const { acNumber } = useParams<{ acNumber: string }>();
   const navigate = useNavigate();
-  const data = acData[acNumber || '118'] || acData['118'];
+  const data = acData[acNumber || '119'] || acData['119'];
   const [selectedBooth, setSelectedBooth] = useState<{ booth: string; completion: number; voters: number } | null>(null);
 
   return (

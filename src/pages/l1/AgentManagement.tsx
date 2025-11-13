@@ -9,8 +9,8 @@ import { UserPlus, Edit2, Trash2, Filter } from 'lucide-react';
 import { useState } from 'react';
 
 const mockAgents = [
-  { id: 1, name: 'Rajesh Kumar', phone: '+91 98765 43210', booth: 'Booth 1', ac: '118 - Thondamuthur', moderator: 'ACI Moderator', status: 'Active' },
-  { id: 2, name: 'Priya Sharma', phone: '+91 98765 43211', booth: 'Booth 2', ac: '118 - Thondamuthur', moderator: 'ACI Moderator', status: 'Active' },
+  { id: 1, name: 'Rajesh Kumar', phone: '+91 98765 43210', booth: 'Booth 1', ac: '119 - Thondamuthur', moderator: 'ACI Moderator', status: 'Active' },
+  { id: 2, name: 'Priya Sharma', phone: '+91 98765 43211', booth: 'Booth 2', ac: '119 - Thondamuthur', moderator: 'ACI Moderator', status: 'Active' },
   { id: 3, name: 'Arun Patel', phone: '+91 98765 43212', booth: 'Booth 1', ac: '119 - Coimbatore North', moderator: 'Priya Sharma', status: 'Active' },
   { id: 4, name: 'Meena Devi', phone: '+91 98765 43213', booth: 'Booth 3', ac: '120 - Coimbatore South', moderator: 'Arun Patel', status: 'Inactive' },
 ];
@@ -53,7 +53,7 @@ export const AgentManagement = () => {
                       <SelectValue placeholder="Select AC" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="118">118 - Thondamuthur</SelectItem>
+                      <SelectItem value="119">119 - Thondamuthur</SelectItem>
                       <SelectItem value="119">119 - Coimbatore North</SelectItem>
                       <SelectItem value="120">120 - Coimbatore South</SelectItem>
                     </SelectContent>
@@ -88,7 +88,7 @@ export const AgentManagement = () => {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All ACs</SelectItem>
-                <SelectItem value="118">118 - Thondamuthur</SelectItem>
+                <SelectItem value="119">119 - Thondamuthur</SelectItem>
                 <SelectItem value="119">119 - Coimbatore North</SelectItem>
               </SelectContent>
             </Select>

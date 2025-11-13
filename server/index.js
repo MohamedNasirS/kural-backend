@@ -8,6 +8,7 @@ import { fileURLToPath } from "url";
 
 import User from "./models/User.js";
 import Survey from "./models/Survey.js";
+import Voter from "./models/Voter.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -462,6 +463,218 @@ app.delete("/api/surveys/:surveyId", async (req, res) => {
   } catch (error) {
     console.error("Error deleting survey", error);
     return res.status(500).json({ message: "Failed to delete survey" });
+  }
+});
+
+// Dashboard Statistics API
+app.get("/api/dashboard/stats/:acId", async (req, res) => {
+  try {
+    await connectToDatabase();
+    
+    const acId = parseInt(req.params.acId);
+    
+    if (isNaN(acId)) {
+      return res.status(400).json({ message: "Invalid AC ID" });
+    }
+    
+    // Query filter - support both aci_num (preferred) and aci_id (fallback)
+    // For Thondamuthur AC 119, we query: { aci_num: 119, aci_name: "THONDAMUTHUR" }
+    const acQuery = { 
+      $or: [
+        { aci_num: acId },
+        { aci_id: acId }
+      ]
+    };
+    
+    // Get total voters for this AC using aci_num
+    const totalVoters = await Voter.countDocuments(acQuery);
+    
+    // Get unique families (by grouping voters with same guardian/father name and address)
+    const familiesAggregation = await Voter.aggregate([
+      { $match: acQuery },
+      { 
+        $group: { 
+          _id: { 
+            address: "$address", 
+            guardian: "$guardian",
+            booth_id: "$booth_id"
+          } 
+        } 
+      },
+      { $count: "total" }
+    ]);
+    const totalFamilies = familiesAggregation.length > 0 ? familiesAggregation[0].total : 0;
+    
+    // Get surveys completed for this AC (from surveys collection)
+    const surveysCompleted = await Survey.countDocuments({ 
+      assignedACs: acId,
+      status: "Active"
+    });
+    
+    // Get unique booths for this AC
+    const boothsAggregation = await Voter.aggregate([
+      { $match: acQuery },
+      { $group: { _id: "$boothno" } },
+      { $count: "total" }
+    ]);
+    const totalBooths = boothsAggregation.length > 0 ? boothsAggregation[0].total : 0;
+    
+    // Get booth-wise data
+    const boothStats = await Voter.aggregate([
+      { $match: acQuery },
+      { 
+        $group: { 
+          _id: { 
+            boothno: "$boothno",
+            boothname: "$boothname",
+            booth_id: "$booth_id"
+          },
+          voters: { $sum: 1 }
+        } 
+      },
+      { $sort: { "_id.boothno": 1 } },
+      { $limit: 10 }
+    ]);
+    
+    return res.json({
+      acId,
+      totalVoters,
+      totalFamilies,
+      surveysCompleted,
+      totalBooths,
+      boothStats: boothStats.map(booth => ({
+        boothNo: booth._id.boothno,
+        boothName: booth._id.boothname,
+        boothId: booth._id.booth_id,
+        voters: booth.voters
+      }))
+    });
+    
+  } catch (error) {
+    console.error("Error fetching dashboard stats:", error);
+    return res.status(500).json({ message: "Failed to fetch dashboard statistics" });
+  }
+});
+
+// Get all voters for a specific AC with optional booth filter
+app.get("/api/voters/:acId", async (req, res) => {
+  try {
+    await connectToDatabase();
+    
+    const acId = parseInt(req.params.acId);
+    const { booth, search, status, page = 1, limit = 50 } = req.query;
+    
+    if (isNaN(acId)) {
+      return res.status(400).json({ message: "Invalid AC ID" });
+    }
+    
+    // Build query - support both aci_num and aci_id
+    const query = {
+      $or: [
+        { aci_num: acId },
+        { aci_id: acId }
+      ]
+    };
+    
+    // Add booth filter if provided
+    if (booth && booth !== 'all') {
+      query.boothname = booth;
+    }
+    
+    // Add status filter if provided
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+    
+    // Add search filter if provided
+    if (search) {
+      query.$or = [
+        { 'name.english': { $regex: search, $options: 'i' } },
+        { 'name.tamil': { $regex: search, $options: 'i' } },
+        { voterID: { $regex: search, $options: 'i' } }
+      ];
+      
+      // Need to recreate the AC query when search is present
+      query.$and = [
+        {
+          $or: [
+            { aci_num: acId },
+            { aci_id: acId }
+          ]
+        }
+      ];
+    }
+    
+    // Calculate pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    // Fetch voters with pagination
+    const voters = await Voter.find(query)
+      .select('name voterID family_id booth_id boothname boothno mobile status age gender verified')
+      .skip(skip)
+      .limit(parseInt(limit))
+      .sort({ boothno: 1, name: 1 });
+    
+    // Get total count
+    const totalVoters = await Voter.countDocuments(query);
+    
+    return res.json({
+      voters: voters.map(voter => ({
+        id: voter._id,
+        name: voter.name?.english || voter.name?.tamil || 'N/A',
+        voterId: voter.voterID || 'N/A',
+        familyId: voter.family_id || 'N/A',
+        booth: voter.boothname || `Booth ${voter.boothno || 'N/A'}`,
+        boothNo: voter.boothno,
+        phone: voter.mobile ? `+91 ${voter.mobile}` : 'N/A',
+        status: voter.status || 'Not Contacted',
+        age: voter.age,
+        gender: voter.gender,
+        verified: voter.verified || false
+      })),
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: totalVoters,
+        pages: Math.ceil(totalVoters / parseInt(limit))
+      }
+    });
+    
+  } catch (error) {
+    console.error("Error fetching voters:", error);
+    return res.status(500).json({ message: "Failed to fetch voters" });
+  }
+});
+
+// Get distinct booths for a specific AC
+app.get("/api/voters/:acId/booths", async (req, res) => {
+  try {
+    await connectToDatabase();
+    
+    const acId = parseInt(req.params.acId);
+    
+    if (isNaN(acId)) {
+      return res.status(400).json({ message: "Invalid AC ID" });
+    }
+    
+    // Get distinct booth names for this AC
+    const booths = await Voter.distinct("boothname", {
+      $or: [
+        { aci_num: acId },
+        { aci_id: acId }
+      ]
+    });
+    
+    // Filter out null/empty values and sort
+    const validBooths = booths
+      .filter(booth => booth && booth.trim())
+      .sort();
+    
+    return res.json({ booths: validBooths });
+    
+  } catch (error) {
+    console.error("Error fetching booths:", error);
+    return res.status(500).json({ message: "Failed to fetch booths" });
   }
 });
 

@@ -16,7 +16,7 @@ const boothPerformance = [
 
 export const Reports = () => {
   const { user } = useAuth();
-  const acNumber = user?.assignedAC || 118;
+  const acNumber = user?.assignedAC || 119;
   const [boothFilter, setBoothFilter] = useState<string>('all');
 
   // Get unique booths for filter options

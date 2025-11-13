@@ -53,13 +53,13 @@ export const BoothAgentManagement = () => {
   const [newAgent, setNewAgent] = useState({
     name: '',
     phone: '',
-    ac: user?.role === 'L2' ? user.assignedAC : 118,
+    ac: user?.role === 'L2' ? user.assignedAC : 119,
   });
   
   const [editAgent, setEditAgent] = useState({
     name: '',
     phone: '',
-    ac: 118,
+    ac: 119,
   });
   
   const [selectedBooths, setSelectedBooths] = useState<string[]>([]);
@@ -121,7 +121,7 @@ export const BoothAgentManagement = () => {
       setNewAgent({
         name: '',
         phone: '',
-        ac: user?.role === 'L2' ? user!.assignedAC : 118,
+        ac: user?.role === 'L2' ? user!.assignedAC : 119,
       });
       setSelectedBooths([]);
       setIsOpen(false);
@@ -243,7 +243,7 @@ export const BoothAgentManagement = () => {
                         <SelectValue placeholder="Select AC" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="118">118 - Thondamuthur</SelectItem>
+                        <SelectItem value="119">119 - Thondamuthur</SelectItem>
                         <SelectItem value="119">119 - Coimbatore North</SelectItem>
                         <SelectItem value="120">120 - Coimbatore South</SelectItem>
                       </SelectContent>
@@ -292,7 +292,7 @@ export const BoothAgentManagement = () => {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All ACs</SelectItem>
-                  <SelectItem value="118">118 - Thondamuthur</SelectItem>
+                  <SelectItem value="119">119 - Thondamuthur</SelectItem>
                   <SelectItem value="119">119 - Coimbatore North</SelectItem>
                   <SelectItem value="120">120 - Coimbatore South</SelectItem>
                 </SelectContent>
@@ -411,7 +411,7 @@ export const BoothAgentManagement = () => {
                       <SelectValue placeholder="Select AC" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="118">118 - Thondamuthur</SelectItem>
+                      <SelectItem value="119">119 - Thondamuthur</SelectItem>
                       <SelectItem value="119">119 - Coimbatore North</SelectItem>
                       <SelectItem value="120">120 - Coimbatore South</SelectItem>
                     </SelectContent>

@@ -15,7 +15,7 @@ const liveUpdates = [
 
 export const LiveBoothUpdates = () => {
   const { user } = useAuth();
-  const acNumber = user?.assignedAC || 118;
+  const acNumber = user?.assignedAC || 119;
   const [boothFilter, setBoothFilter] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [activityFilter, setActivityFilter] = useState<string>('all');
