@@ -1,0 +1,339 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 
+  Award-Winning Design System
+  Ultra-modern, playful design with smooth microinteractions
+  All colors in HSL format for maximum flexibility
+*/
+
+@layer base {
+  :root {
+    /* Light Mode Colors (fallback) */
+    --background: 240 10% 98%;
+    --foreground: 240 10% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 10%;
+
+    /* Primary: Soft Purple */
+    --primary: 250 100% 69%;
+    --primary-foreground: 0 0% 100%;
+    --primary-hover: 250 100% 65%;
+    --primary-glow: 250 100% 75%;
+
+    /* Secondary: Teal */
+    --secondary: 171 100% 41%;
+    --secondary-foreground: 0 0% 100%;
+
+    /* Accent: Coral */
+    --accent: 0 100% 71%;
+    --accent-foreground: 0 0% 100%;
+
+    --muted: 240 5% 96%;
+    --muted-foreground: 240 4% 46%;
+
+    --success: 142 76% 36%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 240 6% 90%;
+    --input: 240 6% 90%;
+    --ring: 250 100% 69%;
+
+    --radius: 1rem;
+    
+    /* Professional Shadows */
+    --shadow-sm: 0 1px 3px 0 hsl(240 10% 10% / 0.1);
+    --shadow-md: 0 4px 6px -1px hsl(240 10% 10% / 0.1);
+    --shadow-lg: 0 10px 15px -3px hsl(240 10% 10% / 0.1);
+    --shadow-xl: 0 20px 25px -5px hsl(240 10% 10% / 0.1);
+    
+    /* Clean Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(250 100% 69%), hsl(250 95% 65%));
+    --gradient-success: linear-gradient(135deg, hsl(171 100% 41%), hsl(171 90% 38%));
+    --gradient-warning: linear-gradient(135deg, hsl(0 100% 71%), hsl(0 95% 68%));
+
+    /* Sidebar */
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 250 100% 69%;
+  }
+
+  /* Dark Mode - Prioritized */
+  .dark {
+    --background: 240 10% 8%;
+    --foreground: 240 5% 96%;
+
+    --card: 240 10% 12%;
+    --card-foreground: 240 5% 96%;
+
+    --popover: 240 10% 12%;
+    --popover-foreground: 240 5% 96%;
+
+    /* Primary: Soft Purple (slightly brighter for dark mode) */
+    --primary: 250 100% 72%;
+    --primary-foreground: 240 10% 8%;
+    --primary-hover: 250 100% 76%;
+    --primary-glow: 250 100% 80%;
+
+    /* Secondary: Teal */
+    --secondary: 171 100% 45%;
+    --secondary-foreground: 240 10% 8%;
+
+    /* Accent: Coral */
+    --accent: 0 100% 73%;
+    --accent-foreground: 240 10% 8%;
+
+    --muted: 240 10% 16%;
+    --muted-foreground: 240 5% 65%;
+
+    --success: 142 76% 45%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 55%;
+    --warning-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 65%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 240 10% 20%;
+    --input: 240 10% 20%;
+    --ring: 250 100% 72%;
+    
+    /* Professional Dark Shadows */
+    --shadow-sm: 0 1px 3px 0 hsl(0 0% 0% / 0.3);
+    --shadow-md: 0 4px 6px -1px hsl(0 0% 0% / 0.3);
+    --shadow-lg: 0 10px 15px -3px hsl(0 0% 0% / 0.3);
+    --shadow-xl: 0 20px 25px -5px hsl(0 0% 0% / 0.3);
+
+    /* Sidebar Dark */
+    --sidebar-background: 240 10% 10%;
+    --sidebar-foreground: 240 5% 90%;
+    --sidebar-primary: 250 100% 72%;
+    --sidebar-primary-foreground: 240 10% 8%;
+    --sidebar-accent: 240 10% 16%;
+    --sidebar-accent-foreground: 240 5% 90%;
+    --sidebar-border: 240 10% 18%;
+    --sidebar-ring: 250 100% 72%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    line-height: 1.4;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+}
+
+/* Custom styles for improved sidebar responsiveness */
+@layer components {
+  [data-sidebar="sidebar"] {
+    @apply transition-all duration-300 ease-in-out;
+  }
+  
+  [data-sidebar="menu-button"] {
+    @apply transition-all duration-200 ease-in-out;
+  }
+  
+  /* Ensure proper spacing and sizing for collapsed sidebar */
+  .group-data-\[collapsible\=icon\]\:w-\[var\(--sidebar-width-icon\)\] {
+    @apply transition-all duration-300 ease-in-out;
+  }
+  
+  /* Improve touch targets for all screen sizes */
+  @media (max-width: 768px) {
+    [data-sidebar="menu-button"] {
+      @apply h-10;
+    }
+    
+    [data-sidebar="menu-sub-button"] {
+      @apply h-9;
+    }
+  }
+  
+  /* Medium screen specific fixes (tablets) */
+  @media (min-width: 768px) and (max-width: 1024px) {
+    [data-sidebar="menu-button"] {
+      @apply h-9;
+    }
+    
+    .sidebar-footer-content {
+      @apply flex flex-col items-center justify-center;
+    }
+    
+    .sidebar-user-info {
+      @apply flex flex-col items-center justify-center h-16;
+    }
+    
+    /* Ensure sidebar is visible on medium screens */
+    .md\:flex {
+      display: flex !important;
+    }
+    
+    /* Fix for overlapping issues on tablets */
+    [data-sidebar="sidebar"] {
+      min-width: 3rem;
+    }
+  }
+  
+  /* Large tablet to small desktop screens */
+  @media (min-width: 1024px) and (max-width: 1280px) {
+    .sidebar-user-info {
+      @apply p-2;
+    }
+    
+    .sidebar-user-info p {
+      @apply text-xs;
+    }
+  }
+  
+  /* Ensure icons are always visible and don't shrink */
+  .sidebar-icon {
+    @apply flex-shrink-0;
+  }
+  
+  /* Fix for logout button visibility and functionality */
+  .logout-button {
+    @apply flex items-center w-full transition-all duration-200 ease-in-out;
+  }
+  
+  /* Ensure proper spacing in collapsed state */
+  .sidebar-collapsed .sidebar-menu-button {
+    @apply justify-center;
+  }
+  
+  /* Additional fixes for medium screens */
+  @media (min-width: 768px) and (max-width: 1200px) {
+    [data-sidebar="sidebar"] {
+      min-width: 3rem !important;
+    }
+    
+    .group-data-\[collapsible\=icon\]\:w-\[var\(--sidebar-width-icon\)\] {
+      width: var(--sidebar-width-icon) !important;
+    }
+  }
+  
+  /* Mobile-specific fixes */
+  @media (max-width: 767px) {
+    .sidebar-user-info {
+      @apply h-14 p-2;
+    }
+    
+    .logout-button {
+      @apply h-10;
+    }
+  }
+  
+  /* Ensure proper z-index for sidebar elements */
+  .sidebar-user-info,
+  .logout-button {
+    z-index: 10;
+  }
+  
+  /* Fix for top navigation view */
+  @media (max-width: 768px) {
+    .sidebar-user-info {
+      min-height: 64px;
+    }
+  }
+  
+  /* Ensure proper display of user info in all states */
+  .sidebar-user-info > div {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+  }
+  
+  /* Fix for developer/admin information visibility */
+  .sidebar-user-info p {
+    line-height: 1.2;
+  }
+  
+  /* Ensure logout icon is always visible */
+  .logout-button svg {
+    min-width: 20px;
+    min-height: 20px;
+  }
+  
+  /* Tablet-specific adjustments for better visibility */
+  @media (min-width: 768px) and (max-width: 1024px) {
+    .logout-button span {
+      font-size: 0.875rem;
+    }
+    
+    .sidebar-user-info {
+      min-height: 70px;
+    }
+  }
+  
+  /* Ensure sidebar visibility on all screen sizes */
+  @media (min-width: 768px) {
+    [data-sidebar="sidebar"] {
+      display: flex !important;
+    }
+  }
+  
+  /* Fix for overlapping issues on medium screens */
+  @media (min-width: 768px) and (max-width: 1200px) {
+    [data-sidebar="content"] {
+      overflow-y: auto;
+      max-height: calc(100vh - 180px);
+    }
+  }
+  
+  /* Ensure proper spacing for sidebar elements on all screens */
+  @media (min-width: 768px) {
+    [data-sidebar="footer"] {
+      margin-top: auto;
+    }
+  }
+  
+  /* Fix for z-index issues on mobile */
+  @media (max-width: 767px) {
+    [data-sidebar="sidebar"] {
+      z-index: 50;
+    }
+  }
+  
+  /* Ensure proper icon sizing across all viewports */
+  [data-sidebar="menu-button"] svg,
+  [data-sidebar="trigger"] svg {
+    min-width: 20px;
+    min-height: 20px;
+  }
+
+  /* Smooth Interactions */
+  .hover-lift {
+    @apply transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-lg;
+  }
+}
