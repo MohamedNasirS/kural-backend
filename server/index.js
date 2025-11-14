@@ -815,6 +815,104 @@ app.get("/api/families/:acId", async (req, res) => {
   }
 });
 
+// Get detailed family information by address and booth
+app.get("/api/families/:acId/details", async (req, res) => {
+  try {
+    await connectToDatabase();
+    
+    const acId = parseInt(req.params.acId);
+    const { address, booth, boothNo } = req.query;
+    
+    console.log('Family details request:', {
+      acId,
+      address,
+      booth,
+      boothNo
+    });
+    
+    if (isNaN(acId)) {
+      return res.status(400).json({ message: "Invalid AC ID" });
+    }
+    
+    if (!address || !booth) {
+      return res.status(400).json({ message: "Address and booth are required" });
+    }
+    
+    // Build match query to find all voters in this family
+    const matchQuery = {
+      $or: [
+        { aci_num: acId },
+        { aci_id: acId }
+      ],
+      address: address,
+      boothname: booth
+    };
+    
+    if (boothNo) {
+      matchQuery.boothno = parseInt(boothNo);
+    }
+    
+    // Fetch all family members (voters at same address and booth)
+    const members = await Voter.find(matchQuery)
+      .sort({ age: -1 }) // Sort by age, head of family first
+      .lean();
+    
+    console.log('Found members:', members.length);
+    
+    if (members.length === 0) {
+      return res.status(404).json({ message: "Family not found" });
+    }
+    
+    // Calculate demographics
+    const demographics = {
+      totalMembers: members.length,
+      male: members.filter(m => m.gender === 'Male').length,
+      female: members.filter(m => m.gender === 'Female').length,
+      surveyed: members.filter(m => m.surveyed === true).length,
+      pending: members.filter(m => m.surveyed !== true).length,
+      averageAge: Math.round(members.reduce((sum, m) => sum + (m.age || 0), 0) / members.length)
+    };
+    
+    // Format family head (first/oldest member)
+    const familyHead = members[0];
+    
+    // Format member data
+    const formattedMembers = members.map((member, index) => ({
+      id: member._id.toString(),
+      name: member.name?.english || member.name?.tamil || 'N/A',
+      voterID: member.voterID || 'N/A',
+      age: member.age || 0,
+      gender: member.gender || 'N/A',
+      relationship: index === 0 ? 'Head' : 'Member', // First is head
+      phone: member.mobile ? `+91 ${member.mobile}` : '',
+      surveyed: member.surveyed === true,
+      surveyedAt: member.verifiedAt || null,
+      religion: member.religion || 'N/A',
+      caste: member.caste || 'N/A'
+    }));
+    
+    return res.json({
+      success: true,
+      family: {
+        id: `${address}-${booth}`.replace(/[^a-zA-Z0-9]/g, '').substring(0, 10).toUpperCase(),
+        headName: familyHead.name?.english || familyHead.name?.tamil || 'N/A',
+        address: address,
+        booth: booth,
+        boothNo: members[0].boothno || 0,
+        acId: acId,
+        acName: members[0].aci_name || `AC ${acId}`,
+        phone: familyHead.mobile ? `+91 ${familyHead.mobile}` : 'N/A'
+      },
+      members: formattedMembers,
+      demographics: demographics
+    });
+    
+  } catch (error) {
+    console.error("Error fetching family details:", error);
+    return res.status(500).json({ message: "Failed to fetch family details", error: error.message });
+  }
+});
+
 // Get survey responses for a specific AC
 app.get("/api/survey-responses/:acId", async (req, res) => {
   try {

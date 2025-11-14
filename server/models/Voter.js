@@ -29,11 +29,7 @@ const voterSchema = new mongoose.Schema({
   verifiedAt: Date,
   surveyed: {
     type: Boolean,
-<<<<<<< HEAD
-    default: false
-=======
     default: false,
->>>>>>> 512f779108dc285826ec4d4e4b4bb39297fd9421
   },
   aci_id: Number,
   aci_name: String
