@@ -12,13 +12,10 @@ import Voter from "./models/Voter.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const envPath = path.resolve(__dirname, "env.env");
-
-console.log('Environment file path:', envPath);
-console.log('File exists:', fs.existsSync(envPath));
+const envPath = path.resolve(__dirname, ".env");
 
 dotenv.config({
-  path: fs.existsSync(envPath) ? envPath : path.resolve(__dirname, ".env"),
+  path: fs.existsSync(envPath) ? envPath : undefined,
 });
 
 const app = express();
@@ -29,9 +26,6 @@ const CLIENT_ORIGINS = (process.env.CLIENT_ORIGIN || "http://localhost:5173")
   .map((origin) => origin.trim())
   .filter(Boolean);
 const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/kuralapp";
-
-console.log('MONGODB_URI:', MONGODB_URI);
-console.log('PORT:', PORT);
 
 app.use(
   cors({
@@ -552,10 +546,10 @@ app.get("/api/dashboard/stats/:acId", async (req, res) => {
       acMeta?.aci_id ??
       (hasNumericIdentifier ? numericFromIdentifier : null);
 
-    // Get total voters for this AC using aci_num
-    const totalVoters = await Voter.countDocuments(acQuery);
+    // Get total members (voters) for this AC
+    const totalMembers = await Voter.countDocuments(acQuery);
 
-    // Get unique families (by grouping voters with same guardian/father name and address)
+    // Get unique families by grouping voters with same address and guardian
     const familiesAggregation = await Voter.aggregate([
       { $match: acQuery },
       {
@@ -571,15 +565,11 @@ app.get("/api/dashboard/stats/:acId", async (req, res) => {
     ]);
     const totalFamilies = familiesAggregation.length > 0 ? familiesAggregation[0].total : 0;
 
-    // Get surveys completed for this AC (from surveys collection)
-    const surveyFilter = {
-      status: "Active",
-    };
-    if (acNumber !== null && acNumber !== undefined) {
-      surveyFilter.assignedACs = acNumber;
-    }
-
-    const surveysCompleted = await Survey.countDocuments(surveyFilter);
+    // Surveys Completed: Count all members who have surveyed: true
+    const surveysCompleted = await Voter.countDocuments({
+      ...acQuery,
+      surveyed: true
+    });
 
     // Get unique booths for this AC
     const boothsAggregation = await Voter.aggregate([
@@ -613,10 +603,10 @@ app.get("/api/dashboard/stats/:acId", async (req, res) => {
       acId: hasNumericIdentifier ? numericFromIdentifier : acNumber ?? null,
       acName: acName ?? null,
       acNumber: acNumber ?? null,
-      totalVoters,
-      totalFamilies,
-      surveysCompleted,
-      totalBooths,
+      totalFamilies,      // Total Families
+      totalMembers,       // Total Members (voters)
+      surveysCompleted,   // Families with all members surveyed
+      totalBooths,        // Total Booths
       boothStats: boothStats.map((booth) => ({
         boothNo: booth._id.boothno,
         boothName: booth._id.boothname,
@@ -821,118 +811,6 @@ app.get("/api/families/:acId", async (req, res) => {
   } catch (error) {
     console.error("Error fetching families:", error);
     return res.status(500).json({ message: "Failed to fetch families" });
-  }
-});
-
-// Get detailed family information with member survey status
-app.get("/api/families/:acId/detail", async (req, res) => {
-  try {
-    await connectToDatabase();
-    
-    const acId = parseInt(req.params.acId);
-    const { address, booth } = req.query;
-    
-    console.log('Family detail request:', { acId, address, booth });
-    
-    if (isNaN(acId)) {
-      return res.status(400).json({ message: "Invalid AC ID" });
-    }
-    
-    if (!address) {
-      return res.status(400).json({ message: "Address is required" });
-    }
-    
-    // Build match query for family members
-    const matchQuery = {
-      $or: [
-        { aci_num: acId },
-        { aci_id: acId }
-      ],
-      address: address
-    };
-    
-    if (booth) {
-      matchQuery.boothname = booth;
-    }
-    
-    console.log('Query:', JSON.stringify(matchQuery));
-    
-    // Get all family members
-    const familyMembers = await Voter.find(matchQuery)
-      .select('name voterID age gender mobile address boothname boothno fathername guardian')
-      .sort({ age: -1 }); // Sort by age descending (head first)
-    
-    console.log('Found family members:', familyMembers.length);
-    
-    if (familyMembers.length === 0) {
-      return res.status(404).json({ message: "Family not found" });
-    }
-    
-    console.log('Creating SurveyResponse model...');
-    // Get survey responses for these voters
-    const SurveyResponse = mongoose.model('SurveyResponse', new mongoose.Schema({}, { strict: false, collection: 'surveyresponses' }));
-    const voterIds = familyMembers.map(v => v.voterID).filter(Boolean);
-    
-    console.log('Voter IDs:', voterIds);
-    
-    // Check which voters have completed surveys (using respondentVoterId field)
-    const surveyedVoters = await SurveyResponse.find({
-      respondentVoterId: { $in: voterIds }
-    }).distinct('respondentVoterId');
-    
-    console.log('Surveyed voters:', surveyedVoters.length);
-    
-    const surveyedSet = new Set(surveyedVoters);
-    
-    // Determine relationships based on age and gender
-    const determineRelationship = (member, index, allMembers) => {
-      if (index === 0) return 'Head';
-      const head = allMembers[0];
-      
-      if (member.age >= 18) {
-        if (member.gender === 'Female' && head.gender === 'Male') return 'Wife';
-        if (member.gender === 'Male' && head.gender === 'Female') return 'Husband';
-        if (member.age < head.age - 15) {
-          return member.gender === 'Male' ? 'Son' : 'Daughter';
-        }
-        return 'Other';
-      } else {
-        return member.gender === 'Male' ? 'Son' : 'Daughter';
-      }
-    };
-    
-    // Calculate demographics
-    const demographics = {
-      total: familyMembers.length,
-      male: familyMembers.filter(m => m.gender === 'Male').length,
-      female: familyMembers.filter(m => m.gender === 'Female').length,
-      surveyed: familyMembers.filter(m => surveyedSet.has(m.voterID)).length,
-      pending: familyMembers.filter(m => !surveyedSet.has(m.voterID)).length
-    };
-    
-    return res.json({
-      id: `FAM${acId}${familyMembers[0].boothno || ''}`,
-      family_head: familyMembers[0].name?.english || familyMembers[0].name?.tamil || 'N/A',
-      address: address,
-      booth: familyMembers[0].boothname || `Booth ${familyMembers[0].boothno}`,
-      boothNo: familyMembers[0].boothno,
-      members: familyMembers.map((member, index) => ({
-        id: member._id,
-        name: member.name?.english || member.name?.tamil || 'N/A',
-        voterID: member.voterID || 'N/A',
-        age: member.age || 0,
-        gender: member.gender || 'N/A',
-        relationship: determineRelationship(member, index, familyMembers),
-        phone: member.mobile ? `+91 ${member.mobile}` : '',
-        survey_status: surveyedSet.has(member.voterID), // true if surveyed, false if pending
-        surveyed: surveyedSet.has(member.voterID) // for backward compatibility
-      })),
-      demographics
-    });
-    
-  } catch (error) {
-    console.error("Error fetching family details:", error);
-    return res.status(500).json({ message: "Failed to fetch family details" });
   }
 });
 

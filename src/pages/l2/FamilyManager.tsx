@@ -118,7 +118,6 @@ export const FamilyManager = () => {
   };
 
   const handleViewDetails = (family: Family) => {
-    console.log('Opening family detail drawer with data:', family);
     setSelectedFamily(family);
     setIsDrawerOpen(true);
   };

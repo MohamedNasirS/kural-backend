@@ -13,8 +13,8 @@ interface DashboardStats {
   acId: number | null;
   acName: string | null;
   acNumber: number | null;
-  totalVoters: number;
   totalFamilies: number;
+  totalMembers: number;
   surveysCompleted: number;
   totalBooths: number;
   boothStats: Array<{
@@ -98,18 +98,18 @@ export const L2Dashboard = () => {
           </div>
         )}
 
-        {/* Overview Cards */}
+        {/* Overview Cards - Clean Minimal Dashboard */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <StatCard 
-            title="Total Voters" 
-            value={loading ? "Loading..." : formatNumber(stats?.totalVoters || 0)} 
-            icon={Users} 
-            variant="primary" 
-          />
           <StatCard 
             title="Total Families" 
             value={loading ? "Loading..." : formatNumber(stats?.totalFamilies || 0)} 
             icon={Home} 
+            variant="primary" 
+          />
+          <StatCard 
+            title="Total Members" 
+            value={loading ? "Loading..." : formatNumber(stats?.totalMembers || 0)} 
+            icon={Users} 
             variant="primary" 
           />
           <StatCard 
