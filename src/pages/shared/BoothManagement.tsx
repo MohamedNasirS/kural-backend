@@ -5,133 +5,221 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Building2, Edit2, Trash2, MapPin } from 'lucide-react';
-import { useState } from 'react';
+import { Building2, Edit2, Trash2, Loader2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/ui/use-toast';
+import { api } from '@/lib/api';
+import { CONSTITUENCIES } from '@/constants/constituencies';
 
 interface Booth {
-  id: number;
-  boothId: string;
-  name: string;
-  ac: number;
-  address: string;
-  voters: number;
-  agents: number;
+  _id: string;
+  booth_id: string;
+  boothCode: string;
+  boothNumber: number;
+  boothName: string;
+  ac_id: number;
+  ac_name: string;
+  address?: string;
+  totalVoters: number;
+  assignedAgents: string[];
+  isActive: boolean;
 }
-
-const initialBooths: Booth[] = [
-  { id: 1, boothId: 'BID-001', name: 'Government School, Main Road', ac: 119, address: 'Main Road, Thondamuthur', voters: 854, agents: 2 },
-  { id: 2, boothId: 'BID-002', name: 'Community Hall, West Street', ac: 119, address: 'West Street, Thondamuthur', voters: 723, agents: 3 },
-  { id: 3, boothId: 'BID-003', name: 'Primary School, East Area', ac: 119, address: 'East Area, Coimbatore', voters: 912, agents: 1 },
-];
 
 export const BoothManagement = () => {
   const { user } = useAuth();
   const { toast } = useToast();
-  const [booths, setBooths] = useState<Booth[]>(initialBooths);
+  const [booths, setBooths] = useState<Booth[]>([]);
+  const [loading, setLoading] = useState(true);
   const [isOpen, setIsOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editingBooth, setEditingBooth] = useState<Booth | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [updating, setUpdating] = useState(false);
   
   // Form states
   const [newBooth, setNewBooth] = useState({
-    boothId: '',
-    name: '',
-    ac: user?.role === 'L2' ? user.assignedAC : 119,
+    boothNumber: '',
+    boothName: '',
+    ac_id: user?.role === 'L2' ? user.assignedAC : 119,
+    ac_name: user?.role === 'L2' ? (user.aciName || '') : 'Thondamuthur',
     address: '',
-    voters: 0,
+    totalVoters: 0,
   });
   
   const [editBooth, setEditBooth] = useState({
-    boothId: '',
-    name: '',
-    ac: 119,
+    boothNumber: '',
+    boothName: '',
+    ac_id: 119,
+    ac_name: 'Thondamuthur',
     address: '',
-    voters: 0,
+    totalVoters: 0,
   });
 
-  // Filter booths based on role
-  const filteredBooths = user?.role === 'L2' 
-    ? booths.filter(booth => booth.ac === user.assignedAC)
-    : booths;
+  // Fetch booths on mount
+  useEffect(() => {
+    if (user) {
+      fetchBooths();
+    }
+  }, [user]);
 
-  const handleCreateBooth = () => {
-    if (newBooth.boothId && newBooth.name && newBooth.address) {
-      const boothToAdd: Booth = {
-        id: Math.max(0, ...booths.map(b => b.id)) + 1,
-        boothId: newBooth.boothId,
-        name: newBooth.name,
-        ac: newBooth.ac,
-        address: newBooth.address,
-        voters: newBooth.voters,
-        agents: 0, // Default to 0 agents
-      };
-      
-      setBooths([...booths, boothToAdd]);
-      setNewBooth({
-        boothId: '',
-        name: '',
-        ac: user?.role === 'L2' ? user!.assignedAC : 119,
-        address: '',
-        voters: 0,
-      });
-      setIsOpen(false);
-      
-      toast({
-        title: 'Booth Created',
-        description: `"${boothToAdd.name}" has been created successfully.`
-      });
-    } else {
+  const fetchBooths = async () => {
+    try {
+      setLoading(true);
+      const response = await api.get('/rbac/booths');
+      console.log('Fetched booths:', response);
+      setBooths(response.booths || []);
+    } catch (error: any) {
+      console.error('Error fetching booths:', error);
       toast({
         title: 'Error',
-        description: 'Please fill in all required fields.',
-        variant: 'destructive'
+        description: error.message || 'Failed to fetch booths',
+        variant: 'destructive',
       });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateBooth = async () => {
+    if (!newBooth.boothNumber || !newBooth.boothName) {
+      toast({
+        title: 'Error',
+        description: 'Booth number and name are required.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      setCreating(true);
+      console.log('Creating booth with data:', newBooth);
+      
+      const response = await api.post('/rbac/booths', {
+        boothNumber: parseInt(newBooth.boothNumber),
+        boothName: newBooth.boothName,
+        ac_id: parseInt(newBooth.ac_id.toString()),
+        ac_name: newBooth.ac_name,
+        address: newBooth.address || undefined,
+        totalVoters: newBooth.totalVoters || 0,
+      });
+      
+      console.log('Booth created:', response);
+      
+      toast({
+        title: 'Success',
+        description: `Booth ${response.booth.boothCode} created successfully`,
+      });
+      
+      // Refresh booth list
+      await fetchBooths();
+      
+      // Reset form and close dialog
+      setNewBooth({
+        boothNumber: '',
+        boothName: '',
+        ac_id: user?.role === 'L2' ? user.assignedAC : 119,
+        ac_name: user?.role === 'L2' ? (user.aciName || '') : 'Thondamuthur',
+        address: '',
+        totalVoters: 0,
+      });
+      setIsOpen(false);
+    } catch (error: any) {
+      console.error('Error creating booth:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to create booth',
+        variant: 'destructive',
+      });
+    } finally {
+      setCreating(false);
     }
   };
 
   const handleEditClick = (booth: Booth) => {
     setEditingBooth(booth);
     setEditBooth({
-      boothId: booth.boothId,
-      name: booth.name,
-      ac: booth.ac,
-      address: booth.address,
-      voters: booth.voters,
+      boothNumber: booth.boothNumber.toString(),
+      boothName: booth.boothName,
+      ac_id: booth.ac_id,
+      ac_name: booth.ac_name,
+      address: booth.address || '',
+      totalVoters: booth.totalVoters,
     });
     setIsEditOpen(true);
   };
 
-  const handleUpdateBooth = () => {
-    if (editingBooth && editBooth.boothId && editBooth.name && editBooth.address) {
-      setBooths(booths.map(booth => 
-        booth.id === editingBooth.id 
-          ? { ...booth, ...editBooth } 
-          : booth
-      ));
-      setIsEditOpen(false);
-      setEditingBooth(null);
-      
-      toast({
-        title: 'Booth Updated',
-        description: `"${editBooth.name}" has been updated successfully.`
-      });
-    } else {
+  const handleUpdateBooth = async () => {
+    if (!editingBooth || !editBooth.boothNumber || !editBooth.boothName) {
       toast({
         title: 'Error',
-        description: 'Please fill in all required fields.',
-        variant: 'destructive'
+        description: 'Booth number and name are required.',
+        variant: 'destructive',
       });
+      return;
+    }
+
+    try {
+      setUpdating(true);
+      console.log('Updating booth:', editingBooth._id, editBooth);
+      
+      const response = await api.put(`/rbac/booths/${editingBooth._id}`, {
+        boothNumber: parseInt(editBooth.boothNumber),
+        boothName: editBooth.boothName,
+        ac_id: parseInt(editBooth.ac_id.toString()),
+        ac_name: editBooth.ac_name,
+        address: editBooth.address || undefined,
+        totalVoters: editBooth.totalVoters || 0,
+      });
+      
+      console.log('Booth updated:', response);
+      
+      toast({
+        title: 'Success',
+        description: 'Booth updated successfully',
+      });
+      
+      // Refresh booth list
+      await fetchBooths();
+      
+      setIsEditOpen(false);
+      setEditingBooth(null);
+    } catch (error: any) {
+      console.error('Error updating booth:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update booth',
+        variant: 'destructive',
+      });
+    } finally {
+      setUpdating(false);
     }
   };
 
-  const handleDeleteBooth = (id: number, name: string) => {
-    setBooths(booths.filter(booth => booth.id !== id));
-    toast({
-      title: 'Booth Deleted',
-      description: `"${name}" has been deleted successfully.`
-    });
+  const handleDeleteBooth = async (booth: Booth) => {
+    if (!confirm(`Are you sure you want to delete "${booth.boothName}"?`)) {
+      return;
+    }
+
+    try {
+      console.log('Deleting booth:', booth._id);
+      await api.delete(`/rbac/booths/${booth._id}`);
+      
+      toast({
+        title: 'Success',
+        description: 'Booth deleted successfully',
+      });
+      
+      // Refresh booth list
+      await fetchBooths();
+    } catch (error: any) {
+      console.error('Error deleting booth:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to delete booth',
+        variant: 'destructive',
+      });
+    }
   };
 
   return (
@@ -142,7 +230,7 @@ export const BoothManagement = () => {
             <h1 className="text-4xl font-bold mb-2">Booth Management</h1>
             <p className="text-muted-foreground">
               {user?.role === 'L2' 
-                ? `Manage booths for AC ${user.assignedAC}`
+                ? `Manage booths for AC ${user.assignedAC || '...'}`
                 : 'Manage booths across all constituencies'}
             </p>
           </div>
@@ -159,12 +247,13 @@ export const BoothManagement = () => {
               </DialogHeader>
               <div className="space-y-4 py-4">
                 <div className="space-y-2">
-                  <Label htmlFor="boothId">Booth ID <span className="text-destructive">*</span></Label>
+                  <Label htmlFor="boothNumber">Booth Number <span className="text-destructive">*</span></Label>
                   <Input 
-                    id="boothId" 
-                    placeholder="BID-XXX" 
-                    value={newBooth.boothId}
-                    onChange={(e) => setNewBooth({...newBooth, boothId: e.target.value})}
+                    id="boothNumber" 
+                    type="number"
+                    placeholder="e.g., 1" 
+                    value={newBooth.boothNumber}
+                    onChange={(e) => setNewBooth({...newBooth, boothNumber: e.target.value})}
                   />
                 </div>
                 <div className="space-y-2">
@@ -172,30 +261,39 @@ export const BoothManagement = () => {
                   <Input 
                     id="boothName" 
                     placeholder="e.g., Government School, Main Road" 
-                    value={newBooth.name}
-                    onChange={(e) => setNewBooth({...newBooth, name: e.target.value})}
+                    value={newBooth.boothName}
+                    onChange={(e) => setNewBooth({...newBooth, boothName: e.target.value})}
                   />
                 </div>
                 {user?.role !== 'L2' && (
                   <div className="space-y-2">
                     <Label htmlFor="ac">Assembly Constituency <span className="text-destructive">*</span></Label>
                     <Select 
-                      value={newBooth.ac.toString()} 
-                      onValueChange={(value) => setNewBooth({...newBooth, ac: parseInt(value)})}
+                      value={newBooth.ac_id.toString()} 
+                      onValueChange={(value) => {
+                        const constituency = CONSTITUENCIES.find(c => c.number === parseInt(value));
+                        setNewBooth({
+                          ...newBooth, 
+                          ac_id: parseInt(value),
+                          ac_name: constituency?.name || ''
+                        });
+                      }}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Select AC" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="119">119 - Thondamuthur</SelectItem>
-                        <SelectItem value="119">119 - Coimbatore North</SelectItem>
-                        <SelectItem value="120">120 - Coimbatore South</SelectItem>
+                        {CONSTITUENCIES.map(c => (
+                          <SelectItem key={c.number} value={c.number.toString()}>
+                            {c.number} - {c.name}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
                 )}
                 <div className="space-y-2">
-                  <Label htmlFor="address">Address <span className="text-destructive">*</span></Label>
+                  <Label htmlFor="address">Address</Label>
                   <Input 
                     id="address" 
                     placeholder="Enter full address" 
@@ -209,73 +307,97 @@ export const BoothManagement = () => {
                     id="voters" 
                     type="number" 
                     placeholder="0" 
-                    value={newBooth.voters}
-                    onChange={(e) => setNewBooth({...newBooth, voters: parseInt(e.target.value) || 0})}
+                    value={newBooth.totalVoters}
+                    onChange={(e) => setNewBooth({...newBooth, totalVoters: parseInt(e.target.value) || 0})}
                   />
                 </div>
-                <Button className="w-full" onClick={handleCreateBooth}>
-                  Create Booth
+                <Button className="w-full" onClick={handleCreateBooth} disabled={creating}>
+                  {creating ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    'Create Booth'
+                  )}
                 </Button>
               </div>
             </DialogContent>
           </Dialog>
         </div>
 
-        <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-muted">
-                <tr>
-                  <th className="px-4 py-3 text-left text-sm font-semibold">Booth ID</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold">Name</th>
-                  {user?.role !== 'L2' && (
-                    <th className="px-4 py-3 text-left text-sm font-semibold">AC</th>
-                  )}
-                  <th className="px-4 py-3 text-left text-sm font-semibold">Address</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold">Voters</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold">Agents</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {filteredBooths.map((booth) => (
-                  <tr key={booth.id} className="hover:bg-muted/50">
-                    <td className="px-4 py-3 text-sm font-medium">{booth.boothId}</td>
-                    <td className="px-4 py-3 text-sm">{booth.name}</td>
+        {loading ? (
+          <Card className="p-8 text-center">
+            <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+            <p className="text-muted-foreground">Loading booths...</p>
+          </Card>
+        ) : booths.length === 0 ? (
+          <Card className="p-8 text-center">
+            <Building2 className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+            <h3 className="text-lg font-semibold mb-2">No Booths Found</h3>
+            <p className="text-muted-foreground mb-4">Get started by creating your first booth</p>
+            <Button onClick={() => setIsOpen(true)}>
+              <Building2 className="mr-2 h-4 w-4" />
+              Create New Booth
+            </Button>
+          </Card>
+        ) : (
+          <Card className="overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-muted">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-sm font-semibold">Booth ID</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold">Name</th>
                     {user?.role !== 'L2' && (
-                      <td className="px-4 py-3 text-sm">{booth.ac}</td>
+                      <th className="px-4 py-3 text-left text-sm font-semibold">AC</th>
                     )}
-                    <td className="px-4 py-3 text-sm max-w-xs truncate">{booth.address}</td>
-                    <td className="px-4 py-3 text-sm">{booth.voters}</td>
-                    <td className="px-4 py-3 text-sm">
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary">
-                        {booth.agents} Agent{booth.agents !== 1 ? 's' : ''}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex space-x-2">
-                        <Button 
-                          variant="ghost" 
-                          size="sm"
-                          onClick={() => handleEditClick(booth)}
-                        >
-                          <Edit2 className="h-4 w-4" />
-                        </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="sm"
-                          onClick={() => handleDeleteBooth(booth.id, booth.name)}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </div>
-                    </td>
+                    <th className="px-4 py-3 text-left text-sm font-semibold">Address</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold">Voters</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold">Agents</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+                </thead>
+                <tbody className="divide-y">
+                  {booths.map((booth) => (
+                    <tr key={booth._id} className="hover:bg-muted/50">
+                      <td className="px-4 py-3 text-sm font-medium">{booth.boothCode}</td>
+                      <td className="px-4 py-3 text-sm">{booth.boothName}</td>
+                      {user?.role !== 'L2' && (
+                        <td className="px-4 py-3 text-sm">{booth.ac_id}</td>
+                      )}
+                      <td className="px-4 py-3 text-sm max-w-xs truncate">{booth.address || '-'}</td>
+                      <td className="px-4 py-3 text-sm">{booth.totalVoters}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary">
+                          {booth.assignedAgents?.length || 0} Agent{booth.assignedAgents?.length !== 1 ? 's' : ''}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex space-x-2">
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => handleEditClick(booth)}
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => handleDeleteBooth(booth)}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )}
 
         {/* Edit Booth Dialog */}
         <Dialog open={isEditOpen} onOpenChange={(open) => {
@@ -288,12 +410,13 @@ export const BoothManagement = () => {
             </DialogHeader>
             <div className="space-y-4 py-4">
               <div className="space-y-2">
-                <Label htmlFor="editBoothId">Booth ID <span className="text-destructive">*</span></Label>
+                <Label htmlFor="editBoothNumber">Booth Number <span className="text-destructive">*</span></Label>
                 <Input 
-                  id="editBoothId" 
-                  placeholder="BID-XXX" 
-                  value={editBooth.boothId}
-                  onChange={(e) => setEditBooth({...editBooth, boothId: e.target.value})}
+                  id="editBoothNumber" 
+                  type="number"
+                  placeholder="e.g., 1" 
+                  value={editBooth.boothNumber}
+                  onChange={(e) => setEditBooth({...editBooth, boothNumber: e.target.value})}
                 />
               </div>
               <div className="space-y-2">
@@ -301,30 +424,39 @@ export const BoothManagement = () => {
                 <Input 
                   id="editBoothName" 
                   placeholder="e.g., Government School, Main Road" 
-                  value={editBooth.name}
-                  onChange={(e) => setEditBooth({...editBooth, name: e.target.value})}
+                  value={editBooth.boothName}
+                  onChange={(e) => setEditBooth({...editBooth, boothName: e.target.value})}
                 />
               </div>
               {user?.role !== 'L2' && (
                 <div className="space-y-2">
                   <Label htmlFor="editAc">Assembly Constituency <span className="text-destructive">*</span></Label>
                   <Select 
-                    value={editBooth.ac.toString()} 
-                    onValueChange={(value) => setEditBooth({...editBooth, ac: parseInt(value)})}
+                    value={editBooth.ac_id.toString()} 
+                    onValueChange={(value) => {
+                      const constituency = CONSTITUENCIES.find(c => c.number === parseInt(value));
+                      setEditBooth({
+                        ...editBooth, 
+                        ac_id: parseInt(value),
+                        ac_name: constituency?.name || ''
+                      });
+                    }}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select AC" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="119">119 - Thondamuthur</SelectItem>
-                      <SelectItem value="119">119 - Coimbatore North</SelectItem>
-                      <SelectItem value="120">120 - Coimbatore South</SelectItem>
+                      {CONSTITUENCIES.map(c => (
+                        <SelectItem key={c.number} value={c.number.toString()}>
+                          {c.number} - {c.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
               )}
               <div className="space-y-2">
-                <Label htmlFor="editAddress">Address <span className="text-destructive">*</span></Label>
+                <Label htmlFor="editAddress">Address</Label>
                 <Input 
                   id="editAddress" 
                   placeholder="Enter full address" 
@@ -338,12 +470,19 @@ export const BoothManagement = () => {
                   id="editVoters" 
                   type="number" 
                   placeholder="0" 
-                  value={editBooth.voters}
-                  onChange={(e) => setEditBooth({...editBooth, voters: parseInt(e.target.value) || 0})}
+                  value={editBooth.totalVoters}
+                  onChange={(e) => setEditBooth({...editBooth, totalVoters: parseInt(e.target.value) || 0})}
                 />
               </div>
-              <Button className="w-full" onClick={handleUpdateBooth}>
-                Update Booth
+              <Button className="w-full" onClick={handleUpdateBooth} disabled={updating}>
+                {updating ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Updating...
+                  </>
+                ) : (
+                  'Update Booth'
+                )}
               </Button>
             </div>
           </DialogContent>
