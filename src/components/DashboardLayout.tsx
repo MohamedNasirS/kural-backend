@@ -31,6 +31,8 @@ import {
   Award,
   Database,
   ClipboardList,
+  Layers,
+  GitMerge,
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Separator } from './ui/separator';
@@ -78,6 +80,8 @@ const AppSidebar = () => {
           { icon: UserCog, label: 'Admin Management', path: '/l0/admins' },
           { icon: Users, label: 'Voter Data', path: '/l0/voters' },
           { icon: Database, label: 'Voter Field Manager', path: '/l0/voter-fields' },
+          { icon: Layers, label: 'Master Data', path: '/l0/master-data' },
+          { icon: GitMerge, label: 'Survey to Master Data Mapper', path: '/l0/survey-master-data-mapper' },
           { icon: FileText, label: 'Survey Forms', path: '/l0/surveys' },
           { icon: ClipboardList, label: 'Survey Responses', path: '/l0/survey-responses' },
           { icon: Home, label: 'Booth Management', path: '/shared/booth-management' },

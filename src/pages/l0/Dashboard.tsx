@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Users, UserCircle, Shield, CheckCircle, TrendingUp, TrendingDown, Calendar as CalendarIcon, Filter, Activity, Home, FileCheck } from 'lucide-react';
+import { Users, UserCircle, Shield, CheckCircle, TrendingUp, TrendingDown, Calendar as CalendarIcon, Filter, Activity, Home, FileCheck, Layers } from 'lucide-react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LineChart, Line, BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -101,6 +101,14 @@ export const L0Dashboard = () => {
             >
               <UserCircle className="h-4 w-4" />
               Create L2 User
+            </Button>
+            <Button 
+              onClick={() => navigate('/l0/master-data')}
+              variant="secondary"
+              className="gap-2"
+            >
+              <Layers className="h-4 w-4" />
+              Master Data
             </Button>
           </div>
         </div>

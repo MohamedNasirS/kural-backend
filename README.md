@@ -36,6 +36,16 @@ npm i
 npm run dev
 ```
 
+### Local API proxy configuration
+
+When the Express API runs on a port other than `4000`, tell Vite where to forward `/api` calls by adding a `.env` file in the project root:
+
+```
+VITE_DEV_API_PROXY_TARGET=http://localhost:4001
+```
+
+You can also override the Vite dev server port itself with `VITE_DEV_SERVER_PORT` if `8080` is occupied.
+
 **Edit a file directly in GitHub**
 
 - Navigate to the desired file(s).

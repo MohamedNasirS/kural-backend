@@ -13,6 +13,9 @@ import Survey from "./models/Survey.js";
 import Voter from "./models/Voter.js";
 import Booth from "./models/Booth.js";
 import VoterField from "./models/VoterField.js";
+import MasterDataSection from "./models/MasterDataSection.js";
+import SurveyMasterDataMapping from "./models/SurveyMasterDataMapping.js";
+import MappedField from "./models/MappedField.js";
 
 // Import RBAC routes
 import rbacRoutes from "./routes/rbac.js";
@@ -26,13 +29,43 @@ dotenv.config({
 });
 
 const app = express();
+app.set("trust proxy", 1);
 
 const PORT = process.env.PORT || 4000;
-const CLIENT_ORIGINS = (process.env.CLIENT_ORIGIN || "http://localhost:5173,http://localhost:8080,http://localhost:3000")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+const isProduction = process.env.NODE_ENV === "production";
+const DEFAULT_LOCALHOST_ORIGINS = [
+  "http://localhost:5173",
+  "http://localhost:8080",
+  "http://localhost:3000",
+  "http://127.0.0.1:5173",
+  "http://127.0.0.1:8080",
+  "http://127.0.0.1:3000",
+];
+const CLIENT_ORIGINS = Array.from(
+  new Set(
+    (process.env.CLIENT_ORIGIN || "")
+      .split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean)
+      .concat(isProduction ? [] : DEFAULT_LOCALHOST_ORIGINS),
+  ),
+);
 const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/kuralapp";
+const SESSION_COOKIE_DOMAIN =
+  process.env.SESSION_COOKIE_DOMAIN && process.env.SESSION_COOKIE_DOMAIN.trim()
+    ? process.env.SESSION_COOKIE_DOMAIN.trim()
+    : undefined;
+const SESSION_COOKIE_SAMESITE =
+  process.env.SESSION_COOKIE_SAMESITE?.toLowerCase() || (isProduction ? "none" : "lax");
+
+function isLocalhostOrigin(origin) {
+  try {
+    const { hostname } = new URL(origin);
+    return ["localhost", "127.0.0.1", "0.0.0.0"].includes(hostname);
+  } catch {
+    return false;
+  }
+}
 
 app.use(
   cors({
@@ -41,7 +74,12 @@ app.use(
         return callback(null, true);
       }
 
-      if (CLIENT_ORIGINS.includes("*") || CLIENT_ORIGINS.includes(origin)) {
+      const isAllowed =
+        CLIENT_ORIGINS.includes("*") ||
+        CLIENT_ORIGINS.includes(origin) ||
+        (!isProduction && isLocalhostOrigin(origin));
+
+      if (isAllowed) {
         return callback(null, true);
       }
 
@@ -76,12 +114,12 @@ app.use(
     store: sessionStore,
     name: 'kural.sid', // Set a specific session cookie name
     cookie: {
-      secure: false, // Set to false for development (localhost doesn't use HTTPS)
+      secure: isProduction,
       httpOnly: true,
       maxAge: 24 * 60 * 60 * 1000, // 24 hours
-      sameSite: 'lax', // 'lax' works for localhost with proxy
+      sameSite: SESSION_COOKIE_SAMESITE,
       path: '/',
-      // Don't set domain - let browser handle it for localhost
+      domain: SESSION_COOKIE_DOMAIN,
     },
   })
 );
@@ -370,6 +408,224 @@ function sanitizeCreatedByRole(createdByRole) {
   return trimmed || undefined;
 }
 
+const MASTER_QUESTION_TYPES = new Set(["short-answer", "multiple-choice"]);
+
+function sanitizeSectionName(name) {
+  if (typeof name !== "string") {
+    return "";
+  }
+  return name.trim();
+}
+
+function normalizeAnswerOptions(questionType, rawOptions) {
+  if (questionType !== "multiple-choice") {
+    return [];
+  }
+
+  if (!Array.isArray(rawOptions)) {
+    return [];
+  }
+
+  const normalizedOptions = rawOptions
+    .map((option, index) => {
+      if (typeof option === "string") {
+        const trimmed = option.trim();
+        if (!trimmed) {
+          return null;
+        }
+        return {
+          label: trimmed,
+          value: trimmed,
+          order: index,
+          isDefault: false,
+        };
+      }
+
+      if (typeof option === "object" && option !== null) {
+        const label =
+          typeof option.label === "string" && option.label.trim()
+            ? option.label.trim()
+            : typeof option.value === "string" && option.value.trim()
+              ? option.value.trim()
+              : "";
+        const value =
+          typeof option.value === "string" && option.value.trim()
+            ? option.value.trim()
+            : label;
+
+        if (!label && !value) {
+          return null;
+        }
+
+        const order =
+          typeof option.order === "number" && Number.isFinite(option.order)
+            ? option.order
+            : index;
+
+        return {
+          label: label || value,
+          value: value || label,
+          order,
+          isDefault: Boolean(option.isDefault),
+        };
+      }
+
+      return null;
+    })
+    .filter(Boolean);
+
+  const seenValues = new Set();
+  return normalizedOptions.filter((option) => {
+    const key = option.value.toLowerCase();
+    if (seenValues.has(key)) {
+      return false;
+    }
+    seenValues.add(key);
+    return true;
+  });
+}
+
+function normalizeMasterQuestion(question, fallbackOrder = 0) {
+  if (typeof question !== "object" || question === null) {
+    throw new Error("Invalid question payload");
+  }
+
+  const prompt =
+    typeof question.prompt === "string" && question.prompt.trim()
+      ? question.prompt.trim()
+      : typeof question.text === "string" && question.text.trim()
+        ? question.text.trim()
+        : "";
+
+  if (!prompt) {
+    throw new Error("Question prompt is required");
+  }
+
+  const typeInput =
+    typeof question.type === "string" && question.type.trim()
+      ? question.type.trim().toLowerCase()
+      : "short-answer";
+  const normalizedType = MASTER_QUESTION_TYPES.has(typeInput)
+    ? typeInput
+    : "short-answer";
+
+  const helperText =
+    typeof question.helperText === "string" && question.helperText.trim()
+      ? question.helperText.trim()
+      : undefined;
+
+  const order =
+    typeof question.order === "number" && Number.isFinite(question.order)
+      ? question.order
+      : fallbackOrder;
+
+  const options =
+    normalizedType === "multiple-choice"
+      ? normalizeAnswerOptions(
+          normalizedType,
+          question.options ?? question.answers ?? [],
+        )
+      : [];
+
+  if (normalizedType === "multiple-choice" && options.length === 0) {
+    throw new Error(
+      "Multiple choice questions must include at least one answer option",
+    );
+  }
+
+  return {
+    prompt,
+    type: normalizedType,
+    isRequired: Boolean(question.isRequired ?? question.required ?? false),
+    isVisible: question.isVisible !== undefined ? Boolean(question.isVisible) : true,
+    helperText,
+    order,
+    options,
+  };
+}
+
+function formatMasterQuestionResponse(questionDoc) {
+  if (!questionDoc) {
+    return null;
+  }
+
+  const question =
+    typeof questionDoc.toObject === "function"
+      ? questionDoc.toObject({ versionKey: false })
+      : questionDoc;
+
+  const formattedOptions =
+    question.type === "multiple-choice" && Array.isArray(question.options)
+      ? [...question.options]
+          .sort((a, b) => {
+            const orderDiff = (a.order ?? 0) - (b.order ?? 0);
+            if (orderDiff !== 0) {
+              return orderDiff;
+            }
+            return String(a.label ?? "").localeCompare(String(b.label ?? ""));
+          })
+          .map((option) => ({
+            id: option._id?.toString?.() ?? option._id ?? undefined,
+            label: option.label,
+            value: option.value,
+            order: option.order ?? 0,
+            isDefault: Boolean(option.isDefault),
+          }))
+      : [];
+
+  return {
+    id: question._id?.toString?.() ?? question._id ?? undefined,
+    prompt: question.prompt,
+    type: question.type,
+    isRequired: Boolean(question.isRequired),
+    helperText: question.helperText,
+    order: question.order ?? 0,
+    isVisible: question.isVisible !== undefined ? Boolean(question.isVisible) : true,
+    options: formattedOptions,
+    createdAt: question.createdAt,
+    updatedAt: question.updatedAt,
+  };
+}
+
+function formatMasterSectionResponse(sectionDoc) {
+  if (!sectionDoc) {
+    return null;
+  }
+
+  const section =
+    typeof sectionDoc.toObject === "function"
+      ? sectionDoc.toObject({ versionKey: false })
+      : sectionDoc;
+
+  const formattedQuestions = Array.isArray(section.questions)
+    ? [...section.questions]
+        .sort((a, b) => {
+          const orderDiff = (a.order ?? 0) - (b.order ?? 0);
+          if (orderDiff !== 0) {
+            return orderDiff;
+          }
+          const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return dateA - dateB;
+        })
+        .map((question) => formatMasterQuestionResponse(question))
+        .filter(Boolean)
+    : [];
+
+  return {
+    id: section._id?.toString?.() ?? section._id ?? undefined,
+    name: section.name,
+    description: section.description,
+    order: section.order ?? 0,
+    aci_id: Array.isArray(section.aci_id) ? section.aci_id : [],
+    aci_name: Array.isArray(section.aci_name) ? section.aci_name : [],
+    isVisible: section.isVisible !== undefined ? Boolean(section.isVisible) : true,
+    createdAt: section.createdAt,
+    updatedAt: section.updatedAt,
+    questions: formattedQuestions,
+  };
+}
+
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { identifier, password } = req.body ?? {};
@@ -380,7 +636,16 @@ app.post("/api/auth/login", async (req, res) => {
       });
     }
 
-    await connectToDatabase();
+    try {
+      await connectToDatabase();
+    } catch (dbError) {
+      console.error("Database connection error:", dbError);
+      console.error("Database connection error stack:", dbError.stack);
+      return res.status(500).json({ 
+        message: "Database connection failed",
+        error: process.env.NODE_ENV === "development" ? dbError.message : undefined
+      });
+    }
 
     const trimmedIdentifier = String(identifier).trim();
     const normalizedIdentifier = trimmedIdentifier.toLowerCase();
@@ -463,7 +728,18 @@ app.post("/api/auth/login", async (req, res) => {
       isActive: user.isActive 
     });
 
-    const isPasswordValid = await user.verifyPassword(password);
+    let isPasswordValid = false;
+    try {
+      isPasswordValid = await user.verifyPassword(password);
+    } catch (passwordError) {
+      console.error("Password verification error:", passwordError);
+      console.error("Password verification error stack:", passwordError.stack);
+      return res.status(500).json({ 
+        message: "Error verifying password",
+        error: process.env.NODE_ENV === "development" ? passwordError.message : undefined
+      });
+    }
+
     if (!isPasswordValid) {
       console.warn("Login failed: invalid password", {
         userId: user._id.toString(),
@@ -529,7 +805,12 @@ app.post("/api/auth/login", async (req, res) => {
     });
   } catch (error) {
     console.error("Login error", error);
-    return res.status(500).json({ message: "Internal server error" });
+    console.error("Login error stack:", error.stack);
+    return res.status(500).json({ 
+      message: "Internal server error",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+      stack: process.env.NODE_ENV === "development" ? error.stack : undefined
+    });
   }
 });
 
@@ -619,7 +900,16 @@ app.get("/api/auth/me", async (req, res) => {
       return res.json({ user: userSession });
     } catch (error) {
       console.error('Error verifying user session:', error);
-      // On error, still return the session user if it exists
+      console.error('Error stack:', error.stack);
+      // On error, return proper error response in development
+      if (process.env.NODE_ENV === "development") {
+        return res.status(500).json({ 
+          message: "Error verifying session",
+          error: error.message,
+          stack: error.stack
+        });
+      }
+      // In production, still return the session user if it exists
       return res.json({ user: req.session.user });
     }
   }
@@ -1393,13 +1683,30 @@ app.get("/api/survey-responses", async (req, res) => {
     // Search functionality
     if (search) {
       const searchRegex = new RegExp(search, 'i');
-      query.$or = [
-        { voterName: searchRegex },
-        { respondentName: searchRegex },
-        { voterId: searchRegex },
-        { surveyId: searchRegex },
-        { formId: searchRegex }
-      ];
+      // Check if search is a valid ObjectId for direct matching
+      const isObjectId = mongoose.Types.ObjectId.isValid(search);
+      
+      if (isObjectId) {
+        // If it's an ObjectId, search by exact match first, then regex
+        query.$or = [
+          { voterId: search }, // Exact ObjectId match
+          { voterName: searchRegex },
+          { respondentName: searchRegex },
+          { voterID: searchRegex },
+          { surveyId: search },
+          { formId: search }
+        ];
+      } else {
+        // Regular text search
+        query.$or = [
+          { voterName: searchRegex },
+          { respondentName: searchRegex },
+          { voterId: searchRegex },
+          { voterID: searchRegex },
+          { surveyId: searchRegex },
+          { formId: searchRegex }
+        ];
+      }
     }
     
     // Calculate pagination
@@ -1419,6 +1726,8 @@ app.get("/api/survey-responses", async (req, res) => {
         survey_id: response.surveyId || response.formId || 'N/A',
         respondent_name: response.voterName || response.respondentName || 'N/A',
         voter_id: response.voterId || 'N/A',
+        voterID: response.voterID || '', // Also include voterID field
+        voterId: response.voterId || response.voterID || 'N/A', // Alias for compatibility
         booth: response.booth || 'N/A',
         survey_date: response.createdAt || response.submittedAt || new Date(),
         status: response.status || 'Completed',
@@ -1486,6 +1795,8 @@ app.get("/api/survey-responses/:acId", async (req, res) => {
         survey_id: response.surveyId || response.formId || 'N/A',
         respondent_name: response.voterName || response.respondentName || 'N/A',
         voter_id: response.voterId || 'N/A',
+        voterID: response.voterID || '', // Also include voterID field
+        voterId: response.voterId || response.voterID || 'N/A', // Alias for compatibility
         booth: response.booth || 'N/A',
         survey_date: response.createdAt || response.submittedAt || new Date(),
         status: response.status || 'Completed',
@@ -1610,6 +1921,414 @@ app.get("/api/reports/:acId/booth-performance", async (req, res) => {
   } catch (error) {
     console.error("Error fetching booth performance:", error);
     return res.status(500).json({ message: "Failed to fetch booth performance" });
+  }
+});
+
+// Master Data APIs
+app.get("/api/master-data/sections", async (_req, res) => {
+  try {
+    await connectToDatabase();
+    const sections = await MasterDataSection.find().sort({ order: 1, createdAt: 1 });
+    return res.json({
+      sections: sections.map((section) => formatMasterSectionResponse(section)),
+    });
+  } catch (error) {
+    console.error("Error fetching master data sections:", error);
+    return res.status(500).json({
+      message: "Failed to fetch master data sections",
+      error: error.message,
+    });
+  }
+});
+
+app.post("/api/master-data/sections", async (req, res) => {
+  try {
+    await connectToDatabase();
+
+    console.log("POST /api/master-data/sections - Request body:", JSON.stringify(req.body, null, 2));
+    console.log("aci_id in body:", req.body?.aci_id, "Type:", typeof req.body?.aci_id, "IsArray:", Array.isArray(req.body?.aci_id));
+    console.log("aci_name in body:", req.body?.aci_name, "Type:", typeof req.body?.aci_name, "IsArray:", Array.isArray(req.body?.aci_name));
+
+    const rawName = sanitizeSectionName(req.body?.name ?? req.body?.title ?? "");
+    if (!rawName) {
+      return res.status(400).json({ message: "Section name is required" });
+    }
+
+    const descriptionInput = sanitizeDescription(req.body?.description);
+    const description = descriptionInput ? descriptionInput : undefined;
+
+    const orderValue =
+      typeof req.body?.order === "number" && Number.isFinite(req.body.order)
+        ? req.body.order
+        : await MasterDataSection.countDocuments();
+
+    const questions = Array.isArray(req.body?.questions)
+      ? req.body.questions.map((question, index) =>
+          normalizeMasterQuestion(question, index),
+        )
+      : [];
+
+    // Process AC arrays - ensure they're always arrays
+    let aci_id = [];
+    let aci_name = [];
+    
+    if ('aci_id' in req.body && Array.isArray(req.body.aci_id)) {
+      aci_id = req.body.aci_id.filter((id) => typeof id === "number" && Number.isFinite(id));
+    }
+    
+    if ('aci_name' in req.body && Array.isArray(req.body.aci_name)) {
+      aci_name = req.body.aci_name.filter((name) => typeof name === "string" && name.trim()).map((name) => name.trim());
+    }
+    
+    // Ensure arrays are the same length
+    const minLength = Math.min(aci_id.length, aci_name.length);
+    aci_id = aci_id.slice(0, minLength);
+    aci_name = aci_name.slice(0, minLength);
+    
+    const isVisible = req.body?.isVisible !== undefined ? Boolean(req.body.isVisible) : true;
+
+    console.log("Creating section with AC data:", { aci_id, aci_name });
+
+    const sectionData = {
+      name: rawName,
+      description,
+      order: orderValue,
+      aci_id: Array.isArray(aci_id) ? aci_id : [],
+      aci_name: Array.isArray(aci_name) ? aci_name : [],
+      isVisible,
+      questions,
+    };
+    
+    console.log("Section data to create:", JSON.stringify(sectionData, null, 2));
+    console.log("aci_id type:", typeof sectionData.aci_id, "isArray:", Array.isArray(sectionData.aci_id));
+    console.log("aci_name type:", typeof sectionData.aci_name, "isArray:", Array.isArray(sectionData.aci_name));
+
+    const section = await MasterDataSection.create(sectionData);
+
+    // Reload from DB to verify it was saved
+    const savedSection = await MasterDataSection.findById(section._id);
+    console.log("Created section - aci_id:", savedSection?.aci_id, "aci_name:", savedSection?.aci_name);
+    console.log("Section document:", JSON.stringify(savedSection?.toObject(), null, 2));
+
+    return res.status(201).json({
+      message: "Section created successfully",
+      section: formatMasterSectionResponse(savedSection || section),
+    });
+  } catch (error) {
+    console.error("Error creating master data section:", error);
+    if (error?.message?.toLowerCase().includes("question")) {
+      return res.status(400).json({ message: error.message });
+    }
+    if (error.code === 11000) {
+      return res.status(400).json({ message: "A section with this name already exists" });
+    }
+    return res.status(500).json({
+      message: "Failed to create section",
+      error: error.message,
+    });
+  }
+});
+
+app.put("/api/master-data/sections/:sectionId", async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { sectionId } = req.params;
+
+    console.log("PUT /api/master-data/sections/:sectionId - Request body:", JSON.stringify(req.body, null, 2));
+    console.log("aci_id in body:", req.body?.aci_id, "Type:", typeof req.body?.aci_id, "IsArray:", Array.isArray(req.body?.aci_id));
+    console.log("aci_name in body:", req.body?.aci_name, "Type:", typeof req.body?.aci_name, "IsArray:", Array.isArray(req.body?.aci_name));
+
+    const section = await MasterDataSection.findById(sectionId);
+    if (!section) {
+      return res.status(404).json({ message: "Section not found" });
+    }
+    
+    console.log("Current section aci_id:", section.aci_id, "aci_name:", section.aci_name);
+
+    const nameInput = sanitizeSectionName(req.body?.name ?? req.body?.title ?? "");
+    if (nameInput) {
+      section.name = nameInput;
+    }
+
+    if (req.body?.description !== undefined) {
+      const descriptionInput = sanitizeDescription(req.body.description);
+      section.description = descriptionInput || undefined;
+    }
+
+    if (req.body?.order !== undefined) {
+      const parsedOrder = Number(req.body.order);
+      if (!Number.isNaN(parsedOrder)) {
+        section.order = parsedOrder;
+      }
+    }
+
+    // Always update both arrays together to keep them in sync
+    // Check if aci_id or aci_name are in the request body (even if empty arrays)
+    const hasAciId = 'aci_id' in req.body;
+    const hasAciName = 'aci_name' in req.body;
+    
+    if (hasAciId || hasAciName) {
+      console.log("Processing AC arrays - hasAciId:", hasAciId, "hasAciName:", hasAciName);
+      
+      const aci_id = hasAciId && Array.isArray(req.body.aci_id)
+        ? req.body.aci_id.filter((id) => typeof id === "number" && Number.isFinite(id))
+        : (hasAciId ? [] : (Array.isArray(section.aci_id) ? section.aci_id : []));
+      
+      const aci_name = hasAciName && Array.isArray(req.body.aci_name)
+        ? req.body.aci_name.filter((name) => typeof name === "string" && name.trim()).map((name) => name.trim())
+        : (hasAciName ? [] : (Array.isArray(section.aci_name) ? section.aci_name : []));
+      
+      // Ensure arrays are the same length - they should always match
+      const minLength = Math.min(aci_id.length, aci_name.length);
+      const finalAciId = aci_id.slice(0, minLength);
+      const finalAciName = aci_name.slice(0, minLength);
+      
+      console.log("Setting arrays - aci_id:", finalAciId, "aci_name:", finalAciName);
+      
+      // Use set() to ensure Mongoose recognizes the change
+      section.set('aci_id', finalAciId);
+      section.set('aci_name', finalAciName);
+      
+      // Mark as modified to ensure Mongoose saves the arrays
+      section.markModified('aci_id');
+      section.markModified('aci_name');
+      
+      console.log("After setting - section.aci_id:", section.aci_id, "section.aci_name:", section.aci_name);
+      console.log("Section document before save:", JSON.stringify(section.toObject(), null, 2));
+    }
+
+    if (req.body?.isVisible !== undefined) {
+      section.isVisible = Boolean(req.body.isVisible);
+    }
+
+    if (Array.isArray(req.body?.questions)) {
+      section.questions = req.body.questions.map((question, index) =>
+        normalizeMasterQuestion(question, index),
+      );
+    }
+
+
+    console.log("Before save - section aci_id:", section.aci_id, "aci_name:", section.aci_name);
+    await section.save();
+    
+    // Reload from DB to verify it was saved
+    const savedSection = await MasterDataSection.findById(section._id);
+    console.log("After save - saved section aci_id:", savedSection?.aci_id, "aci_name:", savedSection?.aci_name);
+
+    return res.json({
+      message: "Section updated successfully",
+      section: formatMasterSectionResponse(savedSection || section),
+    });
+  } catch (error) {
+    console.error("Error updating master data section:", error);
+    if (error?.message?.toLowerCase().includes("question")) {
+      return res.status(400).json({ message: error.message });
+    }
+    if (error.code === 11000) {
+      return res.status(400).json({ message: "A section with this name already exists" });
+    }
+    return res.status(500).json({
+      message: "Failed to update section",
+      error: error.message,
+    });
+  }
+});
+
+app.delete("/api/master-data/sections/:sectionId", async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { sectionId } = req.params;
+
+    const section = await MasterDataSection.findByIdAndDelete(sectionId);
+    if (!section) {
+      return res.status(404).json({ message: "Section not found" });
+    }
+
+    return res.json({
+      message: "Section deleted successfully",
+      sectionId,
+    });
+  } catch (error) {
+    console.error("Error deleting master data section:", error);
+    return res.status(500).json({
+      message: "Failed to delete section",
+      error: error.message,
+    });
+  }
+});
+
+app.post("/api/master-data/sections/:sectionId/questions", async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { sectionId } = req.params;
+
+    const section = await MasterDataSection.findById(sectionId);
+    if (!section) {
+      return res.status(404).json({ message: "Section not found" });
+    }
+
+    const nextOrder = section.questions.length;
+    const questionPayload = normalizeMasterQuestion(req.body ?? {}, nextOrder);
+
+    section.questions.push(questionPayload);
+    await section.save();
+
+    const createdQuestion = section.questions[section.questions.length - 1];
+
+    return res.status(201).json({
+      message: "Question added successfully",
+      question: formatMasterQuestionResponse(createdQuestion),
+      section: formatMasterSectionResponse(section),
+    });
+  } catch (error) {
+    console.error("Error adding master data question:", error);
+    if (error?.message?.toLowerCase().includes("question")) {
+      return res.status(400).json({ message: error.message });
+    }
+    return res.status(500).json({
+      message: "Failed to add question",
+      error: error.message,
+    });
+  }
+});
+
+app.put("/api/master-data/sections/:sectionId/questions/:questionId", async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { sectionId, questionId } = req.params;
+
+    const section = await MasterDataSection.findById(sectionId);
+    if (!section) {
+      return res.status(404).json({ message: "Section not found" });
+    }
+
+    const question = section.questions.id(questionId);
+    if (!question) {
+      return res.status(404).json({ message: "Question not found" });
+    }
+
+    if (req.body?.prompt !== undefined || req.body?.text !== undefined) {
+      const promptValue =
+        typeof req.body.prompt === "string" && req.body.prompt.trim()
+          ? req.body.prompt.trim()
+          : typeof req.body.text === "string" && req.body.text.trim()
+            ? req.body.text.trim()
+            : "";
+      if (!promptValue) {
+        return res.status(400).json({ message: "Question prompt is required" });
+      }
+      question.prompt = promptValue;
+    }
+
+    if (req.body?.helperText !== undefined) {
+      const helper =
+        typeof req.body.helperText === "string" && req.body.helperText.trim()
+          ? req.body.helperText.trim()
+          : undefined;
+      question.helperText = helper;
+    }
+
+    if (req.body?.isRequired !== undefined || req.body?.required !== undefined) {
+      const requiredValue = Boolean(req.body.isRequired ?? req.body.required);
+      question.isRequired = requiredValue;
+    }
+
+    if (req.body?.isVisible !== undefined) {
+      question.isVisible = Boolean(req.body.isVisible);
+    }
+
+    if (req.body?.order !== undefined) {
+      const parsedOrder = Number(req.body.order);
+      if (!Number.isNaN(parsedOrder)) {
+        question.order = parsedOrder;
+      }
+    }
+
+    let nextType = question.type;
+    if (req.body?.type !== undefined) {
+      const typeInput =
+        typeof req.body.type === "string" && req.body.type.trim()
+          ? req.body.type.trim().toLowerCase()
+          : "";
+      if (MASTER_QUESTION_TYPES.has(typeInput)) {
+        nextType = typeInput;
+      }
+    }
+
+    const typeChanged = nextType !== question.type;
+    if (typeChanged) {
+      question.type = nextType;
+    }
+
+    if (nextType === "short-answer") {
+      question.options = [];
+    } else if (nextType === "multiple-choice") {
+      let normalizedOptions;
+      if (req.body?.options !== undefined || req.body?.answers !== undefined) {
+        normalizedOptions = normalizeAnswerOptions(
+          nextType,
+          req.body.options ?? req.body.answers,
+        );
+      } else {
+        normalizedOptions = normalizeAnswerOptions(nextType, question.options);
+      }
+
+      if (!normalizedOptions.length) {
+        return res.status(400).json({
+          message: "Multiple choice questions must include at least one answer option",
+        });
+      }
+      question.options = normalizedOptions;
+    }
+
+    question.updatedAt = new Date();
+    await section.save();
+
+    return res.json({
+      message: "Question updated successfully",
+      question: formatMasterQuestionResponse(question),
+      section: formatMasterSectionResponse(section),
+    });
+  } catch (error) {
+    console.error("Error updating master data question:", error);
+    if (error?.message?.toLowerCase().includes("question")) {
+      return res.status(400).json({ message: error.message });
+    }
+    return res.status(500).json({
+      message: "Failed to update question",
+      error: error.message,
+    });
+  }
+});
+
+app.delete("/api/master-data/sections/:sectionId/questions/:questionId", async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { sectionId, questionId } = req.params;
+
+    const section = await MasterDataSection.findById(sectionId);
+    if (!section) {
+      return res.status(404).json({ message: "Section not found" });
+    }
+
+    const question = section.questions.id(questionId);
+    if (!question) {
+      return res.status(404).json({ message: "Question not found" });
+    }
+
+    question.deleteOne();
+    await section.save();
+
+    return res.json({
+      message: "Question deleted successfully",
+      section: formatMasterSectionResponse(section),
+    });
+  } catch (error) {
+    console.error("Error deleting master data question:", error);
+    return res.status(500).json({
+      message: "Failed to delete question",
+      error: error.message,
+    });
   }
 });
 
@@ -2208,6 +2927,568 @@ app.delete("/api/voters/fields/:fieldName", async (req, res) => {
   } catch (error) {
     console.error("Error deleting voter field:", error);
     return res.status(500).json({ message: "Failed to delete voter field", error: error.message });
+  }
+});
+
+// Survey Master Data Mapper Routes
+// Get all mappings
+app.get("/api/survey-master-data-mappings", async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { surveyId, masterDataSectionId } = req.query;
+    
+    console.log("GET /api/survey-master-data-mappings - query params:", { surveyId, masterDataSectionId });
+    
+    const query = {};
+    if (surveyId) query.surveyId = surveyId;
+    if (masterDataSectionId) query.masterDataSectionId = masterDataSectionId;
+    
+    console.log("Query object:", query);
+    
+    const mappings = await SurveyMasterDataMapping.find(query)
+      .sort({ createdAt: -1 })
+      .populate("createdBy", "username email role");
+    
+    console.log("Found mappings:", mappings.length);
+    
+    return res.json({
+      mappings: mappings.map(m => m.toJSON()),
+    });
+  } catch (error) {
+    console.error("Error fetching survey master data mappings:", error);
+    console.error("Error stack:", error.stack);
+    return res.status(500).json({
+      message: "Failed to fetch mappings",
+      error: error.message,
+    });
+  }
+});
+
+// Get a specific mapping
+app.get("/api/survey-master-data-mappings/:mappingId", async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { mappingId } = req.params;
+    
+    const mapping = await SurveyMasterDataMapping.findById(mappingId)
+      .populate("createdBy", "username email role");
+    
+    if (!mapping) {
+      return res.status(404).json({ message: "Mapping not found" });
+    }
+    
+    return res.json(mapping.toJSON());
+  } catch (error) {
+    console.error("Error fetching survey master data mapping:", error);
+    return res.status(500).json({
+      message: "Failed to fetch mapping",
+      error: error.message,
+    });
+  }
+});
+
+// Create or update a mapping
+app.post("/api/survey-master-data-mappings", async (req, res) => {
+  try {
+    await connectToDatabase();
+    
+    const {
+      surveyId,
+      surveyTitle,
+      masterDataSectionId,
+      masterDataSectionName,
+      mappings,
+      createdBy,
+      createdByRole,
+      status,
+      notes,
+    } = req.body ?? {};
+    
+    if (!surveyId || !masterDataSectionId || !Array.isArray(mappings)) {
+      return res.status(400).json({
+        message: "surveyId, masterDataSectionId, and mappings array are required",
+      });
+    }
+    
+    // Check if mapping already exists
+    const existingMapping = await SurveyMasterDataMapping.findOne({
+      surveyId,
+      masterDataSectionId,
+    });
+    
+    if (existingMapping) {
+      // Update existing mapping
+      existingMapping.surveyTitle = surveyTitle || existingMapping.surveyTitle;
+      existingMapping.masterDataSectionName =
+        masterDataSectionName || existingMapping.masterDataSectionName;
+      existingMapping.mappings = mappings;
+      if (status) existingMapping.status = status;
+      if (notes !== undefined) existingMapping.notes = notes;
+      if (createdBy) existingMapping.createdBy = createdBy;
+      if (createdByRole) existingMapping.createdByRole = createdByRole;
+      
+      await existingMapping.save();
+      
+      return res.json({
+        message: "Mapping updated successfully",
+        mapping: existingMapping.toJSON(),
+      });
+    }
+    
+    // Create new mapping
+    const mappingData = {
+      surveyId,
+      surveyTitle: surveyTitle || "",
+      masterDataSectionId,
+      masterDataSectionName: masterDataSectionName || "",
+      mappings,
+      status: status || "draft",
+      notes: notes || "",
+    };
+    
+    if (createdBy) mappingData.createdBy = createdBy;
+    if (createdByRole) mappingData.createdByRole = createdByRole;
+    
+    const mapping = await SurveyMasterDataMapping.create(mappingData);
+    
+    return res.status(201).json({
+      message: "Mapping created successfully",
+      mapping: mapping.toJSON(),
+    });
+  } catch (error) {
+    console.error("Error creating/updating survey master data mapping:", error);
+    return res.status(500).json({
+      message: "Failed to create/update mapping",
+      error: error.message,
+    });
+  }
+});
+
+// Update mapping status
+app.put("/api/survey-master-data-mappings/:mappingId/status", async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { mappingId } = req.params;
+    const { status } = req.body ?? {};
+    
+    if (!status || !["draft", "active", "archived"].includes(status)) {
+      return res.status(400).json({
+        message: "Valid status (draft, active, archived) is required",
+      });
+    }
+    
+    const mapping = await SurveyMasterDataMapping.findByIdAndUpdate(
+      mappingId,
+      { status },
+      { new: true }
+    );
+    
+    if (!mapping) {
+      return res.status(404).json({ message: "Mapping not found" });
+    }
+    
+    return res.json({
+      message: "Mapping status updated successfully",
+      mapping: mapping.toJSON(),
+    });
+  } catch (error) {
+    console.error("Error updating mapping status:", error);
+    return res.status(500).json({
+      message: "Failed to update mapping status",
+      error: error.message,
+    });
+  }
+});
+
+// Delete a mapping
+app.delete("/api/survey-master-data-mappings/:mappingId", async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { mappingId } = req.params;
+    
+    const mapping = await SurveyMasterDataMapping.findByIdAndDelete(mappingId);
+    
+    if (!mapping) {
+      return res.status(404).json({ message: "Mapping not found" });
+    }
+    
+    return res.json({
+      message: "Mapping deleted successfully",
+      mappingId,
+    });
+  } catch (error) {
+    console.error("Error deleting survey master data mapping:", error);
+    return res.status(500).json({
+      message: "Failed to delete mapping",
+      error: error.message,
+    });
+  }
+});
+
+// Apply mapping and save to mappedfields collection
+app.post("/api/mapped-fields/apply-mapping", async (req, res) => {
+  try {
+    await connectToDatabase();
+    
+    const {
+      mappingId,
+      surveyResponseId,
+      voterId,
+      acNumber,
+      applyToAll = false,
+      createdBy,
+      createdByRole,
+    } = req.body ?? {};
+    
+    if (!mappingId || !surveyResponseId) {
+      return res.status(400).json({
+        message: "mappingId and surveyResponseId are required",
+      });
+    }
+    
+    // Get the mapping
+    const mapping = await SurveyMasterDataMapping.findById(mappingId);
+    if (!mapping) {
+      return res.status(404).json({ message: "Mapping not found" });
+    }
+    
+    if (mapping.status !== "active") {
+      return res.status(400).json({
+        message: "Mapping must be active to apply",
+      });
+    }
+    
+    // Get survey response
+    const SurveyResponse = mongoose.models.SurveyResponse ||
+      mongoose.model('SurveyResponse', new mongoose.Schema({}, { strict: false, collection: 'surveyresponses' }));
+    
+    let surveyResponses = [];
+    if (applyToAll) {
+      // Apply to all survey responses for this survey
+      const responses = await SurveyResponse.find({ surveyId: mapping.surveyId }).limit(1000);
+      surveyResponses = responses;
+    } else {
+      const response = await SurveyResponse.findById(surveyResponseId);
+      if (!response) {
+        return res.status(404).json({ message: "Survey response not found" });
+      }
+      surveyResponses = [response];
+    }
+    
+    // Get master data section
+    const masterSection = await MasterDataSection.findById(mapping.masterDataSectionId);
+    if (!masterSection) {
+      return res.status(404).json({ message: "Master data section not found" });
+    }
+    
+    const mappedFieldsArray = [];
+    
+    // Process each survey response
+    for (const surveyResponse of surveyResponses) {
+      const responseVoterId = voterId || surveyResponse.voterId || surveyResponse.respondentName || '';
+      
+      // Get voter information
+      let voter = null;
+      if (responseVoterId) {
+        // Try to find voter by voterId, voterID, or name
+        if (mongoose.Types.ObjectId.isValid(responseVoterId)) {
+          voter = await Voter.findById(responseVoterId).lean();
+        }
+        
+        if (!voter) {
+          voter = await Voter.findOne({
+            $or: [
+              { voterID: responseVoterId },
+              { "name.english": { $regex: new RegExp(responseVoterId, 'i') } },
+              { "name.tamil": { $regex: new RegExp(responseVoterId, 'i') } },
+            ],
+          }).lean();
+        }
+      }
+      
+      // Get AC information from voter or use provided acNumber
+      let acInfo = {
+        acNumber: acNumber || null,
+        acName: null,
+        aci_id: null,
+        aci_name: null,
+      };
+      
+      if (voter) {
+        acInfo.acNumber = voter.aci_num || voter.aci_id || acNumber;
+        acInfo.acName = voter.aci_name || voter.ac_name;
+        acInfo.aci_id = voter.aci_id || voter.aci_num;
+        acInfo.aci_name = voter.aci_name || voter.ac_name;
+      } else if (acNumber) {
+        // Try to get AC name from any voter in that AC
+        const sampleVoter = await Voter.findOne({
+          $or: [
+            { aci_num: acNumber },
+            { aci_id: acNumber },
+          ],
+        }).select('aci_name ac_name').lean();
+        
+        if (sampleVoter) {
+          acInfo.acName = sampleVoter.aci_name || sampleVoter.ac_name;
+          acInfo.aci_id = acNumber;
+          acInfo.aci_name = sampleVoter.aci_name || sampleVoter.ac_name;
+        }
+      }
+      
+      // Apply mappings to create mapped fields
+      const mappedFields = [];
+      const responseAnswers = surveyResponse.answers || surveyResponse.responses || {};
+      
+      for (const mappingItem of mapping.mappings) {
+        const surveyQuestionId = mappingItem.surveyQuestionId;
+        const surveyResponseValue = responseAnswers[surveyQuestionId];
+        
+        if (surveyResponseValue === undefined || surveyResponseValue === null) {
+          continue;
+        }
+        
+        // Find the master question
+        const masterQuestion = masterSection.questions.find(
+          (q) => q.id.toString() === mappingItem.masterDataQuestionId
+        );
+        
+        if (!masterQuestion) {
+          continue;
+        }
+        
+        // Determine mapped value based on mapping type
+        let mappedValue = surveyResponseValue;
+        let originalValue = surveyResponseValue;
+        
+        if (mappingItem.mappingType === "value-mapping" && mappingItem.responseValueMappings) {
+          // Find value mapping (case-insensitive)
+          const valueStr = String(surveyResponseValue).trim();
+          const valueMapping = mappingItem.responseValueMappings.find(
+            (vm) => String(vm.surveyResponseValue).trim().toLowerCase() === valueStr.toLowerCase()
+          );
+          
+          if (valueMapping && valueMapping.masterDataAnswerValue) {
+            mappedValue = valueMapping.masterDataAnswerValue;
+            originalValue = surveyResponseValue;
+          }
+        }
+        
+        mappedFields.push({
+          surveyQuestionId: mappingItem.surveyQuestionId,
+          surveyQuestionText: mappingItem.surveyQuestionText,
+          surveyResponseValue: originalValue,
+          masterDataQuestionId: mappingItem.masterDataQuestionId,
+          masterDataQuestionPrompt: mappingItem.masterDataQuestionPrompt,
+          mappedValue: mappedValue,
+          mappingType: mappingItem.mappingType,
+          originalValue: originalValue,
+        });
+      }
+      
+      if (mappedFields.length === 0) {
+        continue;
+      }
+      
+      // Check if mapped field already exists for this combination
+      const existingMappedField = await MappedField.findOne({
+        voterId: voter?._id?.toString() || responseVoterId,
+        surveyId: mapping.surveyId,
+        surveyResponseId: surveyResponse._id.toString(),
+        masterDataSectionId: mapping.masterDataSectionId,
+      });
+      
+      if (existingMappedField) {
+        // Update existing
+        existingMappedField.mappedFields = mappedFields;
+        existingMappedField.mappedAt = new Date();
+        if (createdBy) existingMappedField.mappedBy = createdBy;
+        if (createdByRole) existingMappedField.mappedByRole = createdByRole;
+        
+        // Update voter/AC info if available
+        if (voter) {
+          existingMappedField.voterId = voter._id.toString();
+          existingMappedField.voterName = voter.name?.english || voter.name?.tamil || voter.name || '';
+          existingMappedField.voterNameTamil = voter.name?.tamil || '';
+          existingMappedField.voterID = voter.voterID || '';
+          existingMappedField.familyId = voter.family_id || '';
+          existingMappedField.mobile = voter.mobile || '';
+          existingMappedField.age = voter.age;
+          existingMappedField.gender = voter.gender || '';
+          existingMappedField.address = voter.address || '';
+          existingMappedField.guardian = voter.guardian || '';
+        }
+        
+        if (acInfo.acNumber) {
+          existingMappedField.acNumber = acInfo.acNumber;
+          existingMappedField.acName = acInfo.acName || '';
+          existingMappedField.aci_id = acInfo.aci_id;
+          existingMappedField.aci_name = acInfo.aci_name || '';
+        }
+        
+        if (voter) {
+          existingMappedField.boothId = voter.booth_id || '';
+          existingMappedField.boothName = voter.boothname || '';
+          existingMappedField.boothNumber = voter.boothno || '';
+        }
+        
+        await existingMappedField.save();
+        mappedFieldsArray.push(existingMappedField.toJSON());
+      } else {
+        // Create new
+        const mappedFieldData = {
+          voterId: voter?._id?.toString() || responseVoterId,
+          voterName: voter?.name?.english || voter?.name?.tamil || voter?.name || surveyResponse.voterName || surveyResponse.respondentName || '',
+          voterNameTamil: voter?.name?.tamil || '',
+          voterID: voter?.voterID || '',
+          familyId: voter?.family_id || '',
+          acNumber: acInfo.acNumber || acNumber || null,
+          acName: acInfo.acName || '',
+          aci_id: acInfo.aci_id,
+          aci_name: acInfo.aci_name || '',
+          boothId: voter?.booth_id || '',
+          boothName: voter?.boothname || '',
+          boothNumber: voter?.boothno || '',
+          surveyId: mapping.surveyId,
+          surveyTitle: mapping.surveyTitle,
+          surveyResponseId: surveyResponse._id.toString(),
+          masterDataSectionId: mapping.masterDataSectionId,
+          masterDataSectionName: mapping.masterDataSectionName,
+          mappingId: mapping._id.toString(),
+          mappedFields: mappedFields,
+          mobile: voter?.mobile || '',
+          age: voter?.age,
+          gender: voter?.gender || '',
+          address: voter?.address || '',
+          guardian: voter?.guardian || '',
+          mappedBy: createdBy,
+          mappedByRole: createdByRole,
+        };
+        
+        const mappedField = await MappedField.create(mappedFieldData);
+        mappedFieldsArray.push(mappedField.toJSON());
+      }
+    }
+    
+    return res.status(201).json({
+      message: `Mapped fields created/updated successfully for ${mappedFieldsArray.length} record(s)`,
+      mappedFields: mappedFieldsArray,
+    });
+  } catch (error) {
+    console.error("Error applying mapping to mappedfields:", error);
+    return res.status(500).json({
+      message: "Failed to apply mapping",
+      error: error.message,
+    });
+  }
+});
+
+// Get mapped fields
+app.get("/api/mapped-fields", async (req, res) => {
+  try {
+    await connectToDatabase();
+    
+    const {
+      acNumber,
+      surveyId,
+      masterDataSectionId,
+      voterId,
+      voterID,
+      page = 1,
+      limit = 50,
+      search,
+    } = req.query;
+    
+    const query = {};
+    
+    if (acNumber) {
+      query.acNumber = parseInt(acNumber);
+    }
+    
+    if (surveyId) {
+      query.surveyId = surveyId;
+    }
+    
+    if (masterDataSectionId) {
+      query.masterDataSectionId = masterDataSectionId;
+    }
+    
+    if (voterId) {
+      query.voterId = voterId;
+    }
+    
+    if (voterID) {
+      query.voterID = voterID;
+    }
+    
+    if (search) {
+      const searchRegex = new RegExp(search, 'i');
+      query.$or = [
+        { voterName: searchRegex },
+        { voterNameTamil: searchRegex },
+        { voterID: searchRegex },
+        { acName: searchRegex },
+        { surveyTitle: searchRegex },
+      ];
+    }
+    
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    const mappedFields = await MappedField.find(query)
+      .sort({ mappedAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .populate("mappedBy", "username email role")
+      .lean();
+    
+    const total = await MappedField.countDocuments(query);
+    
+    return res.json({
+      mappedFields: mappedFields.map((mf) => ({
+        ...mf,
+        id: mf._id.toString(),
+        _id: undefined,
+      })),
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit)),
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching mapped fields:", error);
+    return res.status(500).json({
+      message: "Failed to fetch mapped fields",
+      error: error.message,
+    });
+  }
+});
+
+// Get a specific mapped field
+app.get("/api/mapped-fields/:mappedFieldId", async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { mappedFieldId } = req.params;
+    
+    const mappedField = await MappedField.findById(mappedFieldId)
+      .populate("mappedBy", "username email role")
+      .lean();
+    
+    if (!mappedField) {
+      return res.status(404).json({ message: "Mapped field not found" });
+    }
+    
+    return res.json({
+      ...mappedField,
+      id: mappedField._id.toString(),
+      _id: undefined,
+    });
+  } catch (error) {
+    console.error("Error fetching mapped field:", error);
+    return res.status(500).json({
+      message: "Failed to fetch mapped field",
+      error: error.message,
+    });
   }
 });
 
