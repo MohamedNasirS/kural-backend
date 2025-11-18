@@ -19,7 +19,7 @@ echo "==> Building application"
 npm run build
 
 echo "==> Reloading PM2 process: ${PM2_PROCESS_NAME}"
-pm2 describe "${PM2_PROCESS_NAME}" >/dev/null 2>&1 && pm2 restart "${PM2_PROCESS_NAME}" || pm2 start npm --name "${PM2_PROCESS_NAME}" -- start
+pm2 restart "${PM2_PROCESS_NAME}"
 
 echo "==> Deployment complete"
 
