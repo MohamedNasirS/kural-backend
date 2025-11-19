@@ -47,6 +47,11 @@ const questionSchema = new mongoose.Schema(
       type: [String],
       default: undefined,
     },
+    masterQuestionId: {
+      type: String,
+      trim: true,
+      required: false,
+    },
     optionMappings: {
       type: [optionMappingSchema],
       default: undefined,

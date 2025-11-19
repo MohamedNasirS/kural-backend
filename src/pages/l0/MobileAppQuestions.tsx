@@ -13,7 +13,7 @@ import {
 import { Plus, Trash2, Search } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useToast } from '@/components/ui/use-toast';
-import { fetchMasterSections, MasterQuestion } from '@/lib/masterData';
+import { fetchMasterQuestions, MasterQuestion } from '@/lib/masterData';
 import {
   fetchMobileAppQuestions,
   addMobileAppQuestion,
@@ -34,18 +34,9 @@ export const MobileAppQuestions = () => {
     const loadMasterQuestions = async () => {
       try {
         setLoadingMasterQuestions(true);
-        const sections = await fetchMasterSections();
-
-        // Gather all questions from all sections
-        const allQuestions: MasterQuestion[] = [];
-        sections.forEach((section) => {
-          const questions = section.questions
-            .filter((q) => q.isVisible)
-            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-          allQuestions.push(...questions);
-        });
-
-        setMasterQuestions(allQuestions);
+        // Fetch all visible master questions directly from the collection
+        const questions = await fetchMasterQuestions({ isVisible: true });
+        setMasterQuestions(questions);
       } catch (error) {
         console.error('Failed to load master questions', error);
         toast({

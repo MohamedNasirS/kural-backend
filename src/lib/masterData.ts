@@ -125,4 +125,18 @@ export async function deleteMasterQuestion(sectionId: string, questionId: string
   return response.section;
 }
 
+interface QuestionsResponse {
+  questions: MasterQuestion[];
+}
+
+export async function fetchMasterQuestions(options?: { isVisible?: boolean }): Promise<MasterQuestion[]> {
+  const params = new URLSearchParams();
+  if (options?.isVisible !== undefined) {
+    params.append('isVisible', String(options.isVisible));
+  }
+  const queryString = params.toString();
+  const endpoint = `/master-data/questions${queryString ? `?${queryString}` : ''}`;
+  const response: QuestionsResponse = await api.get(endpoint);
+  return response.questions ?? [];
+}
 

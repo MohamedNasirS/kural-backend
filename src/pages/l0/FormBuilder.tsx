@@ -59,6 +59,7 @@ interface Question {
   type: 'multiple-choice';
   required: boolean;
   options?: string[];
+  masterQuestionId?: string;
   optionMappings?: OptionMapping[];
 }
 
@@ -222,6 +223,7 @@ export const FormBuilder = () => {
       type: 'multiple-choice',
       required: customQuestion.required,
       options: customQuestion.options,
+      masterQuestionId: selectedMasterQuestion.id,
       optionMappings: autoMappings,
     };
 

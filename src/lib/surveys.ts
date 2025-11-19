@@ -14,6 +14,7 @@ export interface SurveyQuestion {
   type: string;
   required: boolean;
   options?: string[];
+  masterQuestionId?: string;
   optionMappings?: OptionMapping[];
 }
 

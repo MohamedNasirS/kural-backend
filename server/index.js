@@ -375,6 +375,14 @@ function normalizeQuestions(questions) {
         required: Boolean(question.required),
       };
 
+      // Preserve masterQuestionId if it exists
+      if (question.masterQuestionId !== undefined && question.masterQuestionId !== null) {
+        const masterQuestionId = String(question.masterQuestionId).trim();
+        if (masterQuestionId) {
+          normalized.masterQuestionId = masterQuestionId;
+        }
+      }
+
       if (Array.isArray(question.options)) {
         const options = question.options
           .map((option) => (typeof option === "string" ? option.trim() : ""))
@@ -2002,6 +2010,31 @@ app.get("/api/master-data/sections", async (_req, res) => {
     console.error("Error fetching master data sections:", error);
     return res.status(500).json({
       message: "Failed to fetch master data sections",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/api/master-data/questions", async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { isVisible } = req.query;
+    
+    let query = {};
+    if (isVisible !== undefined) {
+      query.isVisible = isVisible === 'true' || isVisible === true;
+    }
+
+    const questions = await MasterQuestion.find(query)
+      .sort({ order: 1, createdAt: 1 });
+    
+    return res.json({
+      questions: questions.map((question) => formatMasterQuestionResponse(question)),
+    });
+  } catch (error) {
+    console.error("Error fetching master data questions:", error);
+    return res.status(500).json({
+      message: "Failed to fetch master data questions",
       error: error.message,
     });
   }
