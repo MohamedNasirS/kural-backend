@@ -14,8 +14,10 @@ import Voter from "./models/Voter.js";
 import Booth from "./models/Booth.js";
 import VoterField from "./models/VoterField.js";
 import MasterDataSection from "./models/MasterDataSection.js";
+import MasterQuestion from "./models/MasterQuestion.js";
 import SurveyMasterDataMapping from "./models/SurveyMasterDataMapping.js";
 import MappedField from "./models/MappedField.js";
+import MobileAppQuestion from "./models/MobileAppQuestion.js";
 
 // Import RBAC routes
 import rbacRoutes from "./routes/rbac.js";
@@ -635,7 +637,7 @@ function formatMasterQuestionResponse(questionDoc) {
   };
 }
 
-function formatMasterSectionResponse(sectionDoc) {
+async function formatMasterSectionResponse(sectionDoc, includeQuestions = true) {
   if (!sectionDoc) {
     return null;
   }
@@ -645,20 +647,12 @@ function formatMasterSectionResponse(sectionDoc) {
       ? sectionDoc.toObject({ versionKey: false })
       : sectionDoc;
 
-  const formattedQuestions = Array.isArray(section.questions)
-    ? [...section.questions]
-        .sort((a, b) => {
-          const orderDiff = (a.order ?? 0) - (b.order ?? 0);
-          if (orderDiff !== 0) {
-            return orderDiff;
-          }
-          const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-          const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-          return dateA - dateB;
-        })
-        .map((question) => formatMasterQuestionResponse(question))
-        .filter(Boolean)
-    : [];
+  let formattedQuestions = [];
+  if (includeQuestions) {
+    const questions = await MasterQuestion.find({ sectionId: section._id || sectionDoc._id })
+      .sort({ order: 1, createdAt: 1 });
+    formattedQuestions = questions.map((question) => formatMasterQuestionResponse(question)).filter(Boolean);
+  }
 
   return {
     id: section._id?.toString?.() ?? section._id ?? undefined,
@@ -1998,8 +1992,11 @@ app.get("/api/master-data/sections", async (_req, res) => {
   try {
     await connectToDatabase();
     const sections = await MasterDataSection.find().sort({ order: 1, createdAt: 1 });
+    const formattedSections = await Promise.all(
+      sections.map((section) => formatMasterSectionResponse(section, true))
+    );
     return res.json({
-      sections: sections.map((section) => formatMasterSectionResponse(section)),
+      sections: formattedSections,
     });
   } catch (error) {
     console.error("Error fetching master data sections:", error);
@@ -2031,12 +2028,6 @@ app.post("/api/master-data/sections", async (req, res) => {
         ? req.body.order
         : await MasterDataSection.countDocuments();
 
-    const questions = Array.isArray(req.body?.questions)
-      ? req.body.questions.map((question, index) =>
-          normalizeMasterQuestion(question, index),
-        )
-      : [];
-
     // Process AC arrays - ensure they're always arrays
     let aci_id = [];
     let aci_name = [];
@@ -2065,7 +2056,6 @@ app.post("/api/master-data/sections", async (req, res) => {
       aci_id: Array.isArray(aci_id) ? aci_id : [],
       aci_name: Array.isArray(aci_name) ? aci_name : [],
       isVisible,
-      questions,
     };
     
     console.log("Section data to create:", JSON.stringify(sectionData, null, 2));
@@ -2081,7 +2071,7 @@ app.post("/api/master-data/sections", async (req, res) => {
 
     return res.status(201).json({
       message: "Section created successfully",
-      section: formatMasterSectionResponse(savedSection || section),
+      section: await formatMasterSectionResponse(savedSection || section, true),
     });
   } catch (error) {
     console.error("Error creating master data section:", error);
@@ -2170,13 +2160,6 @@ app.put("/api/master-data/sections/:sectionId", async (req, res) => {
       section.isVisible = Boolean(req.body.isVisible);
     }
 
-    if (Array.isArray(req.body?.questions)) {
-      section.questions = req.body.questions.map((question, index) =>
-        normalizeMasterQuestion(question, index),
-      );
-    }
-
-
     console.log("Before save - section aci_id:", section.aci_id, "aci_name:", section.aci_name);
     await section.save();
     
@@ -2186,7 +2169,7 @@ app.put("/api/master-data/sections/:sectionId", async (req, res) => {
 
     return res.json({
       message: "Section updated successfully",
-      section: formatMasterSectionResponse(savedSection || section),
+      section: await formatMasterSectionResponse(savedSection || section, true),
     });
   } catch (error) {
     console.error("Error updating master data section:", error);
@@ -2208,10 +2191,16 @@ app.delete("/api/master-data/sections/:sectionId", async (req, res) => {
     await connectToDatabase();
     const { sectionId } = req.params;
 
-    const section = await MasterDataSection.findByIdAndDelete(sectionId);
+    const section = await MasterDataSection.findById(sectionId);
     if (!section) {
       return res.status(404).json({ message: "Section not found" });
     }
+
+    // Delete all questions associated with this section
+    await MasterQuestion.deleteMany({ sectionId: section._id });
+
+    // Delete the section
+    await MasterDataSection.findByIdAndDelete(sectionId);
 
     return res.json({
       message: "Section deleted successfully",
@@ -2236,18 +2225,22 @@ app.post("/api/master-data/sections/:sectionId/questions", async (req, res) => {
       return res.status(404).json({ message: "Section not found" });
     }
 
-    const nextOrder = section.questions.length;
-    const questionPayload = normalizeMasterQuestion(req.body ?? {}, nextOrder);
+    const nextOrder =
+      typeof req.body?.order === "number" && Number.isFinite(req.body.order)
+        ? req.body.order
+        : await MasterQuestion.countDocuments({ sectionId: section._id });
 
-    section.questions.push(questionPayload);
-    await section.save();
+    const questionData = normalizeMasterQuestion(req.body ?? {}, nextOrder);
 
-    const createdQuestion = section.questions[section.questions.length - 1];
+    const question = await MasterQuestion.create({
+      ...questionData,
+      sectionId: section._id,
+    });
 
     return res.status(201).json({
       message: "Question added successfully",
-      question: formatMasterQuestionResponse(createdQuestion),
-      section: formatMasterSectionResponse(section),
+      question: formatMasterQuestionResponse(question),
+      section: await formatMasterSectionResponse(section, true),
     });
   } catch (error) {
     console.error("Error adding master data question:", error);
@@ -2271,7 +2264,10 @@ app.put("/api/master-data/sections/:sectionId/questions/:questionId", async (req
       return res.status(404).json({ message: "Section not found" });
     }
 
-    const question = section.questions.id(questionId);
+    const question = await MasterQuestion.findOne({
+      _id: questionId,
+      sectionId: section._id,
+    });
     if (!question) {
       return res.status(404).json({ message: "Question not found" });
     }
@@ -2329,34 +2325,38 @@ app.put("/api/master-data/sections/:sectionId/questions/:questionId", async (req
       question.type = nextType;
     }
 
-    if (nextType === "short-answer") {
-      question.options = [];
-    } else if (nextType === "multiple-choice") {
+    if (OPTION_REQUIRED_TYPES.has(nextType)) {
       let normalizedOptions;
       if (req.body?.options !== undefined || req.body?.answers !== undefined) {
         normalizedOptions = normalizeAnswerOptions(
           nextType,
           req.body.options ?? req.body.answers,
         );
+      } else if (!OPTION_REQUIRED_TYPES.has(question.type)) {
+        // If changing from a non-option type, initialize with empty array
+        normalizedOptions = [];
       } else {
+        // Keep existing options if type hasn't changed and no new options provided
         normalizedOptions = normalizeAnswerOptions(nextType, question.options);
       }
 
-      if (!normalizedOptions.length) {
+      if (normalizedOptions.length === 0 && OPTION_REQUIRED_TYPES.has(nextType)) {
         return res.status(400).json({
-          message: "Multiple choice questions must include at least one answer option",
+          message: "This question type must include at least one answer option",
         });
       }
       question.options = normalizedOptions;
+    } else {
+      // For non-option types, clear options
+      question.options = [];
     }
 
-    question.updatedAt = new Date();
-    await section.save();
+    await question.save();
 
     return res.json({
       message: "Question updated successfully",
       question: formatMasterQuestionResponse(question),
-      section: formatMasterSectionResponse(section),
+      section: await formatMasterSectionResponse(section, true),
     });
   } catch (error) {
     console.error("Error updating master data question:", error);
@@ -2380,20 +2380,171 @@ app.delete("/api/master-data/sections/:sectionId/questions/:questionId", async (
       return res.status(404).json({ message: "Section not found" });
     }
 
-    const question = section.questions.id(questionId);
+    const question = await MasterQuestion.findOne({
+      _id: questionId,
+      sectionId: section._id,
+    });
     if (!question) {
       return res.status(404).json({ message: "Question not found" });
     }
 
-    question.deleteOne();
-    await section.save();
+    await MasterQuestion.findByIdAndDelete(questionId);
 
     return res.json({
       message: "Question deleted successfully",
-      section: formatMasterSectionResponse(section),
+      section: await formatMasterSectionResponse(section, true),
     });
   } catch (error) {
     console.error("Error deleting master data question:", error);
+    return res.status(500).json({
+      message: "Failed to delete question",
+      error: error.message,
+    });
+  }
+});
+
+// Mobile App Questions APIs
+function formatMobileAppQuestionResponse(questionDoc) {
+  if (!questionDoc) {
+    return null;
+  }
+
+  const question =
+    typeof questionDoc.toObject === "function"
+      ? questionDoc.toObject({ versionKey: false })
+      : questionDoc;
+
+  const formattedOptions =
+    OPTION_REQUIRED_TYPES.has(question.type) && Array.isArray(question.options)
+      ? [...question.options]
+          .sort((a, b) => {
+            const orderDiff = (a.order ?? 0) - (b.order ?? 0);
+            if (orderDiff !== 0) {
+              return orderDiff;
+            }
+            return String(a.label ?? "").localeCompare(String(b.label ?? ""));
+          })
+          .map((option) => ({
+            id: option._id?.toString?.() ?? option._id ?? undefined,
+            label: option.label,
+            value: option.value,
+            order: option.order ?? 0,
+            isDefault: Boolean(option.isDefault),
+            masterOptionId: option.masterOptionId,
+          }))
+      : [];
+
+  return {
+    id: question._id?.toString?.() ?? question._id ?? undefined,
+    prompt: question.prompt,
+    type: question.type,
+    isRequired: Boolean(question.isRequired),
+    isVisible: true, // Mobile app questions are always visible
+    helperText: question.helperText,
+    order: question.order ?? 0,
+    options: formattedOptions,
+    masterQuestionId: question.masterQuestionId,
+    createdAt: question.createdAt,
+    updatedAt: question.updatedAt,
+  };
+}
+
+app.get("/api/mobile-app-questions", async (_req, res) => {
+  try {
+    await connectToDatabase();
+    const questions = await MobileAppQuestion.find()
+      .sort({ order: 1, createdAt: 1 });
+    return res.json({
+      questions: questions.map((question) => formatMobileAppQuestionResponse(question)),
+    });
+  } catch (error) {
+    console.error("Error fetching mobile app questions:", error);
+    return res.status(500).json({
+      message: "Failed to fetch mobile app questions",
+      error: error.message,
+    });
+  }
+});
+
+app.post("/api/mobile-app-questions", async (req, res) => {
+  try {
+    await connectToDatabase();
+
+    const questionData = normalizeMasterQuestion(req.body ?? {}, 0);
+    const order =
+      typeof req.body?.order === "number" && Number.isFinite(req.body.order)
+        ? req.body.order
+        : await MobileAppQuestion.countDocuments();
+
+    // Preserve option IDs from master question if provided
+    let options = questionData.options || [];
+    if (Array.isArray(req.body?.options) && req.body.options.length > 0) {
+      options = questionData.options.map((normalizedOption) => {
+        // Find the matching option from the original master question by value or label
+        const masterOption = req.body.options.find(
+          (opt) =>
+            (opt.id && (
+              opt.value === normalizedOption.value ||
+              opt.label === normalizedOption.label ||
+              (typeof opt.value === "string" && typeof normalizedOption.value === "string" &&
+                opt.value.toLowerCase() === normalizedOption.value.toLowerCase()) ||
+              (typeof opt.label === "string" && typeof normalizedOption.label === "string" &&
+                opt.label.toLowerCase() === normalizedOption.label.toLowerCase())
+            ))
+        );
+        
+        if (masterOption && masterOption.id) {
+          return {
+            ...normalizedOption,
+            masterOptionId: typeof masterOption.id === "string" ? masterOption.id.trim() : String(masterOption.id),
+          };
+        }
+        return normalizedOption;
+      });
+    }
+
+    const mobileQuestionData = {
+      ...questionData,
+      order,
+      options,
+      masterQuestionId: typeof req.body?.masterQuestionId === "string" ? req.body.masterQuestionId.trim() : undefined,
+    };
+
+    const question = await MobileAppQuestion.create(mobileQuestionData);
+
+    return res.status(201).json({
+      message: "Question added successfully",
+      question: formatMobileAppQuestionResponse(question),
+    });
+  } catch (error) {
+    console.error("Error creating mobile app question:", error);
+    if (error?.message?.toLowerCase().includes("question")) {
+      return res.status(400).json({ message: error.message });
+    }
+    return res.status(500).json({
+      message: "Failed to create question",
+      error: error.message,
+    });
+  }
+});
+
+app.delete("/api/mobile-app-questions/:questionId", async (req, res) => {
+  try {
+    await connectToDatabase();
+    const { questionId } = req.params;
+
+    const question = await MobileAppQuestion.findById(questionId);
+    if (!question) {
+      return res.status(404).json({ message: "Question not found" });
+    }
+
+    await MobileAppQuestion.findByIdAndDelete(questionId);
+
+    return res.json({
+      message: "Question deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting mobile app question:", error);
     return res.status(500).json({
       message: "Failed to delete question",
       error: error.message,

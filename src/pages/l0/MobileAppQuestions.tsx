@@ -14,12 +14,19 @@ import { Plus, Trash2, Search } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useToast } from '@/components/ui/use-toast';
 import { fetchMasterSections, MasterQuestion } from '@/lib/masterData';
+import {
+  fetchMobileAppQuestions,
+  addMobileAppQuestion,
+  deleteMobileAppQuestion,
+  MobileAppQuestion,
+} from '@/lib/mobileAppQuestions';
 
 export const MobileAppQuestions = () => {
   const { toast } = useToast();
-  const [selectedQuestions, setSelectedQuestions] = useState<MasterQuestion[]>([]);
+  const [selectedQuestions, setSelectedQuestions] = useState<MobileAppQuestion[]>([]);
   const [masterQuestions, setMasterQuestions] = useState<MasterQuestion[]>([]);
   const [loadingMasterQuestions, setLoadingMasterQuestions] = useState(false);
+  const [loadingSelectedQuestions, setLoadingSelectedQuestions] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -41,17 +48,40 @@ export const MobileAppQuestions = () => {
         setMasterQuestions(allQuestions);
       } catch (error) {
         console.error('Failed to load master questions', error);
+        toast({
+          title: 'Failed to load master questions',
+          description: error instanceof Error ? error.message : 'Please try again later.',
+          variant: 'destructive',
+        });
       } finally {
         setLoadingMasterQuestions(false);
       }
     };
 
+    const loadSelectedQuestions = async () => {
+      try {
+        setLoadingSelectedQuestions(true);
+        const questions = await fetchMobileAppQuestions();
+        setSelectedQuestions(questions);
+      } catch (error) {
+        console.error('Failed to load mobile app questions', error);
+        toast({
+          title: 'Failed to load questions',
+          description: error instanceof Error ? error.message : 'Please try again later.',
+          variant: 'destructive',
+        });
+      } finally {
+        setLoadingSelectedQuestions(false);
+      }
+    };
+
     loadMasterQuestions();
+    loadSelectedQuestions();
   }, []);
 
-  const importQuestion = (masterQuestion: MasterQuestion) => {
+  const importQuestion = async (masterQuestion: MasterQuestion) => {
     // Check if already selected
-    if (selectedQuestions.find(q => q.id === masterQuestion.id)) {
+    if (selectedQuestions.find(q => q.masterQuestionId === masterQuestion.id || q.id === masterQuestion.id)) {
       toast({
         title: 'Already added',
         description: 'This question is already in your list.',
@@ -60,21 +90,50 @@ export const MobileAppQuestions = () => {
       return;
     }
 
-    setSelectedQuestions([...selectedQuestions, masterQuestion]);
-    setSearchQuery('');
+    try {
+      // Save to database
+      const addedQuestion = await addMobileAppQuestion({
+        ...masterQuestion,
+        masterQuestionId: masterQuestion.id,
+      });
 
-    toast({
-      title: 'Question added',
-      description: `"${masterQuestion.prompt}" has been added to the form.`,
-    });
+      // Update local state
+      setSelectedQuestions([...selectedQuestions, addedQuestion]);
+      setSearchQuery('');
+
+      toast({
+        title: 'Question added',
+        description: `"${masterQuestion.prompt}" has been added to the form.`,
+      });
+    } catch (error) {
+      console.error('Failed to add question', error);
+      toast({
+        title: 'Failed to add question',
+        description: error instanceof Error ? error.message : 'Please try again later.',
+        variant: 'destructive',
+      });
+    }
   };
 
-  const removeQuestion = (questionId: string) => {
-    setSelectedQuestions(selectedQuestions.filter(q => q.id !== questionId));
-    toast({
-      title: 'Question removed',
-      description: 'The question has been removed from the form.',
-    });
+  const removeQuestion = async (questionId: string) => {
+    try {
+      // Delete from database
+      await deleteMobileAppQuestion(questionId);
+
+      // Update local state
+      setSelectedQuestions(selectedQuestions.filter(q => q.id !== questionId));
+      toast({
+        title: 'Question removed',
+        description: 'The question has been removed from the form.',
+      });
+    } catch (error) {
+      console.error('Failed to remove question', error);
+      toast({
+        title: 'Failed to remove question',
+        description: error instanceof Error ? error.message : 'Please try again later.',
+        variant: 'destructive',
+      });
+    }
   };
 
   const getTypeLabel = (type: string): string => {
@@ -112,7 +171,13 @@ export const MobileAppQuestions = () => {
 
         {/* Selected Questions List */}
         <div className="space-y-4">
-          {selectedQuestions.length === 0 ? (
+          {loadingSelectedQuestions ? (
+            <Card className="p-12">
+              <div className="text-center">
+                <p className="text-muted-foreground">Loading questions...</p>
+              </div>
+            </Card>
+          ) : selectedQuestions.length === 0 ? (
             <Card className="p-12">
               <div className="text-center">
                 <Search className="h-12 w-12 mx-auto text-muted-foreground/50 mb-3" />
@@ -216,7 +281,9 @@ export const MobileAppQuestions = () => {
                       </p>
                     </div>
                     {filteredQuestions.map((masterQ) => {
-                      const isSelected = selectedQuestions.find(q => q.id === masterQ.id);
+                      const isSelected = selectedQuestions.find(
+                        q => q.masterQuestionId === masterQ.id || q.id === masterQ.id
+                      );
                       return (
                         <div
                           key={masterQ.id}
@@ -224,8 +291,11 @@ export const MobileAppQuestions = () => {
                             isSelected ? 'bg-primary/5' : ''
                           }`}
                           onClick={() => {
-                            importQuestion(masterQ);
-                            setImportDialogOpen(false);
+                            importQuestion(masterQ).then(() => {
+                              setImportDialogOpen(false);
+                            }).catch(() => {
+                              // Error already handled in importQuestion
+                            });
                           }}
                         >
                           <div className="flex items-start justify-between gap-2">

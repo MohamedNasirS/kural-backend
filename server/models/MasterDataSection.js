@@ -1,92 +1,5 @@
 import mongoose from "mongoose";
 
-const answerOptionSchema = new mongoose.Schema(
-  {
-    label: {
-      type: String,
-      required: true,
-      trim: true,
-      maxlength: 256,
-    },
-    value: {
-      type: String,
-      required: true,
-      trim: true,
-      maxlength: 256,
-    },
-    order: {
-      type: Number,
-      default: 0,
-    },
-    isDefault: {
-      type: Boolean,
-      default: false,
-    },
-  },
-  { _id: true },
-);
-
-const questionSchema = new mongoose.Schema(
-  {
-    prompt: {
-      type: String,
-      required: true,
-      trim: true,
-      maxlength: 1000,
-    },
-    type: {
-      type: String,
-      enum: [
-        "short-answer",
-        "long-answer",
-        "multiple-choice",
-        "checkboxes",
-        "dropdown",
-        "number",
-        "date",
-        "email",
-        "phone",
-        "rating",
-      ],
-      required: true,
-      default: "short-answer",
-    },
-    isRequired: {
-      type: Boolean,
-      default: false,
-    },
-    helperText: {
-      type: String,
-      trim: true,
-      maxlength: 500,
-    },
-    order: {
-      type: Number,
-      default: 0,
-    },
-    isVisible: {
-      type: Boolean,
-      default: true,
-    },
-    options: {
-      type: [answerOptionSchema],
-      default: [],
-      validate: {
-        validator(options) {
-          // Types that require options
-          const optionRequiredTypes = ["multiple-choice", "checkboxes", "dropdown", "rating"];
-          if (optionRequiredTypes.includes(this.type)) {
-            return Array.isArray(options) && options.length > 0;
-          }
-          return true;
-        },
-        message: "This question type must have at least one answer option",
-      },
-    },
-  },
-  { _id: true, timestamps: true },
-);
-
 const masterDataSectionSchema = new mongoose.Schema(
   {
     name: {
@@ -122,10 +35,6 @@ const masterDataSectionSchema = new mongoose.Schema(
     isVisible: {
       type: Boolean,
       default: true,
-    },
-    questions: {
-      type: [questionSchema],
-      default: [],
     },
   },
   {
