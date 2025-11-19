@@ -383,6 +383,35 @@ function normalizeQuestions(questions) {
         }
       }
 
+      // Preserve optionMappings if they exist
+      if (question.optionMappings !== undefined && question.optionMappings !== null) {
+        if (Array.isArray(question.optionMappings)) {
+          const optionMappings = question.optionMappings
+            .map((mapping) => {
+              if (
+                typeof mapping === "object" &&
+                mapping !== null &&
+                typeof mapping.surveyOptionIndex === "number" &&
+                typeof mapping.masterQuestionId === "string" &&
+                mapping.masterQuestionId.trim() &&
+                typeof mapping.masterOptionValue === "string" &&
+                mapping.masterOptionValue.trim()
+              ) {
+                return {
+                  surveyOptionIndex: mapping.surveyOptionIndex,
+                  masterQuestionId: mapping.masterQuestionId.trim(),
+                  masterOptionValue: mapping.masterOptionValue.trim(),
+                };
+              }
+              return null;
+            })
+            .filter(Boolean);
+
+          // Include optionMappings even if empty array (to preserve the field)
+          normalized.optionMappings = optionMappings;
+        }
+      }
+
       return normalized;
     })
     .filter(Boolean);
@@ -1004,6 +1033,9 @@ app.post("/api/surveys", async (req, res) => {
       metadata,
     } = req.body ?? {};
 
+    // Debug: Log incoming questions to see optionMappings
+    console.log('Received questions:', JSON.stringify(questions, null, 2));
+
     // Convert metadata to Map if it's a plain object
     // Mongoose Map type can be set directly as an object, it will convert automatically
     let metadataValue = undefined;
@@ -1015,11 +1047,14 @@ app.post("/api/surveys", async (req, res) => {
       }
     }
 
+    const normalizedQuestions = normalizeQuestions(questions);
+    console.log('Normalized questions:', JSON.stringify(normalizedQuestions, null, 2));
+
     const surveyData = {
       title: sanitizeTitle(title),
       description: sanitizeDescription(description),
       status: sanitizeStatus(status),
-      questions: normalizeQuestions(questions),
+      questions: normalizedQuestions,
       assignedACs: sanitizeAssignedACs(assignedACs),
     };
 
@@ -1038,9 +1073,14 @@ app.post("/api/surveys", async (req, res) => {
       surveyData.metadata = metadataValue;
     }
 
+    console.log('Survey data to save:', JSON.stringify(surveyData, null, 2));
+    
     const survey = await Survey.create(surveyData);
+    
+    const savedSurvey = survey.toJSON();
+    console.log('Saved survey:', JSON.stringify(savedSurvey, null, 2));
 
-    return res.status(201).json(survey.toJSON());
+    return res.status(201).json(savedSurvey);
   } catch (error) {
     console.error("Error creating survey", error);
     console.error("Error details:", {
@@ -1093,12 +1133,19 @@ app.put("/api/surveys/:surveyId", async (req, res) => {
       metadata,
     } = req.body ?? {};
 
+    // Debug: Log incoming questions
+    console.log('Update - Received questions:', JSON.stringify(questions, null, 2));
+
     survey.title = sanitizeTitle(title ?? survey.title);
     survey.description = sanitizeDescription(
       description === undefined ? survey.description : description,
     );
     survey.status = sanitizeStatus(status ?? survey.status);
-    survey.questions = normalizeQuestions(questions ?? survey.questions);
+    
+    const normalizedQuestions = normalizeQuestions(questions ?? survey.questions);
+    console.log('Update - Normalized questions:', JSON.stringify(normalizedQuestions, null, 2));
+    survey.questions = normalizedQuestions;
+    
     survey.assignedACs =
       assignedACs !== undefined
         ? sanitizeAssignedACs(assignedACs)
@@ -1107,8 +1154,11 @@ app.put("/api/surveys/:surveyId", async (req, res) => {
       metadata && typeof metadata === "object" ? metadata : survey.metadata;
 
     await survey.save();
+    
+    const updatedSurvey = survey.toJSON();
+    console.log('Update - Saved survey:', JSON.stringify(updatedSurvey, null, 2));
 
-    return res.json(survey.toJSON());
+    return res.json(updatedSurvey);
   } catch (error) {
     console.error("Error updating survey", error);
     if (error.name === "ValidationError") {
@@ -3235,8 +3285,7 @@ app.post("/api/mapped-fields/apply-mapping", async (req, res) => {
         }
       }
       
-      // Apply mappings to create mapped fields
-      const mappedFields = [];
+      // Apply mappings to create mapped fields - each question mapping creates a separate entry
       const responseAnswers = surveyResponse.answers || surveyResponse.responses || {};
       
       for (const mappingItem of mapping.mappings) {
@@ -3273,7 +3322,8 @@ app.post("/api/mapped-fields/apply-mapping", async (req, res) => {
           }
         }
         
-        mappedFields.push({
+        // Create a single mapped field entry for this question mapping
+        const singleMappedField = {
           surveyQuestionId: mappingItem.surveyQuestionId,
           surveyQuestionText: mappingItem.surveyQuestionText,
           surveyResponseValue: originalValue,
@@ -3282,90 +3332,102 @@ app.post("/api/mapped-fields/apply-mapping", async (req, res) => {
           mappedValue: mappedValue,
           mappingType: mappingItem.mappingType,
           originalValue: originalValue,
-        });
-      }
-      
-      if (mappedFields.length === 0) {
-        continue;
-      }
-      
-      // Check if mapped field already exists for this combination
-      const existingMappedField = await MappedField.findOne({
-        voterId: voter?._id?.toString() || responseVoterId,
-        surveyId: mapping.surveyId,
-        surveyResponseId: surveyResponse._id.toString(),
-        masterDataSectionId: mapping.masterDataSectionId,
-      });
-      
-      if (existingMappedField) {
-        // Update existing
-        existingMappedField.mappedFields = mappedFields;
-        existingMappedField.mappedAt = new Date();
-        if (createdBy) existingMappedField.mappedBy = createdBy;
-        if (createdByRole) existingMappedField.mappedByRole = createdByRole;
-        
-        // Update voter/AC info if available
-        if (voter) {
-          existingMappedField.voterId = voter._id.toString();
-          existingMappedField.voterName = voter.name?.english || voter.name?.tamil || voter.name || '';
-          existingMappedField.voterNameTamil = voter.name?.tamil || '';
-          existingMappedField.voterID = voter.voterID || '';
-          existingMappedField.familyId = voter.family_id || '';
-          existingMappedField.mobile = voter.mobile || '';
-          existingMappedField.age = voter.age;
-          existingMappedField.gender = voter.gender || '';
-          existingMappedField.address = voter.address || '';
-          existingMappedField.guardian = voter.guardian || '';
-        }
-        
-        if (acInfo.acNumber) {
-          existingMappedField.acNumber = acInfo.acNumber;
-          existingMappedField.acName = acInfo.acName || '';
-          existingMappedField.aci_id = acInfo.aci_id;
-          existingMappedField.aci_name = acInfo.aci_name || '';
-        }
-        
-        if (voter) {
-          existingMappedField.boothId = voter.booth_id || '';
-          existingMappedField.boothName = voter.boothname || '';
-          existingMappedField.boothNumber = voter.boothno || '';
-        }
-        
-        await existingMappedField.save();
-        mappedFieldsArray.push(existingMappedField.toJSON());
-      } else {
-        // Create new
-        const mappedFieldData = {
-          voterId: voter?._id?.toString() || responseVoterId,
-          voterName: voter?.name?.english || voter?.name?.tamil || voter?.name || surveyResponse.voterName || surveyResponse.respondentName || '',
-          voterNameTamil: voter?.name?.tamil || '',
-          voterID: voter?.voterID || '',
-          familyId: voter?.family_id || '',
-          acNumber: acInfo.acNumber || acNumber || null,
-          acName: acInfo.acName || '',
-          aci_id: acInfo.aci_id,
-          aci_name: acInfo.aci_name || '',
-          boothId: voter?.booth_id || '',
-          boothName: voter?.boothname || '',
-          boothNumber: voter?.boothno || '',
-          surveyId: mapping.surveyId,
-          surveyTitle: mapping.surveyTitle,
-          surveyResponseId: surveyResponse._id.toString(),
-          masterDataSectionId: mapping.masterDataSectionId,
-          masterDataSectionName: mapping.masterDataSectionName,
-          mappingId: mapping._id.toString(),
-          mappedFields: mappedFields,
-          mobile: voter?.mobile || '',
-          age: voter?.age,
-          gender: voter?.gender || '',
-          address: voter?.address || '',
-          guardian: voter?.guardian || '',
-          mappedBy: createdBy,
-          mappedByRole: createdByRole,
         };
         
-        const mappedField = await MappedField.create(mappedFieldData);
-        mappedFieldsArray.push(mappedField.toJSON());
+        // Check if mapped field already exists for this specific question mapping
+        const existingMappedField = await MappedField.findOne({
+          voterId: voter?._id?.toString() || responseVoterId,
+          surveyId: mapping.surveyId,
+          surveyResponseId: surveyResponse._id.toString(),
+          masterDataSectionId: mapping.masterDataSectionId,
+          "mappedFields.surveyQuestionId": mappingItem.surveyQuestionId,
+          "mappedFields.masterDataQuestionId": mappingItem.masterDataQuestionId,
+        });
+        
+        if (existingMappedField) {
+          // Update existing - find the matching mapped field and update it
+          const mappedFieldIndex = existingMappedField.mappedFields.findIndex(
+            (mf) => mf.surveyQuestionId === mappingItem.surveyQuestionId &&
+                     mf.masterDataQuestionId === mappingItem.masterDataQuestionId
+          );
+          
+          if (mappedFieldIndex >= 0) {
+            existingMappedField.mappedFields[mappedFieldIndex] = singleMappedField;
+          } else {
+            existingMappedField.mappedFields.push(singleMappedField);
+          }
+          
+          existingMappedField.mappedAt = new Date();
+          if (createdBy) existingMappedField.mappedBy = createdBy;
+          if (createdByRole) existingMappedField.mappedByRole = createdByRole;
+          
+          // Update voter/AC info if available
+          if (voter) {
+            existingMappedField.voterId = voter._id.toString();
+            existingMappedField.voterName = voter.name?.english || voter.name?.tamil || voter.name || '';
+            existingMappedField.voterNameTamil = voter.name?.tamil || '';
+            existingMappedField.voterID = voter.voterID || '';
+            existingMappedField.familyId = voter.family_id || '';
+            existingMappedField.mobile = voter.mobile || '';
+            existingMappedField.age = voter.age;
+            existingMappedField.gender = voter.gender || '';
+            existingMappedField.address = voter.address || '';
+            existingMappedField.guardian = voter.guardian || '';
+          }
+          
+          if (acInfo.acNumber) {
+            existingMappedField.acNumber = acInfo.acNumber;
+            existingMappedField.acName = acInfo.acName || '';
+            existingMappedField.aci_id = acInfo.aci_id;
+            existingMappedField.aci_name = acInfo.aci_name || '';
+          }
+          
+          if (voter) {
+            existingMappedField.boothId = voter.booth_id || '';
+            existingMappedField.boothName = voter.boothname || '';
+            existingMappedField.boothNumber = voter.boothno || '';
+          }
+          
+          await existingMappedField.save();
+          
+          // Only add if not already in array
+          if (!mappedFieldsArray.find(mf => mf.id === existingMappedField._id.toString())) {
+            mappedFieldsArray.push(existingMappedField.toJSON());
+          }
+        } else {
+          // Create new document for this question mapping
+          const mappedFieldData = {
+            voterId: voter?._id?.toString() || responseVoterId,
+            voterName: voter?.name?.english || voter?.name?.tamil || voter?.name || surveyResponse.voterName || surveyResponse.respondentName || '',
+            voterNameTamil: voter?.name?.tamil || '',
+            voterID: voter?.voterID || '',
+            familyId: voter?.family_id || '',
+            acNumber: acInfo.acNumber || acNumber || null,
+            acName: acInfo.acName || '',
+            aci_id: acInfo.aci_id,
+            aci_name: acInfo.aci_name || '',
+            boothId: voter?.booth_id || '',
+            boothName: voter?.boothname || '',
+            boothNumber: voter?.boothno || '',
+            surveyId: mapping.surveyId,
+            surveyTitle: mapping.surveyTitle,
+            surveyResponseId: surveyResponse._id.toString(),
+            masterDataSectionId: mapping.masterDataSectionId,
+            masterDataSectionName: mapping.masterDataSectionName,
+            mappingId: mapping._id.toString(),
+            mappedFields: [singleMappedField], // Single mapping entry
+            mobile: voter?.mobile || '',
+            age: voter?.age,
+            gender: voter?.gender || '',
+            address: voter?.address || '',
+            guardian: voter?.guardian || '',
+            mappedBy: createdBy,
+            mappedByRole: createdByRole,
+          };
+          
+          const mappedField = await MappedField.create(mappedFieldData);
+          mappedFieldsArray.push(mappedField.toJSON());
+        }
       }
     }
     

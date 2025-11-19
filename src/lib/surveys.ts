@@ -2,12 +2,19 @@ import API_BASE_URL, { api } from "./api";
 
 export type SurveyStatus = "Draft" | "Active";
 
+export interface OptionMapping {
+  surveyOptionIndex: number;
+  masterQuestionId: string;
+  masterOptionValue: string;
+}
+
 export interface SurveyQuestion {
   id: string;
   text: string;
   type: string;
   required: boolean;
   options?: string[];
+  optionMappings?: OptionMapping[];
 }
 
 export interface Survey {

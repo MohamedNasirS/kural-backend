@@ -1,5 +1,27 @@
 import mongoose from "mongoose";
 
+const optionMappingSchema = new mongoose.Schema(
+  {
+    surveyOptionIndex: {
+      type: Number,
+      required: true,
+    },
+    masterQuestionId: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    masterOptionValue: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
 const questionSchema = new mongoose.Schema(
   {
     id: {
@@ -24,6 +46,11 @@ const questionSchema = new mongoose.Schema(
     options: {
       type: [String],
       default: undefined,
+    },
+    optionMappings: {
+      type: [optionMappingSchema],
+      default: undefined,
+      required: false,
     },
   },
   {
