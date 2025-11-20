@@ -642,12 +642,20 @@ router.put("/users/:userId", isAuthenticated, async (req, res) => {
 
 /**
  * DELETE /api/rbac/users/:userId
- * Soft delete a user
- * Access: L0 only
+ * Permanently delete a user from the database
+ * Access: L0 (all users), L1 (users they created)
  */
-router.delete("/users/:userId", isAuthenticated, canManageUsers, async (req, res) => {
+router.delete("/users/:userId", isAuthenticated, async (req, res) => {
   try {
     const { userId } = req.params;
+
+    // Check permissions
+    if (req.user.role !== "L0" && req.user.role !== "L1") {
+      return res.status(403).json({
+        success: false,
+        message: "You don't have permission to delete users",
+      });
+    }
 
     const user = await User.findById(userId);
     if (!user) {
@@ -657,9 +665,36 @@ router.delete("/users/:userId", isAuthenticated, canManageUsers, async (req, res
       });
     }
 
-    // Soft delete
-    user.isActive = false;
-    await user.save();
+    // L1 users can only delete users they created
+    if (req.user.role === "L1") {
+      const userCreatedBy = user.createdBy?.toString();
+      const currentUserId = req.user._id.toString();
+      
+      if (userCreatedBy !== currentUserId) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only delete users you created",
+        });
+      }
+    }
+
+    // If user is a booth agent, remove them from booth's assignedAgents before deletion
+    if (user.assignedBoothId) {
+      const booth = await Booth.findById(user.assignedBoothId);
+      if (booth) {
+        booth.assignedAgents = booth.assignedAgents.filter(
+          (agentId) => agentId.toString() !== userId
+        );
+        // If this was the primary agent, clear it
+        if (booth.primaryAgent && booth.primaryAgent.toString() === userId) {
+          booth.primaryAgent = null;
+        }
+        await booth.save();
+      }
+    }
+
+    // Permanently delete the user from the database
+    await User.findByIdAndDelete(userId);
 
     res.json({
       success: true,
