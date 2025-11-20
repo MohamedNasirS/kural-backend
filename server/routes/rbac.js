@@ -7,6 +7,7 @@ import express from "express";
 import bcrypt from "bcryptjs";
 import User from "../models/User.js";
 import Booth from "../models/Booth.js";
+import Voter from "../models/Voter.js";
 import {
   isAuthenticated,
   canManageUsers,
@@ -1334,6 +1335,170 @@ router.get("/dashboard/stats", isAuthenticated, validateACAccess, async (req, re
     res.status(500).json({
       success: false,
       message: "Failed to fetch dashboard statistics",
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/rbac/dashboard/ac-overview
+ * Batched AC performance stats to avoid hundreds of client requests
+ * Access: L0 (all ACs), L1/L2 (their AC only)
+ */
+router.get("/dashboard/ac-overview", isAuthenticated, async (req, res) => {
+  try {
+    const toNumber = (value) => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    const limitToAc =
+      req.user.role === "L1" || req.user.role === "L2"
+        ? toNumber(req.user.assignedAC ?? req.user.aci_id ?? req.user.ac_id)
+        : null;
+
+    if ((req.user.role === "L1" || req.user.role === "L2") && limitToAc === null) {
+      return res.status(403).json({
+        success: false,
+        message: "No AC assigned to your account.",
+      });
+    }
+
+    const voterMatch = limitToAc !== null
+      ? { aci_id: limitToAc }
+      : { aci_id: { $ne: null } };
+
+    const voterAggregation = await Voter.aggregate([
+      { $match: voterMatch },
+      {
+        $group: {
+          _id: { acId: "$aci_id", acName: "$aci_name" },
+          totalMembers: { $sum: 1 },
+          surveyedMembers: {
+            $sum: {
+              $cond: [
+                { $eq: ["$surveyed", true] },
+                1,
+                0,
+              ],
+            },
+          },
+        },
+      },
+      { $sort: { "_id.acId": 1 } },
+    ]);
+
+    const userMatch = {
+      isActive: { $ne: false },
+      role: { $in: ["L1", "L2", "Booth Agent", "BoothAgent"] },
+    };
+    if (limitToAc !== null) {
+      userMatch.assignedAC = limitToAc;
+    }
+
+    const users = await User.find(userMatch)
+      .select("role assignedAC")
+      .lean();
+
+    const perAcUserCounts = new Map();
+    const roleTotals = {
+      totalL1Admins: 0,
+      totalL2Moderators: 0,
+      totalL3Agents: 0,
+    };
+
+    users.forEach((user) => {
+      const acId = toNumber(user.assignedAC);
+      if (acId === null) {
+        return;
+      }
+      const bucket =
+        perAcUserCounts.get(acId) || { admins: 0, moderators: 0, agents: 0 };
+
+      if (user.role === "L1") {
+        bucket.admins += 1;
+        roleTotals.totalL1Admins += 1;
+      } else if (user.role === "L2") {
+        bucket.moderators += 1;
+        roleTotals.totalL2Moderators += 1;
+      } else if (user.role === "Booth Agent" || user.role === "BoothAgent") {
+        bucket.agents += 1;
+        roleTotals.totalL3Agents += 1;
+      }
+
+      perAcUserCounts.set(acId, bucket);
+    });
+
+    const acPerformance = voterAggregation.map((entry) => {
+      const acId = entry._id.acId;
+      const acName = entry._id.acName;
+      const counts = perAcUserCounts.get(acId) || {
+        admins: 0,
+        moderators: 0,
+        agents: 0,
+      };
+      const voters = entry.totalMembers || 0;
+      const surveyedMembers = entry.surveyedMembers || 0;
+      const completion =
+        voters > 0 ? Math.round((surveyedMembers / voters) * 1000) / 10 : 0;
+
+      return {
+        ac: acName ? `${acId ?? ""} - ${acName}` : `AC ${acId ?? ""}`,
+        acNumber: acId ?? null,
+        acName: acName || null,
+        voters,
+        surveyedMembers,
+        completion,
+        admins: counts.admins,
+        moderators: counts.moderators,
+        agents: counts.agents,
+      };
+    });
+
+    // Include ACs that only have user data (no voters yet)
+    perAcUserCounts.forEach((counts, acId) => {
+      if (!acPerformance.find((ac) => ac.acNumber === acId)) {
+        acPerformance.push({
+          ac: `AC ${acId}`,
+          acNumber: acId,
+          acName: null,
+          voters: 0,
+          surveyedMembers: 0,
+          completion: 0,
+          admins: counts.admins,
+          moderators: counts.moderators,
+          agents: counts.agents,
+        });
+      }
+    });
+
+    // Sort again after potential additions
+    acPerformance.sort((a, b) => {
+      const aId = a.acNumber ?? 0;
+      const bId = b.acNumber ?? 0;
+      return aId - bId;
+    });
+
+    const totals = {
+      ...roleTotals,
+      totalVoters: acPerformance.reduce((sum, ac) => sum + ac.voters, 0),
+      totalSurveyedMembers: acPerformance.reduce(
+        (sum, ac) => sum + (ac.surveyedMembers || 0),
+        0,
+      ),
+    };
+
+    res.json({
+      success: true,
+      totals,
+      acPerformance,
+      scope: limitToAc ?? "all",
+    });
+  } catch (error) {
+    console.error("Error building AC overview stats:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to build AC overview stats",
       error: error.message,
     });
   }

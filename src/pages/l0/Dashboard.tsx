@@ -13,7 +13,6 @@ import { LineChart, Line, BarChart, Bar, AreaChart, Area, XAxis, YAxis, Cartesia
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/api';
-import { CONSTITUENCIES } from '@/constants/constituencies';
 import { useToast } from '@/hooks/use-toast';
 
 interface ACPerformance {
@@ -24,6 +23,7 @@ interface ACPerformance {
   admins: number;
   moderators: number;
   agents: number;
+  surveyedMembers?: number;
 }
 
 interface DashboardStats {
@@ -68,61 +68,29 @@ export const L0Dashboard = () => {
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
-      
-      // Fetch user counts by role
-      const [l1Users, l2Users, boothAgents, dashboardStats] = await Promise.all([
-        api.get('/rbac/users?role=L1&status=Active'),
-        api.get('/rbac/users?role=L2&status=Active'),
-        api.get('/rbac/users?role=BoothAgent&status=Active'),
+      const [overviewResponse, dashboardStats] = await Promise.all([
+        api.get('/rbac/dashboard/ac-overview'),
         api.get('/rbac/dashboard/stats').catch(() => ({ stats: {} })),
       ]);
 
-      const totalL1Admins = l1Users.users?.length || 0;
-      const totalL2Moderators = l2Users.users?.length || 0;
-      const totalL3Agents = boothAgents.users?.length || 0;
+      const acPerformance: ACPerformance[] = (overviewResponse?.acPerformance || []).map((ac: any) => ({
+        ac: ac.ac || `AC ${ac.acNumber ?? ''}`,
+        acNumber: ac.acNumber ?? 0,
+        voters: ac.voters ?? 0,
+        completion: ac.completion ?? 0,
+        admins: ac.admins ?? 0,
+        moderators: ac.moderators ?? 0,
+        agents: ac.agents ?? 0,
+        surveyedMembers: ac.surveyedMembers ?? 0,
+      }));
 
-      // Fetch AC performance data for all constituencies
-      const acPerformancePromises = CONSTITUENCIES.map(async (ac) => {
-        try {
-          const acStats = await api.get(`/dashboard/stats/${ac.number}`);
-          const voters = acStats.totalMembers || acStats.totalVoters || 0;
-          const surveyed = acStats.surveyedMembers || 0;
-          const completion = voters > 0 ? ((surveyed / voters) * 100) : 0;
-
-          // Count users for this AC
-          const [acL1Users, acL2Users, acAgents] = await Promise.all([
-            api.get(`/rbac/users?role=L1&assignedAC=${ac.number}`).catch(() => ({ users: [] })),
-            api.get(`/rbac/users?role=L2&assignedAC=${ac.number}`).catch(() => ({ users: [] })),
-            api.get(`/rbac/users?role=BoothAgent&assignedAC=${ac.number}`).catch(() => ({ users: [] })),
-          ]);
-
-          return {
-            ac: `${ac.number} - ${ac.name}`,
-            acNumber: ac.number,
-            voters,
-            completion: Math.round(completion * 10) / 10,
-            admins: acL1Users.users?.length || 0,
-            moderators: acL2Users.users?.length || 0,
-            agents: acAgents.users?.length || 0,
-          };
-        } catch (error) {
-          console.error(`Error fetching stats for AC ${ac.number}:`, error);
-          return {
-            ac: `${ac.number} - ${ac.name}`,
-            acNumber: ac.number,
-            voters: 0,
-            completion: 0,
-            admins: 0,
-            moderators: 0,
-            agents: 0,
-          };
-        }
-      });
-
-      const acPerformance = await Promise.all(acPerformancePromises);
+      const totals = overviewResponse?.totals || {};
+      const totalL1Admins = totals.totalL1Admins ?? 0;
+      const totalL2Moderators = totals.totalL2Moderators ?? 0;
+      const totalL3Agents = totals.totalL3Agents ?? 0;
       
       // Calculate total voters
-      const totalVoters = acPerformance.reduce((sum, ac) => sum + ac.voters, 0);
+      const totalVoters = totals.totalVoters ?? acPerformance.reduce((sum, ac) => sum + ac.voters, 0);
 
       // Find highest voter AC, best completion AC, and needs attention AC
       const highestVoterAC = acPerformance.length > 0

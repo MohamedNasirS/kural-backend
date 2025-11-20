@@ -28,6 +28,7 @@ interface AuthContextType {
   login: (identifier: string, password: string) => Promise<LoginResult>;
   logout: () => void;
   isAuthenticated: boolean;
+  isCheckingSession: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -91,8 +92,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             try {
               const parsedUser = JSON.parse(storedUser);
               setUser(normalizeUser(parsedUser));
-              // Still verify with server, but don't clear on failure immediately
-              setIsCheckingSession(false);
             } catch (e) {
               console.error("Failed to parse stored user:", e);
             }
@@ -181,6 +180,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const data = await response.json();
       const authenticatedUser = normalizeUser(data.user as User);
       setUser(authenticatedUser);
+      setIsCheckingSession(false);
       return { success: true };
     } catch (error) {
       console.error("Login request failed", error);
@@ -199,6 +199,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }).catch(console.error);
     
     setUser(null);
+    setIsCheckingSession(false);
   };
 
   const value = useMemo(
@@ -206,9 +207,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       user,
       login,
       logout,
-      isAuthenticated: Boolean(user),
+      isAuthenticated: Boolean(user) && !isCheckingSession,
+      isCheckingSession,
     }),
-    [user],
+    [user, isCheckingSession],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
