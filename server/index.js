@@ -57,6 +57,10 @@ const SESSION_COOKIE_DOMAIN =
   process.env.SESSION_COOKIE_DOMAIN && process.env.SESSION_COOKIE_DOMAIN.trim()
     ? process.env.SESSION_COOKIE_DOMAIN.trim()
     : undefined;
+// In production with HTTPS, use 'none' for cross-origin, 'lax' for same-site
+// For admin.kuralapp.in, we likely need 'lax' if frontend and backend are on same domain
+// For production: 'none' if frontend/backend on different subdomains, 'lax' if same domain
+// 'none' requires secure: true (HTTPS)
 const SESSION_COOKIE_SAMESITE =
   process.env.SESSION_COOKIE_SAMESITE?.toLowerCase() || (isProduction ? "none" : "lax");
 
@@ -116,12 +120,13 @@ app.use(
     store: sessionStore,
     name: 'kural.sid', // Set a specific session cookie name
     cookie: {
-      secure: isProduction,
+      secure: isProduction, // true in production (HTTPS required)
       httpOnly: true,
       maxAge: 24 * 60 * 60 * 1000, // 24 hours
-      sameSite: SESSION_COOKIE_SAMESITE,
+      sameSite: SESSION_COOKIE_SAMESITE, // 'lax' for same-site, 'none' for cross-origin (requires secure: true)
       path: '/',
-      domain: SESSION_COOKIE_DOMAIN,
+      // Set domain to .kuralapp.in in production to share cookies across subdomains
+      domain: SESSION_COOKIE_DOMAIN || (isProduction ? '.kuralapp.in' : undefined),
     },
   })
 );
@@ -130,16 +135,19 @@ app.use(
 app.use((req, res, next) => {
   if (req.session && req.session.user) {
     req.user = req.session.user;
-    console.log('Session restored - User:', {
-      id: req.user.id || req.user._id,
-      role: req.user.role,
-      sessionId: req.sessionID
-    });
-  } else {
+    // Only log in development
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Session restored - User:', {
+        id: req.user.id || req.user._id,
+        role: req.user.role,
+        sessionId: req.sessionID
+      });
+    }
+  } else if (process.env.NODE_ENV === 'development') {
     console.log('No user in session:', {
       hasSession: !!req.session,
       sessionId: req.sessionID,
-      cookies: req.headers.cookie
+      hasCookies: !!req.headers.cookie
     });
   }
   next();
