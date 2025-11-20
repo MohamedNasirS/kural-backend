@@ -59,10 +59,11 @@ const SESSION_COOKIE_DOMAIN =
     : undefined;
 // In production with HTTPS, use 'none' for cross-origin, 'lax' for same-site
 // For admin.kuralapp.in, we likely need 'lax' if frontend and backend are on same domain
-// For production: 'none' if frontend/backend on different subdomains, 'lax' if same domain
-// 'none' requires secure: true (HTTPS)
+// For production: 'lax' if frontend/backend on same domain, 'none' if different subdomains
+// 'none' requires secure: true (HTTPS) and is less secure
+// Since both are on admin.kuralapp.in, use 'lax'
 const SESSION_COOKIE_SAMESITE =
-  process.env.SESSION_COOKIE_SAMESITE?.toLowerCase() || (isProduction ? "none" : "lax");
+  process.env.SESSION_COOKIE_SAMESITE?.toLowerCase() || (isProduction ? "lax" : "lax");
 
 function isLocalhostOrigin(origin) {
   try {
@@ -125,8 +126,10 @@ app.use(
       maxAge: 24 * 60 * 60 * 1000, // 24 hours
       sameSite: SESSION_COOKIE_SAMESITE, // 'lax' for same-site, 'none' for cross-origin (requires secure: true)
       path: '/',
-      // Set domain to .kuralapp.in in production to share cookies across subdomains
-      domain: SESSION_COOKIE_DOMAIN || (isProduction ? '.kuralapp.in' : undefined),
+      // Only set domain if explicitly provided via env var
+      // For same domain (admin.kuralapp.in), don't set domain (let browser use exact domain)
+      // Setting domain to .kuralapp.in would share cookies across subdomains, but may cause issues
+      domain: SESSION_COOKIE_DOMAIN || undefined,
     },
   })
 );
@@ -863,9 +866,12 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(500).json({ message: "Failed to create session" });
     }
 
-    console.log('Login successful - Session ID:', req.sessionID);
-    console.log('Login successful - User stored in session:', !!req.session.user);
-    console.log('Login successful - Cookie headers:', res.getHeader('Set-Cookie'));
+    // Log session creation (only in development)
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Login successful - Session ID:', req.sessionID);
+      console.log('Login successful - User stored in session:', !!req.session.user);
+      console.log('Login successful - Cookie headers:', res.getHeader('Set-Cookie'));
+    }
 
     return res.json({
       user: userSession,
