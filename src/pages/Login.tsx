@@ -120,9 +120,6 @@ export const Login = () => {
                   <input type="checkbox" className="h-4 w-4 rounded border border-input bg-background" />
                   Remember me
                 </label>
-                <button type="button" className="font-semibold text-primary transition-colors hover:text-primary/80">
-                  Recover password
-                </button>
               </div>
 
               <div className="space-y-3">
@@ -134,27 +131,9 @@ export const Login = () => {
                 >
                   {isLoading ? "Logging in..." : "Login"}
                 </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="lg"
-                  className="w-full"
-                  disabled={isLoading}
-                >
-                  Login with OTP
-                </Button>
               </div>
             </form>
 
-            <div className="mt-8 rounded-2xl border border-dashed border-primary/40 bg-primary/5 p-6 text-sm">
-              <p className="font-semibold text-primary">Demo credentials</p>
-              <div className="mt-3 grid gap-2 text-muted-foreground">
-                <p><span className="font-medium text-foreground">System Admin:</span> 9999999999 / Admin@123</p>
-                <p><span className="font-medium text-foreground">L1 Director:</span> acim@ac.com / acim123</p>
-                <p><span className="font-medium text-foreground">L2 Supervisor:</span> aci@ac118.com / aci123</p>
-                <p><span className="font-medium text-foreground">L9 Command:</span> warroom@system.com / wrm123</p>
-              </div>
-            </div>
           </Card>
         </div>
       </div>

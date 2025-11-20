@@ -8,6 +8,7 @@ import bcrypt from "bcryptjs";
 import User from "../models/User.js";
 import Booth from "../models/Booth.js";
 import Voter from "../models/Voter.js";
+import { resolveAssignedACFromUser } from "../utils/ac.js";
 import {
   isAuthenticated,
   canManageUsers,
@@ -1354,7 +1355,7 @@ router.get("/dashboard/ac-overview", isAuthenticated, async (req, res) => {
 
     const limitToAc =
       req.user.role === "L1" || req.user.role === "L2"
-        ? toNumber(req.user.assignedAC ?? req.user.aci_id ?? req.user.ac_id)
+        ? resolveAssignedACFromUser(req.user)
         : null;
 
     if ((req.user.role === "L1" || req.user.role === "L2") && limitToAc === null) {
@@ -1408,22 +1409,28 @@ router.get("/dashboard/ac-overview", isAuthenticated, async (req, res) => {
     };
 
     users.forEach((user) => {
-      const acId = toNumber(user.assignedAC);
+      if (user.role === "L1") {
+        roleTotals.totalL1Admins += 1;
+      } else if (user.role === "L2") {
+        roleTotals.totalL2Moderators += 1;
+      } else if (user.role === "Booth Agent" || user.role === "BoothAgent") {
+        roleTotals.totalL3Agents += 1;
+      }
+
+      const acId = resolveAssignedACFromUser(user);
       if (acId === null) {
         return;
       }
+
       const bucket =
         perAcUserCounts.get(acId) || { admins: 0, moderators: 0, agents: 0 };
 
       if (user.role === "L1") {
         bucket.admins += 1;
-        roleTotals.totalL1Admins += 1;
       } else if (user.role === "L2") {
         bucket.moderators += 1;
-        roleTotals.totalL2Moderators += 1;
       } else if (user.role === "Booth Agent" || user.role === "BoothAgent") {
         bucket.agents += 1;
-        roleTotals.totalL3Agents += 1;
       }
 
       perAcUserCounts.set(acId, bucket);
