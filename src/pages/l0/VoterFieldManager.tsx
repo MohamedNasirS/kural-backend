@@ -640,7 +640,7 @@ export const VoterFieldManager = () => {
             </div>
 
             {/* Existing Fields Reference Section */}
-            <Card className="border-blue-200 bg-blue-50/50">
+            <Card className="border-blue-200 bg-blue-50/50 dark:border-blue-900/40 dark:bg-blue-950/40">
               <div className="p-6">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
@@ -676,7 +676,7 @@ export const VoterFieldManager = () => {
                     Normalize Legacy Fields
                   </Button>
                 </div>
-                <p className="text-sm text-muted-foreground mb-4">
+                <p className="text-sm text-muted-foreground dark:text-slate-300 mb-4">
                   Fields currently found in voter documents with sample data. Click Edit to rename or change data type, or Delete to remove from all voters. Use "Normalize" if you still have legacy {'{ value, visible }'} objects stored inside voter documents.
                 </p>
                 
@@ -695,7 +695,10 @@ export const VoterFieldManager = () => {
                       const isCritical = false;
                       
                       return (
-                        <Card key={fieldName} className="p-3 bg-white">
+                        <Card
+                          key={fieldName}
+                          className="p-3 bg-white dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800 shadow-sm dark:shadow-none transition-colors"
+                        >
                           <div className="flex items-start justify-between mb-2">
                             <div className="flex-1">
                               <div className="flex items-center gap-2 mb-1">
@@ -704,16 +707,19 @@ export const VoterFieldManager = () => {
                                   <Badge variant="secondary" className="text-xs">In Schema</Badge>
                                 )}
                               </div>
-                              <Badge className={`text-xs ${getTypeColor(fieldInfo.type)}`}>
+                              <Badge className={`text-xs ${getTypeColor(fieldInfo.type)} dark:border-slate-700 dark:text-slate-200`}>
                                 {fieldInfo.type}
                               </Badge>
                             </div>
                           </div>
                           
                           {/* Visibility Toggle and Action Buttons */}
-                          <div className="flex items-center justify-between mt-2 pt-2 border-t">
+                          <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                             <div className="flex items-center gap-2">
-                              <Label htmlFor={`visibility-${fieldName}`} className="text-xs text-muted-foreground cursor-pointer">
+                              <Label
+                                htmlFor={`visibility-${fieldName}`}
+                                className="text-xs text-muted-foreground dark:text-slate-300 cursor-pointer"
+                              >
                                 Visible in Frontend:
                               </Label>
                               <Switch
@@ -723,7 +729,7 @@ export const VoterFieldManager = () => {
                                 title={fieldInfo.visible !== undefined && !fieldInfo.visible ? 'Field is hidden in frontend' : 'Field is visible in frontend'}
                               />
                               {fieldInfo.visible !== undefined && !fieldInfo.visible && (
-                                <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700">
+                                <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700 dark:bg-yellow-300/20 dark:text-yellow-200">
                                   Hidden
                                 </Badge>
                               )}
@@ -765,15 +771,18 @@ export const VoterFieldManager = () => {
                           
                           {fieldInfo.samples && fieldInfo.samples.length > 0 && (
                             <div className="mt-2 space-y-1">
-                              <p className="text-xs font-medium text-muted-foreground">Sample Values:</p>
+                              <p className="text-xs font-medium text-muted-foreground dark:text-slate-300">Sample Values:</p>
                               <div className="space-y-1">
                                 {fieldInfo.samples.slice(0, 3).map((sample: any, idx: number) => (
-                                  <div key={idx} className="text-xs text-muted-foreground bg-muted/50 p-1.5 rounded truncate">
+                                  <div
+                                    key={idx}
+                                    className="text-xs text-muted-foreground dark:text-slate-200 bg-muted/50 dark:bg-slate-800/70 p-1.5 rounded truncate"
+                                  >
                                     {sample.value !== null && sample.value !== undefined ? String(sample.value) : 'null'}
                                   </div>
                                 ))}
                                 {fieldInfo.samples.length > 3 && (
-                                  <p className="text-xs text-muted-foreground italic">
+                                  <p className="text-xs text-muted-foreground dark:text-slate-400 italic">
                                     +{fieldInfo.samples.length - 3} more...
                                   </p>
                                 )}
