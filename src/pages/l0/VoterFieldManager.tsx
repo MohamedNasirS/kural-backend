@@ -76,6 +76,23 @@ const AC_LIST = [
 // Reserved field names - EMPTY to allow full flexibility
 const RESERVED_FIELDS: string[] = [];
 
+// Helper function to unwrap legacy field values (extract value from {value, visible} objects)
+const unwrapLegacyFieldValue = (value: any): any => {
+  if (value === null || value === undefined) return value;
+  // Check if it's a legacy object with {value, visible} structure
+  if (typeof value === 'object' && !Array.isArray(value) && value !== null) {
+    // Check if it has the legacy structure
+    if ('value' in value && ('visible' in value || Object.keys(value).length === 1)) {
+      return value.value; // Extract the actual value
+    }
+    // Handle bilingual objects like {english, tamil}
+    if (value.english !== undefined || value.tamil !== undefined) {
+      return value; // Keep bilingual objects as-is
+    }
+  }
+  return value;
+};
+
 // Helper function to safely render values that might be objects (e.g., {english, tamil})
 const renderValue = (value: any): string => {
   if (value === null || value === undefined) return 'N/A';
@@ -83,6 +100,10 @@ const renderValue = (value: any): string => {
     // Handle bilingual objects like {english, tamil}
     if (value.english && value.tamil) {
       return value.english || value.tamil || 'N/A';
+    }
+    // Handle legacy {value, visible} objects
+    if ('value' in value && ('visible' in value || Object.keys(value).length === 1)) {
+      return renderValue(value.value); // Recursively unwrap
     }
     // Handle other objects
     return JSON.stringify(value);
@@ -243,12 +264,22 @@ export const VoterFieldManager = () => {
       // Fetch full voter details
       const fullVoterData = await api.get(`/voters/details/${voter.id}`);
       setSelectedVoter(voter);
-      setEditingVoterData({ ...fullVoterData });
+      // Unwrap legacy field values before setting
+      const unwrappedData: any = {};
+      Object.keys(fullVoterData).forEach(key => {
+        unwrappedData[key] = unwrapLegacyFieldValue(fullVoterData[key]);
+      });
+      setEditingVoterData(unwrappedData);
       setIsVoterEditDialogOpen(true);
     } catch (error) {
       // Fallback to basic voter data
       setSelectedVoter(voter);
-      setEditingVoterData({ ...voter });
+      // Unwrap legacy field values before setting
+      const unwrappedData: any = {};
+      Object.keys(voter).forEach(key => {
+        unwrappedData[key] = unwrapLegacyFieldValue(voter[key]);
+      });
+      setEditingVoterData(unwrappedData);
       setIsVoterEditDialogOpen(true);
     }
   };
@@ -760,89 +791,6 @@ export const VoterFieldManager = () => {
                 )}
               </div>
             </Card>
-
-            {loading ? (
-              <Card className="p-8 text-center">
-                <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-r-transparent"></div>
-                <p className="mt-4 text-muted-foreground">Loading fields...</p>
-              </Card>
-            ) : (
-              <Card>
-                <div className="p-6">
-                  <div className="flex items-center gap-2 mb-6">
-                    <Database className="h-5 w-5 text-primary" />
-                    <h2 className="text-2xl font-semibold">Defined Field Schema</h2>
-                    <Badge variant="outline" className="ml-2">
-                      {fields.length} {fields.length === 1 ? 'field' : 'fields'}
-                    </Badge>
-                  </div>
-
-                  {fields.length === 0 ? (
-                    <div className="text-center py-12">
-                      <Database className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                      <p className="text-muted-foreground mb-4">No custom fields defined</p>
-                      <Button onClick={handleAddField} variant="outline">
-                        <Plus className="h-4 w-4 mr-2" />
-                        Add Your First Field
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {fields.map((field) => (
-                        <Card key={field.name} className="p-4 hover:shadow-md transition-shadow">
-                          <div className="flex items-start justify-between mb-3">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-1">
-                                <h3 className="font-semibold text-lg">{field.name}</h3>
-                                {field.required && (
-                                  <Badge variant="destructive" className="text-xs">Required</Badge>
-                                )}
-                              </div>
-                              <Badge className={getTypeColor(field.type)}>
-                                {field.type}
-                              </Badge>
-                            </div>
-                            <div className="flex gap-1">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleEditField(field)}
-                              >
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleDeleteField(field.name)}
-                                className="text-destructive hover:text-destructive"
-                                title={`Delete field "${field.name}" from ALL voters`}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </div>
-                          {field.label && (
-                            <p className="text-sm text-muted-foreground mb-2">
-                              <strong>Label:</strong> {field.label}
-                            </p>
-                          )}
-                          {field.description && (
-                            <p className="text-sm text-muted-foreground mb-2">
-                              {field.description}
-                            </p>
-                          )}
-                          {field.default !== undefined && field.default !== '' && (
-                            <p className="text-xs text-muted-foreground">
-                              <strong>Default:</strong> {String(field.default)}
-                            </p>
-                          )}
-                        </Card>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </Card>
-            )}
           </TabsContent>
 
           <TabsContent value="voters" className="space-y-6">
@@ -1370,7 +1318,8 @@ export const VoterFieldManager = () => {
                     <h3 className="font-semibold text-lg border-b pb-2">Custom Fields</h3>
                     <div className="grid grid-cols-2 gap-4">
                       {fields.filter(f => !f.isReserved).map((field) => {
-                        const fieldValue = editingVoterData[field.name];
+                        const rawFieldValue = editingVoterData[field.name];
+                        const fieldValue = unwrapLegacyFieldValue(rawFieldValue);
                         return (
                           <div key={field.name} className="space-y-2">
                             <Label htmlFor={`custom_${field.name}`}>
@@ -1399,7 +1348,7 @@ export const VoterFieldManager = () => {
                               <Input
                                 id={`custom_${field.name}`}
                                 type="number"
-                                value={fieldValue || ''}
+                                value={fieldValue !== null && fieldValue !== undefined ? String(fieldValue) : ''}
                                 onChange={(e) => setEditingVoterData({
                                   ...editingVoterData,
                                   [field.name]: e.target.value ? Number(e.target.value) : undefined
@@ -1499,12 +1448,22 @@ export const VoterFieldManager = () => {
                           !fields.find(f => f.name === key); // Exclude fields already shown in custom fields section
                       })
                       .map(([key, value]) => {
-                        // Determine field type based on value
+                        // Unwrap legacy field values first
+                        const unwrappedValue = unwrapLegacyFieldValue(value);
+                        
+                        // Determine field type based on unwrapped value
                         let inferredType: 'String' | 'Number' | 'Boolean' | 'Date' | 'Object' = 'String';
-                        if (typeof value === 'number') inferredType = 'Number';
-                        else if (typeof value === 'boolean') inferredType = 'Boolean';
-                        else if (value instanceof Date || (typeof value === 'string' && !isNaN(Date.parse(value)) && value.includes('-'))) inferredType = 'Date';
-                        else if (typeof value === 'object' && value !== null) inferredType = 'Object';
+                        if (typeof unwrappedValue === 'number') inferredType = 'Number';
+                        else if (typeof unwrappedValue === 'boolean') inferredType = 'Boolean';
+                        else if (unwrappedValue instanceof Date || (typeof unwrappedValue === 'string' && !isNaN(Date.parse(unwrappedValue)) && unwrappedValue.includes('-'))) inferredType = 'Date';
+                        else if (typeof unwrappedValue === 'object' && unwrappedValue !== null && !Array.isArray(unwrappedValue)) {
+                          // Check if it's a bilingual object
+                          if (unwrappedValue.english !== undefined || unwrappedValue.tamil !== undefined) {
+                            inferredType = 'Object';
+                          } else {
+                            inferredType = 'Object';
+                          }
+                        }
 
                         return (
                           <div key={key} className="space-y-2">
@@ -1526,7 +1485,7 @@ export const VoterFieldManager = () => {
                             </div>
                             {inferredType === 'Boolean' ? (
                               <Select
-                                value={value === undefined ? '' : String(value)}
+                                value={unwrappedValue === undefined ? '' : String(unwrappedValue)}
                                 onValueChange={(val) => {
                                   setEditingVoterData({
                                     ...editingVoterData,
@@ -1546,7 +1505,7 @@ export const VoterFieldManager = () => {
                               <Input
                                 id={`dynamic_${key}`}
                                 type="number"
-                                value={value !== null && value !== undefined ? String(value) : ''}
+                                value={unwrappedValue !== null && unwrappedValue !== undefined ? String(unwrappedValue) : ''}
                                 onChange={(e) => {
                                   const numValue = e.target.value ? Number(e.target.value) : undefined;
                                   setEditingVoterData({
@@ -1559,7 +1518,7 @@ export const VoterFieldManager = () => {
                               <Input
                                 id={`dynamic_${key}`}
                                 type="date"
-                                value={value ? (typeof value === 'string' ? value.split('T')[0] : new Date(value).toISOString().split('T')[0]) : ''}
+                                value={unwrappedValue ? (typeof unwrappedValue === 'string' ? unwrappedValue.split('T')[0] : new Date(unwrappedValue).toISOString().split('T')[0]) : ''}
                                 onChange={(e) => {
                                   setEditingVoterData({
                                     ...editingVoterData,
@@ -1571,7 +1530,7 @@ export const VoterFieldManager = () => {
                               <div className="space-y-2">
                                 <Input
                                   id={`dynamic_${key}`}
-                                  value={value !== null && value !== undefined ? (typeof value === 'object' ? JSON.stringify(value) : String(value)) : ''}
+                                  value={unwrappedValue !== null && unwrappedValue !== undefined ? (typeof unwrappedValue === 'object' ? JSON.stringify(unwrappedValue) : String(unwrappedValue)) : ''}
                                   onChange={(e) => {
                                     try {
                                       const parsed = JSON.parse(e.target.value);
@@ -1589,12 +1548,12 @@ export const VoterFieldManager = () => {
                                   }}
                                   placeholder="Enter JSON object (e.g., {'english': 'value', 'tamil': 'value'})"
                                 />
-                                {typeof value === 'object' && value !== null && (
+                                {typeof unwrappedValue === 'object' && unwrappedValue !== null && (
                                   <div className="text-xs text-muted-foreground">
-                                    {value.english && value.tamil ? (
-                                      <span>English: {value.english} | Tamil: {value.tamil}</span>
+                                    {unwrappedValue.english && unwrappedValue.tamil ? (
+                                      <span>English: {unwrappedValue.english} | Tamil: {unwrappedValue.tamil}</span>
                                     ) : (
-                                      <span>Object: {JSON.stringify(value)}</span>
+                                      <span>Object: {JSON.stringify(unwrappedValue)}</span>
                                     )}
                                   </div>
                                 )}
@@ -1602,7 +1561,7 @@ export const VoterFieldManager = () => {
                             ) : (
                               <Input
                                 id={`dynamic_${key}`}
-                                value={value !== null && value !== undefined ? String(value) : ''}
+                                value={unwrappedValue !== null && unwrappedValue !== undefined ? String(unwrappedValue) : ''}
                                 onChange={(e) => setEditingVoterData({
                                   ...editingVoterData,
                                   [key]: e.target.value

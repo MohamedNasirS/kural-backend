@@ -62,7 +62,7 @@ const generateMockNotifications = (userId: string, userRole: string): Notificati
         timestamp: new Date(now.getTime() - 30 * 60000),
         read: true,
         userId,
-        actionUrl: '/l0/admins'
+        actionUrl: '/l0/users'
       }
     );
   } else if (userRole === 'L1') {

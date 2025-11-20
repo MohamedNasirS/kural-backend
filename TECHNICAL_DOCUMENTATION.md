@@ -431,7 +431,7 @@ All components use `class-variance-authority` (CVA) for variant management and `
 - Tabbed interface for different views
 
 **Sub-pages:**
-- Admin Management (`/l0/admins`)
+- User Management (`/l0/users`) - Manages all users including ACIM (L1), ACI (L2), and Booth Agents
 - Voter Data (`/l0/voters`)
 - Survey Bank (`/l0/surveys`)
 - Form Builder (`/l0/surveys/builder/:formId`)

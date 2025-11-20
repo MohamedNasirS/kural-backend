@@ -27,7 +27,6 @@ import { BoothManagement } from "@/pages/shared/BoothManagement";
 import { BoothAgentManagementNew } from "@/pages/shared/BoothAgentManagementNew";
 import BoothAgentRegistration from "@/pages/shared/BoothAgentRegistration";
 import { L0Dashboard } from "@/pages/l0/Dashboard";
-import { AdminManagement } from "@/pages/l0/AdminManagement";
 import { AppSettings } from "@/pages/l0/AppSettings";
 import { VoterData } from "@/pages/l0/VoterData";
 import { VoterFieldManager } from "@/pages/l0/VoterFieldManager";
@@ -107,7 +106,6 @@ const AppRoutes = () => {
       {/* L0 Routes */}
       <Route path="/l0/dashboard" element={<ProtectedRoute allowedRoles={['L0']}><L0Dashboard /></ProtectedRoute>} />
       <Route path="/l0/users" element={<ProtectedRoute allowedRoles={['L0']}><UserManagement /></ProtectedRoute>} />
-      <Route path="/l0/admins" element={<ProtectedRoute allowedRoles={['L0']}><AdminManagement /></ProtectedRoute>} />
       <Route path="/l0/settings" element={<ProtectedRoute allowedRoles={['L0']}><AppSettings /></ProtectedRoute>} />
       <Route path="/l0/voters" element={<ProtectedRoute allowedRoles={['L0']}><VoterData /></ProtectedRoute>} />
       <Route path="/l0/voter-fields" element={<ProtectedRoute allowedRoles={['L0']}><VoterFieldManager /></ProtectedRoute>} />

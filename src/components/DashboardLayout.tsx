@@ -77,7 +77,6 @@ const AppSidebar = () => {
         return [
           { icon: LayoutDashboard, label: 'System Dashboard', path: '/l0/dashboard' },
           { icon: Users, label: 'User Management', path: '/l0/users' },
-          { icon: UserCog, label: 'Admin Management', path: '/l0/admins' },
           { icon: Users, label: 'Voter Data', path: '/l0/voters' },
           { icon: Database, label: 'Voter Field Manager', path: '/l0/voter-fields' },
           { icon: Layers, label: 'Master Data', path: '/l0/master-data' },
