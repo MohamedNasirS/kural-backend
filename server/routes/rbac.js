@@ -5,9 +5,11 @@
 
 import express from "express";
 import bcrypt from "bcryptjs";
+import mongoose from "mongoose";
 import User from "../models/User.js";
 import Booth from "../models/Booth.js";
 import Voter from "../models/Voter.js";
+import Survey from "../models/Survey.js";
 import { resolveAssignedACFromUser } from "../utils/ac.js";
 import {
   isAuthenticated,
@@ -21,6 +23,307 @@ import {
 } from "../middleware/auth.js";
 
 const router = express.Router();
+
+const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+const getSurveyResponseModel = () => {
+  if (mongoose.models.SurveyResponse) {
+    return mongoose.models.SurveyResponse;
+  }
+  return mongoose.model(
+    "SurveyResponse",
+    new mongoose.Schema({}, { strict: false, collection: "surveyresponses" }),
+  );
+};
+
+const isNamespaceMissingError = (error) =>
+  error?.codeName === "NamespaceNotFound" ||
+  error?.message?.toLowerCase?.().includes("ns not found");
+
+const startOfDay = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+const startOfWeek = (date) => {
+  const start = startOfDay(date);
+  const day = start.getDay(); // Sunday = 0
+  start.setDate(start.getDate() - day);
+  return start;
+};
+
+const createMonthBuckets = (count = 5) => {
+  const buckets = [];
+  const now = new Date();
+  for (let i = count - 1; i >= 0; i -= 1) {
+    const reference = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const start = new Date(reference.getFullYear(), reference.getMonth(), 1);
+    const end = new Date(reference.getFullYear(), reference.getMonth() + 1, 1);
+    buckets.push({
+      label: `${MONTH_LABELS[start.getMonth()]} ${String(start.getFullYear()).slice(-2)}`,
+      year: start.getFullYear(),
+      month: start.getMonth() + 1,
+      start,
+      end,
+    });
+  }
+  return buckets;
+};
+
+const createWeekBuckets = (count = 6) => {
+  const buckets = [];
+  const currentWeekStart = startOfWeek(new Date());
+  for (let i = count - 1; i >= 0; i -= 1) {
+    const start = new Date(currentWeekStart);
+    start.setDate(start.getDate() - i * 7);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 7);
+    buckets.push({
+      label: `Week of ${start.toLocaleDateString("en-IN", { month: "short", day: "2-digit" })}`,
+      start,
+      end,
+    });
+  }
+  return buckets;
+};
+
+const createDayBuckets = (count = 7) => {
+  const buckets = [];
+  const todayStart = startOfDay(new Date());
+  for (let i = count - 1; i >= 0; i -= 1) {
+    const start = new Date(todayStart);
+    start.setDate(start.getDate() - i);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+    buckets.push({
+      label: start.toLocaleDateString("en-IN", { weekday: "short" }),
+      start,
+      end,
+    });
+  }
+  return buckets;
+};
+
+const formatHourWindow = (hour) => {
+  if (!Number.isFinite(hour) || hour < 0) {
+    return null;
+  }
+  const normalize = (value) => (value % 12 === 0 ? 12 : value % 12);
+  const suffix = (value) => (value < 12 ? "AM" : "PM");
+  const endHour = (hour + 1) % 24;
+  return `${normalize(hour)} ${suffix(hour)} - ${normalize(endHour)} ${suffix(endHour)}`;
+};
+
+const aggregateCountsByMonth = async (model, baseMatch, buckets, dateField = "createdAt") => {
+  if (!model || buckets.length === 0) {
+    return [];
+  }
+
+  const matchStage = {
+    ...baseMatch,
+    [dateField]: {
+      $gte: buckets[0].start,
+      $lt: buckets[buckets.length - 1].end,
+    },
+  };
+
+  const results = await model.aggregate([
+    { $match: matchStage },
+    {
+      $group: {
+        _id: {
+          year: { $year: `$${dateField}` },
+          month: { $month: `$${dateField}` },
+        },
+        count: { $sum: 1 },
+      },
+    },
+  ]);
+
+  const lookup = new Map(
+    results.map((item) => [`${item._id.year}-${item._id.month}`, item.count]),
+  );
+
+  return buckets.map((bucket) => lookup.get(`${bucket.year}-${bucket.month}`) || 0);
+};
+
+const buildDashboardAnalytics = async ({ assignedAC, totalBooths, boothsActive }) => {
+  const monthBuckets = createMonthBuckets(5);
+  const weekBuckets = createWeekBuckets(6);
+  const dayBuckets = createDayBuckets(7);
+
+  const voterMatch = assignedAC !== null ? { aci_id: assignedAC } : {};
+  const surveyMatch = assignedAC !== null ? { assignedACs: assignedAC } : {};
+  const agentMatch =
+    assignedAC !== null
+      ? { assignedAC, role: { $in: ["Booth Agent", "BoothAgent"] } }
+      : { role: { $in: ["Booth Agent", "BoothAgent"] } };
+  const dayUserMatch =
+    assignedAC !== null
+      ? { assignedAC, role: { $in: ["L1", "L2", "Booth Agent", "BoothAgent"] } }
+      : { role: { $in: ["L1", "L2", "Booth Agent", "BoothAgent"] } };
+
+  const weekRangeStart = weekBuckets[0].start;
+  const weekRangeEnd = weekBuckets[weekBuckets.length - 1].end;
+  const surveyResponseDateFilter = {
+    $or: [
+      { createdAt: { $gte: weekRangeStart, $lt: weekRangeEnd } },
+      { submittedAt: { $gte: weekRangeStart, $lt: weekRangeEnd } },
+      { updatedAt: { $gte: weekRangeStart, $lt: weekRangeEnd } },
+    ],
+  };
+  const acFilter =
+    assignedAC !== null
+      ? {
+          $or: [
+            { aci_id: assignedAC },
+            { aci_num: assignedAC },
+            { acId: assignedAC },
+            { assignedAC },
+            { "metadata.acId": assignedAC },
+          ],
+        }
+      : null;
+  const surveyResponseMatch =
+    acFilter !== null
+      ? { $and: [surveyResponseDateFilter, acFilter] }
+      : surveyResponseDateFilter;
+
+  const [voterMonthlyCounts, surveyMonthlyCounts, agentMonthlyCounts] = await Promise.all([
+    aggregateCountsByMonth(Voter, voterMatch, monthBuckets, "createdAt"),
+    aggregateCountsByMonth(Survey, surveyMatch, monthBuckets, "createdAt"),
+    aggregateCountsByMonth(User, agentMatch, monthBuckets, "createdAt"),
+  ]);
+
+  const dayRangeStart = dayBuckets[0].start;
+  const recentUsers = await User.find({
+    ...dayUserMatch,
+    createdAt: { $gte: dayRangeStart },
+  })
+    .select({ role: 1, createdAt: 1 })
+    .lean();
+
+  let surveyResponses = [];
+  try {
+    surveyResponses = await getSurveyResponseModel()
+      .find(surveyResponseMatch)
+      .select({ createdAt: 1, submittedAt: 1, updatedAt: 1, status: 1 })
+      .lean();
+  } catch (error) {
+    if (!isNamespaceMissingError(error)) {
+      throw error;
+    }
+  }
+
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const formsCreatedLast30Days = await Survey.countDocuments({
+    ...surveyMatch,
+    createdAt: { $gte: thirtyDaysAgo },
+  });
+
+  const systemGrowthData = monthBuckets.map((bucket, index) => ({
+    month: bucket.label,
+    voters: voterMonthlyCounts[index] || 0,
+    surveys: surveyMonthlyCounts[index] || 0,
+    agents: agentMonthlyCounts[index] || 0,
+  }));
+
+  const weeklyBucketsData = weekBuckets.map((bucket) => ({
+    ...bucket,
+    completed: 0,
+    pending: 0,
+  }));
+  const hourBuckets = Array(24).fill(0);
+
+  surveyResponses.forEach((response) => {
+    const timestamp =
+      response.createdAt || response.submittedAt || response.updatedAt;
+    if (!timestamp) {
+      return;
+    }
+    const time = new Date(timestamp);
+    const target = weeklyBucketsData.find(
+      (bucket) => time >= bucket.start && time < bucket.end,
+    );
+    if (!target) {
+      return;
+    }
+    const isCompleted = String(response.status || "").toLowerCase() === "completed";
+    if (isCompleted) {
+      target.completed += 1;
+    } else {
+      target.pending += 1;
+    }
+    const hour = time.getHours();
+    if (Number.isFinite(hour)) {
+      hourBuckets[hour] += 1;
+    }
+  });
+
+  const surveyDistribution = weeklyBucketsData.map((bucket) => ({
+    category: bucket.label,
+    completed: bucket.completed,
+    pending: bucket.pending,
+  }));
+
+  const adminActivityBuckets = dayBuckets.map((bucket) => ({
+    ...bucket,
+    l1: 0,
+    l2: 0,
+    l3: 0,
+  }));
+
+  recentUsers.forEach((user) => {
+    const createdAt = user.createdAt ? new Date(user.createdAt) : null;
+    if (!createdAt) {
+      return;
+    }
+    const bucket = adminActivityBuckets.find(
+      (entry) => createdAt >= entry.start && createdAt < entry.end,
+    );
+    if (!bucket) {
+      return;
+    }
+    if (user.role === "L1") {
+      bucket.l1 += 1;
+    } else if (user.role === "L2") {
+      bucket.l2 += 1;
+    } else if (user.role === "Booth Agent" || user.role === "BoothAgent") {
+      bucket.l3 += 1;
+    }
+  });
+
+  const adminActivityData = adminActivityBuckets.map((bucket) => ({
+    day: bucket.label,
+    l1: bucket.l1,
+    l2: bucket.l2,
+    l3: bucket.l3,
+  }));
+
+  const totalActivity = adminActivityData.reduce(
+    (sum, row) => sum + row.l1 + row.l2 + row.l3,
+    0,
+  );
+  const avgDailyLogins =
+    adminActivityData.length > 0
+      ? Math.round((totalActivity / adminActivityData.length) * 10) / 10
+      : null;
+  const peakHourCount = Math.max(...hourBuckets);
+  const peakHourIndex = peakHourCount > 0 ? hourBuckets.indexOf(peakHourCount) : null;
+
+  const trendSummary = {
+    avgDailyLogins,
+    peakHourActivity: peakHourIndex !== null ? formatHourWindow(peakHourIndex) : null,
+    formsCreatedLast30Days,
+    boothsActive,
+    boothsTotal: totalBooths,
+  };
+
+  return {
+    systemGrowthData,
+    surveyDistribution,
+    adminActivityData,
+    trendSummary,
+  };
+};
 
 // ==================== USER MANAGEMENT ROUTES ====================
 // L0 can manage all users, L1 (ACIM) can create L2 (ACI) and BoothAgents
@@ -1284,20 +1587,18 @@ router.put("/booth-agents/:agentId/assign-booth", isAuthenticated, canAssignAgen
  */
 router.get("/dashboard/stats", isAuthenticated, validateACAccess, async (req, res) => {
   try {
-    let boothQuery = { isActive: true };
-    let userQuery = { isActive: true };
-
-    // Apply AC filter for L1/L2
-    boothQuery = applyACFilter(req.user, boothQuery);
-    if (req.user.role === "L1" || req.user.role === "L2") {
-      userQuery.assignedAC = req.user.assignedAC;
-    }
+    const assignedAC = req.user.role === "L0" ? null : resolveAssignedACFromUser(req.user);
+    const boothQuery = assignedAC !== null ? { isActive: true, ac_id: assignedAC } : { isActive: true };
+    const userQuery = assignedAC !== null ? { isActive: true, assignedAC } : { isActive: true };
+    const agentRoleFilter = {
+      $or: [{ role: "Booth Agent" }, { role: "BoothAgent" }],
+    };
 
     // Get counts
     const totalBooths = await Booth.countDocuments(boothQuery);
     const totalAgents = await User.countDocuments({
       ...userQuery,
-      role: "Booth Agent",
+      ...agentRoleFilter,
     });
 
     // Get assigned agents count
@@ -1310,12 +1611,16 @@ router.get("/dashboard/stats", isAuthenticated, validateACAccess, async (req, re
         assignedAgentIds.add(agentId.toString());
       });
     });
+    const boothsActive = boothsWithAgents.filter(
+      (booth) => Array.isArray(booth.assignedAgents) && booth.assignedAgents.length > 0,
+    ).length;
 
     const stats = {
       totalBooths,
       totalAgents,
       assignedAgents: assignedAgentIds.size,
-      unassignedAgents: totalAgents - assignedAgentIds.size,
+      unassignedAgents: Math.max(totalAgents - assignedAgentIds.size, 0),
+      boothsActive,
     };
 
     // L0 gets additional user counts
@@ -1327,9 +1632,18 @@ router.get("/dashboard/stats", isAuthenticated, validateACAccess, async (req, re
       stats.totalUsers = await User.countDocuments(userQuery);
     }
 
+    const analytics = await buildDashboardAnalytics({
+      assignedAC,
+      totalBooths,
+      boothsActive,
+    });
+
     res.json({
       success: true,
-      stats,
+      stats: {
+        ...stats,
+        ...analytics,
+      },
     });
   } catch (error) {
     console.error("Error fetching dashboard stats:", error);
