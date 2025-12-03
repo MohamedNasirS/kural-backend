@@ -68,7 +68,7 @@ const boothSchema = new mongoose.Schema(
 
 // Compound indexes for efficient queries
 boothSchema.index({ ac_id: 1, boothNumber: 1 });
-boothSchema.index({ boothCode: 1 }, { unique: true });
+// Note: boothCode unique index is already defined in schema field definition (unique: true)
 boothSchema.index({ assignedAgents: 1 });
 
 // Ensure booth codes are unique per AC

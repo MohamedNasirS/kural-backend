@@ -12,6 +12,21 @@ import User from "./models/User.js";
 import Survey from "./models/Survey.js";
 import Voter from "./models/Voter.js";
 import Booth from "./models/Booth.js";
+
+// Import voter collection utilities for sharded voter data
+import {
+  getVoterModel,
+  countVoters,
+  queryVoters,
+  aggregateVoters,
+  findVoterById,
+  findVoterByIdAndUpdate,
+  countAllVoters,
+  queryAllVoters,
+  findOneVoter,
+  aggregateAllVoters,
+  ALL_AC_IDS
+} from "./utils/voterCollection.js";
 import VoterField from "./models/VoterField.js";
 import MasterDataSection from "./models/MasterDataSection.js";
 import MasterQuestion from "./models/MasterQuestion.js";
@@ -1285,7 +1300,28 @@ app.get("/api/dashboard/stats/:acId", async (req, res) => {
     );
     const hasNumericIdentifier = Number.isFinite(numericFromIdentifier);
 
-    const acMeta = await Voter.findOne(acQuery, {
+    // Use the AC-specific voter collection - we need a numeric AC ID
+    let acId;
+    if (hasNumericIdentifier) {
+      acId = numericFromIdentifier;
+    } else {
+      // For name-based lookup, we need to search across collections to find the AC ID
+      const voterResult = await findOneVoter({
+        $or: [
+          { aci_name: new RegExp(`^${identifierString}$`, 'i') },
+          { ac_name: new RegExp(`^${identifierString}$`, 'i') }
+        ]
+      });
+      if (voterResult && voterResult.voter) {
+        acId = voterResult.voter.aci_id || voterResult.voter.aci_num;
+      }
+      if (!acId) {
+        return res.status(400).json({ message: `AC not found: ${identifierString}` });
+      }
+    }
+    const VoterModel = getVoterModel(acId);
+
+    const acMeta = await VoterModel.findOne({}, {
       aci_name: 1,
       ac_name: 1,
       aci_num: 1,
@@ -1303,12 +1339,12 @@ app.get("/api/dashboard/stats/:acId", async (req, res) => {
       acMeta?.aci_id ??
       (hasNumericIdentifier ? numericFromIdentifier : null);
 
-    // Get total members (voters) for this AC
-    const totalMembers = await Voter.countDocuments(acQuery);
+    // Get total members (voters) for this AC - use sharded collection
+    const totalMembers = await countVoters(acId, {});
 
     // Get unique families by grouping voters with same address and guardian
-    const familiesAggregation = await Voter.aggregate([
-      { $match: acQuery },
+    const familiesAggregation = await aggregateVoters(acId, [
+      { $match: {} },
       {
         $group: {
           _id: {
@@ -1323,22 +1359,19 @@ app.get("/api/dashboard/stats/:acId", async (req, res) => {
     const totalFamilies = familiesAggregation.length > 0 ? familiesAggregation[0].total : 0;
 
     // Surveys Completed: Count all members who have surveyed: true
-    const surveysCompleted = await Voter.countDocuments({
-      ...acQuery,
-      surveyed: true
-    });
+    const surveysCompleted = await countVoters(acId, { surveyed: true });
 
     // Get unique booths for this AC
-    const boothsAggregation = await Voter.aggregate([
-      { $match: acQuery },
+    const boothsAggregation = await aggregateVoters(acId, [
+      { $match: {} },
       { $group: { _id: "$boothno" } },
       { $count: "total" },
     ]);
     const totalBooths = boothsAggregation.length > 0 ? boothsAggregation[0].total : 0;
 
     // Get booth-wise data
-    const boothStats = await Voter.aggregate([
-      { $match: acQuery },
+    const boothStats = await aggregateVoters(acId, [
+      { $match: {} },
       {
         $group: {
           _id: {
@@ -1381,20 +1414,21 @@ app.get("/api/dashboard/stats/:acId", async (req, res) => {
 app.get("/api/voters/details/:voterId", async (req, res) => {
   try {
     await connectToDatabase();
-    
+
     const { voterId } = req.params;
-    
+
     if (!mongoose.Types.ObjectId.isValid(voterId)) {
       return res.status(400).json({ message: "Invalid voter ID" });
     }
-    
-    const voter = await Voter.findById(voterId).lean();
-    
-    if (!voter) {
+
+    // Search across all AC collections to find the voter
+    const result = await findVoterById(voterId);
+
+    if (!result) {
       return res.status(404).json({ message: "Voter not found" });
     }
-    
-    return res.json(voter);
+
+    return res.json(result.voter);
   } catch (error) {
     console.error("Error fetching voter details:", error);
     return res.status(500).json({ message: "Failed to fetch voter details", error: error.message });
@@ -1405,32 +1439,34 @@ app.get("/api/voters/details/:voterId", async (req, res) => {
 app.put("/api/voters/:voterId", async (req, res) => {
   try {
     await connectToDatabase();
-    
+
     const { voterId } = req.params;
     const updateData = req.body;
-    
+
     // Check if voterId looks like an ObjectId (24 hex characters)
     if (!mongoose.Types.ObjectId.isValid(voterId)) {
       return res.status(400).json({ message: "Invalid voter ID" });
     }
-    
-    // Get the current voter to check field structure
-    const currentVoter = await Voter.findById(voterId).lean();
-    if (!currentVoter) {
+
+    // Find the current voter across all AC collections
+    const currentVoterResult = await findVoterById(voterId);
+    if (!currentVoterResult) {
       return res.status(404).json({ message: "Voter not found" });
     }
-    
+    const currentVoter = currentVoterResult.voter;
+    const voterAcId = currentVoterResult.acId;
+
     // Handle nested name object
     if (updateData.name && typeof updateData.name === 'string') {
       updateData.name = { ...currentVoter.name, english: updateData.name };
     }
-    
+
     const processedUpdateData = {};
     Object.entries(updateData).forEach(([key, rawValue]) => {
       if (key === '_id' || key === '__v') {
         return;
       }
-      
+
       if (key === 'name' && typeof rawValue === 'string') {
         processedUpdateData.name = { ...currentVoter.name, english: rawValue };
         return;
@@ -1439,18 +1475,19 @@ app.put("/api/voters/:voterId", async (req, res) => {
       const { actualValue } = unwrapLegacyFieldValue(rawValue);
       processedUpdateData[key] = actualValue;
     });
-    
-    // Find and update the voter
-    const voter = await Voter.findByIdAndUpdate(
+
+    // Find and update the voter in the correct AC collection
+    const VoterModel = getVoterModel(voterAcId);
+    const voter = await VoterModel.findByIdAndUpdate(
       voterId,
       { $set: processedUpdateData },
       { new: true, runValidators: false } // Allow flexible schema updates
     );
-    
+
     if (!voter) {
       return res.status(404).json({ message: "Voter not found" });
     }
-    
+
     return res.json({
       message: "Voter updated successfully",
       voter,
@@ -1467,23 +1504,42 @@ app.get("/api/voters/:acId", async (req, res) => {
     await connectToDatabase();
 
     const rawIdentifier = req.params.acId ?? req.query.aciName ?? req.query.acName;
-    
+
     // Check if the identifier looks like an ObjectId (24 hex characters)
     // If so, it's likely a voter ID, not an AC identifier
     if (mongoose.Types.ObjectId.isValid(rawIdentifier) && rawIdentifier.length === 24) {
-      return res.status(400).json({ 
-        message: "Invalid AC identifier. Use /api/voters/details/:voterId to fetch individual voter details." 
+      return res.status(400).json({
+        message: "Invalid AC identifier. Use /api/voters/details/:voterId to fetch individual voter details."
       });
     }
-    
-    const acQuery = buildAcQuery(rawIdentifier);
-    if (!acQuery) {
-      return res.status(400).json({ message: "Invalid AC identifier" });
+
+    // Parse AC ID - support both numeric ID and AC name
+    let acId;
+    const numericId = Number(rawIdentifier);
+    if (!isNaN(numericId) && numericId > 0) {
+      acId = numericId;
+    } else {
+      // Try to find AC ID by name
+      const identifierString = String(rawIdentifier);
+      const voterResult = await findOneVoter({
+        $or: [
+          { aci_name: new RegExp(`^${identifierString}$`, 'i') },
+          { ac_name: new RegExp(`^${identifierString}$`, 'i') }
+        ]
+      });
+      if (voterResult && voterResult.voter) {
+        acId = voterResult.voter.aci_id || voterResult.voter.aci_num;
+      }
+    }
+
+    if (!acId) {
+      return res.status(400).json({ message: `Invalid AC identifier: ${rawIdentifier}` });
     }
 
     const { booth, search, status, page = 1, limit = 50 } = req.query;
 
-    const queryClauses = [acQuery];
+    // Build query for the AC-specific collection (no need for acQuery since collection is already AC-specific)
+    const queryClauses = [];
 
     // Add booth filter if provided
     if (booth && booth !== "all") {
@@ -1506,28 +1562,30 @@ app.get("/api/voters/:acId", async (req, res) => {
       });
     }
 
-    const query =
+    const query = queryClauses.length === 0 ? {} :
       queryClauses.length === 1 ? queryClauses[0] : { $and: queryClauses };
 
     // Calculate pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // Fetch voters with pagination
-    // Include name field explicitly to ensure it's fetched
-    const voters = await Voter.find(query)
+    // Get the AC-specific voter model
+    const VoterModel = getVoterModel(acId);
+
+    // Fetch voters with pagination from AC-specific collection
+    const voters = await VoterModel.find(query)
       .select("name voterID family_id booth_id boothname boothno mobile status age gender verified surveyed")
       .skip(skip)
       .limit(parseInt(limit))
       .sort({ boothno: 1, "name.english": 1 })
       .lean();
-    
+
     // Debug: Log first voter's name structure if available
     if (voters.length > 0 && process.env.NODE_ENV === 'development') {
       console.log('Sample voter name structure:', JSON.stringify(voters[0].name));
     }
 
-    // Get total count
-    const totalVoters = await Voter.countDocuments(query);
+    // Get total count from AC-specific collection
+    const totalVoters = await VoterModel.countDocuments(query);
 
     return res.json({
       voters: voters.map((voter) => {
@@ -1574,17 +1632,36 @@ app.get("/api/voters/:acId/booths", async (req, res) => {
   try {
     await connectToDatabase();
 
-    const rawIdentifier = req.params.acId ?? req.query.aciName ?? req.query.acName;
-    const acQuery = buildAcQuery(rawIdentifier);
+    const rawIdentifier = req.params.acId;
 
-    if (!acQuery) {
-      return res.status(400).json({ message: "Invalid AC identifier" });
+    // Parse AC ID - support both numeric ID and AC name
+    let acId;
+    const numericId = Number(rawIdentifier);
+    if (!isNaN(numericId) && numericId > 0) {
+      acId = numericId;
+    } else {
+      // Try to find AC ID by name
+      const identifierString = String(rawIdentifier);
+      const voterResult = await findOneVoter({
+        $or: [
+          { aci_name: new RegExp(`^${identifierString}$`, 'i') },
+          { ac_name: new RegExp(`^${identifierString}$`, 'i') }
+        ]
+      });
+      if (voterResult && voterResult.voter) {
+        acId = voterResult.voter.aci_id || voterResult.voter.aci_num;
+      }
     }
 
-    // Get distinct booth names for this AC
-    const booths = await Voter.distinct("boothname", {
-      ...acQuery,
-    });
+    if (!acId) {
+      return res.status(400).json({ message: `Invalid AC identifier: ${rawIdentifier}` });
+    }
+
+    // Get the AC-specific voter model
+    const VoterModel = getVoterModel(acId);
+
+    // Get distinct booth names for this AC collection
+    const booths = await VoterModel.distinct("boothname", {});
 
     // Filter out null/empty values and sort
     const validBooths = booths
@@ -1602,29 +1679,25 @@ app.get("/api/voters/:acId/booths", async (req, res) => {
 app.get("/api/families/:acId", async (req, res) => {
   try {
     await connectToDatabase();
-    
+
     const acId = parseInt(req.params.acId);
     const { booth, search, page = 1, limit = 50 } = req.query;
-    
+
     if (isNaN(acId)) {
       return res.status(400).json({ message: "Invalid AC ID" });
     }
-    
-    // Build match query
-    const matchQuery = {
-      $or: [
-        { aci_num: acId },
-        { aci_id: acId }
-      ]
-    };
-    
+
+    // Build match query for the AC-specific collection (no AC filter needed)
+    const matchQuery = {};
+
     // Add booth filter if provided
     if (booth && booth !== 'all') {
       matchQuery.boothname = booth;
     }
-    
+
     // Aggregate families by grouping voters with same address and booth
-    const familiesAggregation = await Voter.aggregate([
+    // Use AC-specific collection
+    const familiesAggregation = await aggregateVoters(acId, [
       { $match: matchQuery },
       {
         $group: {
@@ -1688,41 +1761,40 @@ app.get("/api/families/:acId", async (req, res) => {
 app.get("/api/families/:acId/details", async (req, res) => {
   try {
     await connectToDatabase();
-    
+
     const acId = parseInt(req.params.acId);
     const { address, booth, boothNo } = req.query;
-    
+
     console.log('Family details request:', {
       acId,
       address,
       booth,
       boothNo
     });
-    
+
     if (isNaN(acId)) {
       return res.status(400).json({ message: "Invalid AC ID" });
     }
-    
+
     if (!address || !booth) {
       return res.status(400).json({ message: "Address and booth are required" });
     }
-    
-    // Build match query to find all voters in this family
+
+    // Build match query to find all voters in this family (no AC filter needed, using AC-specific collection)
     const matchQuery = {
-      $or: [
-        { aci_num: acId },
-        { aci_id: acId }
-      ],
       address: address,
       boothname: booth
     };
-    
+
     if (boothNo) {
       matchQuery.boothno = parseInt(boothNo);
     }
-    
-    // Fetch all family members (voters at same address and booth)
-    const members = await Voter.find(matchQuery)
+
+    // Get the AC-specific voter model
+    const VoterModel = getVoterModel(acId);
+
+    // Fetch all family members (voters at same address and booth) from AC-specific collection
+    const members = await VoterModel.find(matchQuery)
       .sort({ age: -1 }) // Sort by age, head of family first
       .lean();
     
@@ -1953,20 +2025,16 @@ app.get("/api/reports/:acId/booth-performance", async (req, res) => {
       return res.status(400).json({ message: "Invalid AC ID" });
     }
     
-    // Build match query
-    const matchQuery = {
-      $or: [
-        { aci_num: acId },
-        { aci_id: acId }
-      ]
-    };
-    
+    // Build match query - no need for AC filter since collection is AC-specific
+    const matchQuery = {};
+
     if (booth && booth !== 'all') {
       matchQuery.boothname = booth;
     }
-    
-    // Aggregate booth performance data
-    const boothPerformance = await Voter.aggregate([
+
+    // Aggregate booth performance data using sharded collection
+    const VoterModel = getVoterModel(acId);
+    const boothPerformance = await VoterModel.aggregate([
       { $match: matchQuery },
       {
         $group: {
@@ -2004,9 +2072,9 @@ app.get("/api/reports/:acId/booth-performance", async (req, res) => {
     ]);
     
     const surveyMap = new Map(surveysByBooth.map(s => [s._id, s.surveys_completed]));
-    
-    // Calculate families per booth
-    const familiesByBooth = await Voter.aggregate([
+
+    // Calculate families per booth using sharded collection
+    const familiesByBooth = await VoterModel.aggregate([
       { $match: matchQuery },
       {
         $group: {
@@ -3258,13 +3326,14 @@ const RESERVED_FIELDS = [];
 app.get("/api/voters/fields/existing", async (req, res) => {
   try {
     await connectToDatabase();
-    
-    // Sample a few voter documents to analyze existing fields
-    const totalVoters = await Voter.countDocuments({});
-    console.log(`[Fields Existing] Total voters in collection: ${totalVoters}`);
-    
-    const sampleVoters = await Voter.find({}).limit(100).lean();
-    console.log(`[Fields Existing] Sampled ${sampleVoters.length} voters`);
+
+    // Sample voter documents from all sharded collections to analyze existing fields
+    const totalVoters = await countAllVoters({});
+    console.log(`[Fields Existing] Total voters across all collections: ${totalVoters}`);
+
+    // Sample from collections that have data (voters_111 has most data)
+    const sampleVoters = await queryAllVoters({}, { limit: 100 });
+    console.log(`[Fields Existing] Sampled ${sampleVoters.length} voters from sharded collections`);
     
     if (sampleVoters.length === 0) {
       console.log('[Fields Existing] No voters found in collection');
@@ -3407,58 +3476,63 @@ app.post("/api/voters/fields/convert-all", async (_req, res) => {
   try {
     await connectToDatabase();
 
-    const cursor = Voter.find({}).lean().cursor();
     const systemFields = new Set(['_id', '__v', 'createdAt', 'updatedAt']);
     const batchSize = 500;
-    let bulkOps = [];
-    let batchIndex = 0;
-    let flattenedFields = 0;
-    let votersUpdated = 0;
-    let votersChecked = 0;
+    let totalFlattenedFields = 0;
+    let totalVotersUpdated = 0;
+    let totalVotersChecked = 0;
 
-    for await (const voter of cursor) {
-      votersChecked++;
-      const updateObj = {};
+    // Iterate through all sharded voter collections
+    for (const acId of ALL_AC_IDS) {
+      const VoterModel = getVoterModel(acId);
+      const cursor = VoterModel.find({}).lean().cursor();
+      let bulkOps = [];
+      let batchIndex = 0;
 
-      Object.keys(voter).forEach((key) => {
-        if (systemFields.has(key)) return;
+      for await (const voter of cursor) {
+        totalVotersChecked++;
+        const updateObj = {};
 
-        const { actualValue, wasLegacyFormat } = unwrapLegacyFieldValue(voter[key]);
-        if (wasLegacyFormat) {
-          updateObj[key] = actualValue ?? null;
-          flattenedFields++;
-        }
-      });
+        Object.keys(voter).forEach((key) => {
+          if (systemFields.has(key)) return;
 
-      if (Object.keys(updateObj).length > 0) {
-        bulkOps.push({
-          updateOne: {
-            filter: { _id: voter._id },
-            update: { $set: updateObj },
-          },
+          const { actualValue, wasLegacyFormat } = unwrapLegacyFieldValue(voter[key]);
+          if (wasLegacyFormat) {
+            updateObj[key] = actualValue ?? null;
+            totalFlattenedFields++;
+          }
         });
+
+        if (Object.keys(updateObj).length > 0) {
+          bulkOps.push({
+            updateOne: {
+              filter: { _id: voter._id },
+              update: { $set: updateObj },
+            },
+          });
+        }
+
+        if (bulkOps.length >= batchSize) {
+          const result = await VoterModel.bulkWrite(bulkOps, { ordered: false });
+          totalVotersUpdated += result.modifiedCount || 0;
+          console.log(`[Convert-All] AC ${acId} Batch ${batchIndex} flattened ${result.modifiedCount || 0} voters`);
+          bulkOps = [];
+          batchIndex++;
+        }
       }
 
-      if (bulkOps.length >= batchSize) {
-        const result = await Voter.bulkWrite(bulkOps, { ordered: false });
-        votersUpdated += result.modifiedCount || 0;
-        console.log(`[Convert-All] Batch ${batchIndex} flattened ${result.modifiedCount || 0} voters`);
-        bulkOps = [];
-        batchIndex++;
+      if (bulkOps.length > 0) {
+        const result = await VoterModel.bulkWrite(bulkOps, { ordered: false });
+        totalVotersUpdated += result.modifiedCount || 0;
+        console.log(`[Convert-All] AC ${acId} Final batch flattened ${result.modifiedCount || 0} voters`);
       }
-    }
-
-    if (bulkOps.length > 0) {
-      const result = await Voter.bulkWrite(bulkOps, { ordered: false });
-      votersUpdated += result.modifiedCount || 0;
-      console.log(`[Convert-All] Final batch flattened ${result.modifiedCount || 0} voters`);
     }
 
     return res.json({
-      message: `Flattened ${flattenedFields} legacy field instances across ${votersUpdated} voter documents`,
-      flattenedFields,
-      votersUpdated,
-      votersChecked,
+      message: `Flattened ${totalFlattenedFields} legacy field instances across ${totalVotersUpdated} voter documents`,
+      flattenedFields: totalFlattenedFields,
+      votersUpdated: totalVotersUpdated,
+      votersChecked: totalVotersChecked,
     });
   } catch (error) {
     console.error("Error flattening legacy field objects:", error);
@@ -3509,20 +3583,26 @@ app.post("/api/voters/fields", async (req, res) => {
     
     await newField.save();
     
-    // Add the field to ALL existing voter documents with primitive/default values
+    // Add the field to ALL existing voter documents across all sharded collections
     const normalizedDefault =
       defaultValue !== undefined && defaultValue !== null && defaultValue !== ''
         ? defaultValue
         : null;
-    const updateResult = await Voter.updateMany(
-      { [name]: { $exists: false } },
-      { $set: { [name]: normalizedDefault } }
-    );
-    
-    const totalVoters = await Voter.countDocuments({});
+
+    let totalUpdated = 0;
+    let totalVoters = 0;
+    for (const acId of ALL_AC_IDS) {
+      const VoterModel = getVoterModel(acId);
+      const updateResult = await VoterModel.updateMany(
+        { [name]: { $exists: false } },
+        { $set: { [name]: normalizedDefault } }
+      );
+      totalUpdated += updateResult.modifiedCount;
+      totalVoters += await VoterModel.countDocuments({});
+    }
     
     return res.status(201).json({
-      message: `Field "${name}" has been successfully added to all ${totalVoters} voters. ${updateResult.modifiedCount} voters were updated.`,
+      message: `Field "${name}" has been successfully added to all ${totalVoters} voters. ${totalUpdated} voters were updated.`,
       field: {
         name: newField.name,
         type: newField.type,
@@ -3575,16 +3655,16 @@ app.post("/api/voters/fields/:oldFieldName/rename", async (req, res) => {
     
     // Check if new field name already exists in schema
     const existingFieldInSchema = await VoterField.findOne({ name: trimmedNewName });
-    
-    // Check if new field name already exists in voter documents
-    const votersWithNewField = await Voter.countDocuments({ [trimmedNewName]: { $exists: true } });
-    const votersWithOldField = await Voter.countDocuments({ [oldFieldName]: { $exists: true } });
-    
+
+    // Check if new field name already exists in voter documents across all sharded collections
+    const votersWithNewField = await countAllVoters({ [trimmedNewName]: { $exists: true } });
+    const votersWithOldField = await countAllVoters({ [oldFieldName]: { $exists: true } });
+
     // If target field exists and it's different from source, we'll merge the data
     const needsMerge = votersWithNewField > 0 && trimmedNewName !== oldFieldName;
-    
-    // Count total voters
-    const totalVoters = await Voter.countDocuments({});
+
+    // Count total voters across all sharded collections
+    const totalVoters = await countAllVoters({});
     const votersWithoutField = totalVoters - votersWithOldField;
     
     if (votersWithOldField === 0) {
@@ -3620,48 +3700,55 @@ app.post("/api/voters/fields/:oldFieldName/rename", async (req, res) => {
       console.warn(`Metadata update failed, continuing with field rename:`, metaError.message);
     }
     
-    // Rename the field in voter documents that have it
+    // Rename the field in voter documents across all sharded collections
     // We need to iterate and update each document because MongoDB doesn't support field renaming directly
-    const votersWithField = await Voter.find({ [oldFieldName]: { $exists: true } }).lean();
     let renamedCount = 0;
     let mergedCount = 0;
-    
-    // Process in batches for better performance
-    const batchSize = 100;
-    for (let i = 0; i < votersWithField.length; i += batchSize) {
-      const batch = votersWithField.slice(i, i + batchSize);
-      const bulkOps = batch.map(voter => {
-        const { actualValue: oldActual } = unwrapLegacyFieldValue(voter[oldFieldName]);
-        const { actualValue: newActual } = unwrapLegacyFieldValue(voter[trimmedNewName]);
-        
-        let finalValue = oldActual ?? null;
-        
-        if (needsMerge) {
-          const targetHasValue = hasMeaningfulValue(newActual);
-          const sourceHasValue = hasMeaningfulValue(oldActual);
-          
-          if (!targetHasValue && sourceHasValue) {
-            mergedCount++;
-          }
-          
-          if (targetHasValue) {
-            finalValue = newActual;
-          }
-        }
-        
-        return {
-          updateOne: {
-            filter: { _id: voter._id },
-            update: {
-              $set: { [trimmedNewName]: finalValue },
-              $unset: { [oldFieldName]: "" }
+
+    // Iterate through all sharded voter collections
+    for (const acId of ALL_AC_IDS) {
+      const VoterModel = getVoterModel(acId);
+      const votersWithField = await VoterModel.find({ [oldFieldName]: { $exists: true } }).lean();
+
+      // Process in batches for better performance
+      const batchSize = 100;
+      for (let i = 0; i < votersWithField.length; i += batchSize) {
+        const batch = votersWithField.slice(i, i + batchSize);
+        const bulkOps = batch.map(voter => {
+          const { actualValue: oldActual } = unwrapLegacyFieldValue(voter[oldFieldName]);
+          const { actualValue: newActual } = unwrapLegacyFieldValue(voter[trimmedNewName]);
+
+          let finalValue = oldActual ?? null;
+
+          if (needsMerge) {
+            const targetHasValue = hasMeaningfulValue(newActual);
+            const sourceHasValue = hasMeaningfulValue(oldActual);
+
+            if (!targetHasValue && sourceHasValue) {
+              mergedCount++;
+            }
+
+            if (targetHasValue) {
+              finalValue = newActual;
             }
           }
-        };
-      });
-      
-      const batchResult = await Voter.bulkWrite(bulkOps);
-      renamedCount += batchResult.modifiedCount;
+
+          return {
+            updateOne: {
+              filter: { _id: voter._id },
+              update: {
+                $set: { [trimmedNewName]: finalValue },
+                $unset: { [oldFieldName]: "" }
+              }
+            }
+          };
+        });
+
+        if (bulkOps.length > 0) {
+          const batchResult = await VoterModel.bulkWrite(bulkOps);
+          renamedCount += batchResult.modifiedCount;
+        }
+      }
     }
     
     let message;
@@ -3730,15 +3817,15 @@ app.put("/api/voters/fields/:fieldName/visibility", async (req, res) => {
       field.visible = visible;
       await field.save();
     } else {
-      // Infer type and create metadata if field exists on any voter
-      const sampleVoter = await Voter.findOne({ [fieldName]: { $exists: true } }).lean();
-      if (!sampleVoter) {
+      // Infer type and create metadata if field exists on any voter across all sharded collections
+      const sampleVoterResult = await findOneVoter({ [fieldName]: { $exists: true } });
+      if (!sampleVoterResult) {
         return res.status(404).json({
           message: `Field "${fieldName}" not found in schema or voter documents`
         });
       }
 
-      const { actualValue } = unwrapLegacyFieldValue(sampleVoter[fieldName]);
+      const { actualValue } = unwrapLegacyFieldValue(sampleVoterResult.voter[fieldName]);
       field = new VoterField({
         name: fieldName,
         type: inferFieldTypeFromValue(actualValue),
@@ -3789,10 +3876,13 @@ app.put("/api/voters/fields/:fieldName", async (req, res) => {
     
     await field.save();
     
-    // If default value changed and field doesn't exist on some documents, add it directly
+    // If default value changed and field doesn't exist on some documents, add it directly across all sharded collections
     if (defaultValue !== undefined && defaultValue !== null && defaultValue !== '') {
       const updateQuery = { $set: { [fieldName]: defaultValue } };
-      await Voter.updateMany({ [fieldName]: { $exists: false } }, updateQuery);
+      for (const acId of ALL_AC_IDS) {
+        const VoterModel = getVoterModel(acId);
+        await VoterModel.updateMany({ [fieldName]: { $exists: false } }, updateQuery);
+      }
     }
     
     return res.json({
@@ -3829,15 +3919,20 @@ app.delete("/api/voters/fields/:fieldName", async (req, res) => {
     if (field) {
       await VoterField.deleteOne({ name: fieldName });
     }
-    
-    // Remove the field from ALL existing voter documents (even if not in schema)
+
+    // Remove the field from ALL existing voter documents across all sharded collections
     const unsetQuery = { $unset: { [fieldName]: "" } };
-    const deleteResult = await Voter.updateMany({}, unsetQuery);
-    
+    let totalModified = 0;
+    for (const acId of ALL_AC_IDS) {
+      const VoterModel = getVoterModel(acId);
+      const result = await VoterModel.updateMany({}, unsetQuery);
+      totalModified += result.modifiedCount;
+    }
+
     return res.json({
       message: `Field "${fieldName}" has been successfully deleted from all voters`,
       fieldName,
-      votersAffected: deleteResult.modifiedCount,
+      votersAffected: totalModified,
       wasInSchema: !!field,
     });
   } catch (error) {
@@ -4103,22 +4198,24 @@ app.post("/api/mapped-fields/apply-mapping", async (req, res) => {
     for (const surveyResponse of surveyResponses) {
       const responseVoterId = voterId || surveyResponse.voterId || surveyResponse.respondentName || '';
       
-      // Get voter information
+      // Get voter information from sharded collections
       let voter = null;
       if (responseVoterId) {
-        // Try to find voter by voterId, voterID, or name
+        // Try to find voter by voterId, voterID, or name across all sharded collections
         if (mongoose.Types.ObjectId.isValid(responseVoterId)) {
-          voter = await Voter.findById(responseVoterId).lean();
+          const result = await findVoterById(responseVoterId);
+          if (result) voter = result.voter;
         }
-        
+
         if (!voter) {
-          voter = await Voter.findOne({
+          const result = await findOneVoter({
             $or: [
               { voterID: responseVoterId },
               { "name.english": { $regex: new RegExp(responseVoterId, 'i') } },
               { "name.tamil": { $regex: new RegExp(responseVoterId, 'i') } },
             ],
-          }).lean();
+          });
+          if (result) voter = result.voter;
         }
       }
       
@@ -4136,18 +4233,18 @@ app.post("/api/mapped-fields/apply-mapping", async (req, res) => {
         acInfo.aci_id = voter.aci_id || voter.aci_num;
         acInfo.aci_name = voter.aci_name || voter.ac_name;
       } else if (acNumber) {
-        // Try to get AC name from any voter in that AC
-        const sampleVoter = await Voter.findOne({
-          $or: [
-            { aci_num: acNumber },
-            { aci_id: acNumber },
-          ],
-        }).select('aci_name ac_name').lean();
-        
-        if (sampleVoter) {
-          acInfo.acName = sampleVoter.aci_name || sampleVoter.ac_name;
-          acInfo.aci_id = acNumber;
-          acInfo.aci_name = sampleVoter.aci_name || sampleVoter.ac_name;
+        // Try to get AC name from any voter in that AC using the sharded collection
+        try {
+          const VoterModel = getVoterModel(acNumber);
+          const sampleVoter = await VoterModel.findOne({}).select('aci_name ac_name').lean();
+
+          if (sampleVoter) {
+            acInfo.acName = sampleVoter.aci_name || sampleVoter.ac_name;
+            acInfo.aci_id = acNumber;
+            acInfo.aci_name = sampleVoter.aci_name || sampleVoter.ac_name;
+          }
+        } catch (err) {
+          console.warn(`Could not find AC info for AC ${acNumber}:`, err.message);
         }
       }
       

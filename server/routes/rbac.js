@@ -12,6 +12,12 @@ import Voter from "../models/Voter.js";
 import Survey from "../models/Survey.js";
 import { resolveAssignedACFromUser } from "../utils/ac.js";
 import {
+  getVoterModel,
+  aggregateVoters,
+  aggregateAllVoters,
+  ALL_AC_IDS
+} from "../utils/voterCollection.js";
+import {
   isAuthenticated,
   canManageUsers,
   canManageBooths,
@@ -1679,12 +1685,8 @@ router.get("/dashboard/ac-overview", isAuthenticated, async (req, res) => {
       });
     }
 
-    const voterMatch = limitToAc !== null
-      ? { aci_id: limitToAc }
-      : { aci_id: { $ne: null } };
-
-    const voterAggregation = await Voter.aggregate([
-      { $match: voterMatch },
+    // Aggregation pipeline for voter stats
+    const aggregationPipeline = [
       {
         $group: {
           _id: { acId: "$aci_id", acName: "$aci_name" },
@@ -1701,7 +1703,16 @@ router.get("/dashboard/ac-overview", isAuthenticated, async (req, res) => {
         },
       },
       { $sort: { "_id.acId": 1 } },
-    ]);
+    ];
+
+    let voterAggregation;
+    if (limitToAc !== null) {
+      // L1/L2: Query only the assigned AC collection
+      voterAggregation = await aggregateVoters(limitToAc, aggregationPipeline);
+    } else {
+      // L0: Query all AC collections
+      voterAggregation = await aggregateAllVoters(aggregationPipeline);
+    }
 
     const userMatch = {
       isActive: { $ne: false },
