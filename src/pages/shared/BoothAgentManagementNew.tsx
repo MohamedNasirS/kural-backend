@@ -11,6 +11,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/ui/use-toast';
 import { api } from '@/lib/api';
 import { Badge } from '@/components/ui/badge';
+import { CONSTITUENCIES } from '@/constants/constituencies';
 
 interface BoothAgent {
   _id: string;
@@ -304,15 +305,15 @@ export const BoothAgentManagementNew = () => {
           <div className="flex gap-4">
             {user?.role !== 'L2' && (
               <Select value={filterAC} onValueChange={setFilterAC}>
-                <SelectTrigger className="w-[200px]">
+                <SelectTrigger className="w-[280px]">
                   <Filter className="mr-2 h-4 w-4" />
-                  <SelectValue placeholder="Filter by AC" />
+                  <SelectValue placeholder="Filter by Constituency" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Constituencies</SelectItem>
-                  {uniqueACs.map(ac => (
-                    <SelectItem key={ac} value={ac.toString()}>
-                      AC {ac}
+                  {CONSTITUENCIES.map(constituency => (
+                    <SelectItem key={constituency.number} value={constituency.number.toString()}>
+                      AC {constituency.number} - {constituency.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -371,30 +372,27 @@ export const BoothAgentManagementNew = () => {
                   {user?.role !== 'L2' && (
                     <div className="space-y-2">
                       <Label htmlFor="aci">Assembly Constituency <span className="text-destructive">*</span></Label>
-                      <Select 
-                        value={newAgent.aci_id.toString()} 
+                      <Select
+                        value={newAgent.aci_id.toString()}
                         onValueChange={(value) => {
-                          const booth = booths.find(b => b.ac_id === parseInt(value));
+                          const constituency = CONSTITUENCIES.find(c => c.number === parseInt(value));
                           setNewAgent({
-                            ...newAgent, 
+                            ...newAgent,
                             aci_id: value,
-                            aci_name: booth?.ac_name || '',
+                            aci_name: constituency?.name || '',
                             booth_id: '' // Reset booth selection when AC changes
                           });
                         }}
                       >
                         <SelectTrigger>
-                          <SelectValue placeholder="Select AC" />
+                          <SelectValue placeholder="Select Constituency" />
                         </SelectTrigger>
                         <SelectContent>
-                          {Array.from(new Set(booths.map(b => b.ac_id))).sort((a, b) => a - b).map(ac => {
-                            const booth = booths.find(b => b.ac_id === ac);
-                            return (
-                              <SelectItem key={ac} value={ac.toString()}>
-                                {ac} - {booth?.ac_name}
-                              </SelectItem>
-                            );
-                          })}
+                          {CONSTITUENCIES.map(constituency => (
+                            <SelectItem key={constituency.number} value={constituency.number.toString()}>
+                              AC {constituency.number} - {constituency.name}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
@@ -475,10 +473,19 @@ export const BoothAgentManagementNew = () => {
                       <td className="px-4 py-3 text-sm">{agent.username}</td>
                       <td className="px-4 py-3 text-sm">{agent.phoneNumber}</td>
                       {user?.role !== 'L2' && (
-                        <td className="px-4 py-3 text-sm">{agent.aci_id}</td>
+                        <td className="px-4 py-3 text-sm">
+                          <div>
+                            <div className="font-medium">AC {agent.aci_id}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {CONSTITUENCIES.find(c => c.number === agent.aci_id)?.name || agent.aci_name}
+                            </div>
+                          </div>
+                        </td>
                       )}
                       <td className="px-4 py-3 text-sm max-w-xs truncate">
-                        {getBoothInfo(agent.booth_id)}
+                        {agent.boothCode && agent.boothName
+                          ? `${agent.boothCode} - ${agent.boothName}`
+                          : agent.boothCode || agent.boothName || getBoothInfo(agent.booth_id)}
                       </td>
                       <td className="px-4 py-3 text-sm">
                         <Badge variant={agent.isActive ? "default" : "secondary"}>

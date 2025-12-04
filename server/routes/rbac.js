@@ -1234,22 +1234,17 @@ router.delete("/users/:userId", isAuthenticated, async (req, res) => {
 
 /**
  * GET /api/rbac/booths
- * Get booths (filtered by AC for L1/L2)
- * Aggregates booth data from voter documents and merges with any existing booths in collection
+ * Get booths from voter collections (source of truth)
+ * Aggregates booth data from voter_{AC_ID} collections
  * Access: L0, L1, L2
  */
 router.get("/booths", isAuthenticated, canManageBooths, validateACAccess, async (req, res) => {
   try {
-    const { ac, search, source, page = 1, limit = 50 } = req.query;
+    const { ac, search, source, page = 1, limit = 100 } = req.query;
     const pageNum = parseInt(page) || 1;
-    const limitNum = parseInt(limit) || 50;
+    const limitNum = parseInt(limit) || 100;
 
-    let query = { isActive: true };
-
-    // Apply AC filter based on user role
-    query = applyACFilter(req.user, query);
-
-    // Additional AC filter from query params (must match user's AC for L1/L2)
+    // Validate AC filter for L1/L2 users
     if (ac) {
       const acId = parseInt(ac);
       if (!canAccessAC(req.user, acId)) {
@@ -1258,41 +1253,17 @@ router.get("/booths", isAuthenticated, canManageBooths, validateACAccess, async 
           message: "Access denied to this AC",
         });
       }
-      query.ac_id = acId;
     }
 
     // Determine the target AC for voter data aggregation
-    const targetAC = query.ac_id || req.user.assignedAC;
+    const targetAC = ac ? parseInt(ac) : req.user.assignedAC;
 
-    // If source=collection, only return booths from collection (for backwards compatibility)
-    if (source === "collection") {
-      if (search) {
-        const searchRegex = new RegExp(search, "i");
-        query.$or = [{ boothName: searchRegex }, { boothCode: searchRegex }];
-      }
-
-      const booths = await Booth.find(query)
-        .populate("assignedAgents", "name phone role")
-        .populate("primaryAgent", "name phone role")
-        .populate("createdBy", "name role")
-        .sort({ boothNumber: 1 });
-
-      return res.json({
-        success: true,
-        count: booths.length,
-        booths,
-      });
-    }
-
-    // For L1/L2 users with a specific AC, aggregate booth data from voter documents
-    // This provides a complete view of all booths based on actual voter data
     let booths = [];
 
+    // Always aggregate booths from voter collections when AC is specified
     if (targetAC) {
       try {
-        // Aggregate booth data from voter documents
-        // booth_id is the unique identifier (e.g., BOOTH1-111, BOOTH2-111, etc.)
-        // Each booth_id has ~100 voters
+        // Aggregate booth data from voter_{AC_ID} collection
         const voterBooths = await aggregateVoters(targetAC, [
           { $match: {} },
           {
@@ -1300,26 +1271,15 @@ router.get("/booths", isAuthenticated, canManageBooths, validateACAccess, async 
               _id: "$booth_id",
               boothno: { $first: "$boothno" },
               boothname: { $first: "$boothname" },
+              aci_id: { $first: "$aci_id" },
+              aci_name: { $first: "$aci_name" },
               totalVoters: { $sum: 1 }
             }
           },
-          { $sort: { "boothno": 1 } }
+          { $sort: { boothno: 1 } }
         ]);
 
-        // Fetch existing booths from collection to merge metadata
-        const existingBooths = await Booth.find({ ac_id: targetAC, isActive: true })
-          .populate("assignedAgents", "name phone role")
-          .populate("primaryAgent", "name phone role")
-          .populate("createdBy", "name role");
-
-        // Create a map of existing booths by their booth code
-        const existingBoothMap = {};
-        existingBooths.forEach(booth => {
-          existingBoothMap[booth.boothCode] = booth;
-          if (booth.booth_id) existingBoothMap[booth.booth_id] = booth;
-        });
-
-        // Get assigned agents for each booth from users collection
+        // Get booth agents for this AC from users collection
         const boothAgentMap = {};
         const boothAgents = await User.find({
           role: { $in: ["Booth Agent", "BoothAgent"] },
@@ -1328,32 +1288,18 @@ router.get("/booths", isAuthenticated, canManageBooths, validateACAccess, async 
         }).select("name phone role booth_id assignedBoothId booth_agent_id");
 
         boothAgents.forEach(agent => {
-          // Try to determine the booth ID in this priority:
-          // 1. booth_id if it's in BOOTH format (e.g., "BOOTH1-111")
-          // 2. Extract from booth_agent_id (e.g., "BOOTH1-111-2" -> "BOOTH1-111")
-          // 3. Fall back to booth_id or assignedBoothId as-is
           let boothId = null;
-
-          // Check if booth_id is in the correct format (starts with BOOTH)
           if (agent.booth_id && agent.booth_id.toString().startsWith("BOOTH")) {
             boothId = agent.booth_id;
-          }
-          // Try to extract from booth_agent_id (format: "BOOTH1-111-2")
-          else if (agent.booth_agent_id) {
+          } else if (agent.booth_agent_id) {
             const match = agent.booth_agent_id.match(/^(BOOTH\d+-\d+)/);
-            if (match) {
-              boothId = match[1];
-            }
+            if (match) boothId = match[1];
           }
-          // Fall back to booth_id or assignedBoothId
           if (!boothId) {
             boothId = agent.booth_id || (agent.assignedBoothId ? agent.assignedBoothId.toString() : null);
           }
-
           if (boothId) {
-            if (!boothAgentMap[boothId]) {
-              boothAgentMap[boothId] = [];
-            }
+            if (!boothAgentMap[boothId]) boothAgentMap[boothId] = [];
             boothAgentMap[boothId].push({
               _id: agent._id,
               name: agent.name,
@@ -1363,40 +1309,22 @@ router.get("/booths", isAuthenticated, canManageBooths, validateACAccess, async 
           }
         });
 
-        // Transform voter data into booth format, merging with existing booth data
+        // Transform voter data into booth format
         booths = voterBooths.map((vb, index) => {
           const boothId = vb._id; // e.g., "BOOTH1-111"
           const boothNumber = vb.boothno || index + 1;
-          const boothName = vb.boothname || `Booth ${boothNumber}`;
-
-          const existingBooth = existingBoothMap[boothId];
           const agentsFromUsers = boothAgentMap[boothId] || [];
 
-          // Prefer existing booth data if available, but always use agents from users collection
-          // The booth collection's assignedAgents may be outdated
-          if (existingBooth) {
-            const boothData = existingBooth.toObject();
-            return {
-              ...boothData,
-              totalVoters: vb.totalVoters,
-              // Always use agent data from users collection (more accurate than booth.assignedAgents)
-              assignedAgents: agentsFromUsers.length > 0 ? agentsFromUsers : boothData.assignedAgents,
-              primaryAgent: agentsFromUsers.length > 0 ? agentsFromUsers[0] : boothData.primaryAgent,
-              isFromVoterData: false
-            };
-          }
-
           return {
-            _id: `voter-booth-${targetAC}-${boothNumber}`,
+            _id: boothId,
             boothCode: boothId,
             boothNumber: boothNumber,
-            boothName: boothName,
-            ac_id: targetAC,
-            acName: req.user.aci_name || `AC ${targetAC}`,
+            boothName: vb.boothname || `Booth ${boothNumber}`,
+            ac_id: vb.aci_id || targetAC,
+            ac_name: vb.aci_name || `AC ${targetAC}`,
             totalVoters: vb.totalVoters,
             assignedAgents: agentsFromUsers,
             primaryAgent: agentsFromUsers.length > 0 ? agentsFromUsers[0] : null,
-            address: "",
             isActive: true,
             isFromVoterData: true
           };
@@ -1411,28 +1339,20 @@ router.get("/booths", isAuthenticated, canManageBooths, validateACAccess, async 
         }
       } catch (voterError) {
         console.error("Error aggregating booths from voter data:", voterError);
-        // Fall back to collection-only data
-        if (search) {
-          const searchRegex = new RegExp(search, "i");
-          query.$or = [{ boothName: searchRegex }, { boothCode: searchRegex }];
-        }
-        booths = await Booth.find(query)
-          .populate("assignedAgents", "name phone role")
-          .populate("primaryAgent", "name phone role")
-          .populate("createdBy", "name role")
-          .sort({ boothNumber: 1 });
+        return res.status(500).json({
+          success: false,
+          message: "Failed to fetch booth data from voter collection",
+          error: voterError.message
+        });
       }
     } else {
-      // For L0 without specific AC filter, return booths from collection
-      if (search) {
-        const searchRegex = new RegExp(search, "i");
-        query.$or = [{ boothName: searchRegex }, { boothCode: searchRegex }];
-      }
-      booths = await Booth.find(query)
-        .populate("assignedAgents", "name phone role")
-        .populate("primaryAgent", "name phone role")
-        .populate("createdBy", "name role")
-        .sort({ boothNumber: 1 });
+      // L0 user without AC filter - no booths to show (they must select an AC first)
+      return res.json({
+        success: true,
+        count: 0,
+        booths: [],
+        message: "Please select a constituency to view booths"
+      });
     }
 
     // Apply pagination

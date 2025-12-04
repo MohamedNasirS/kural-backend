@@ -89,6 +89,7 @@ const UserManagement: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [activeTab, setActiveTab] = useState<string>("L0");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [acFilter, setAcFilter] = useState<string>("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -112,7 +113,7 @@ const UserManagement: React.FC = () => {
   useEffect(() => {
     fetchUsers();
     fetchBooths();
-  }, [activeTab, statusFilter]);
+  }, [activeTab, statusFilter, acFilter]);
 
   // Handle URL parameter to auto-open dialog with pre-selected role
   useEffect(() => {
@@ -145,7 +146,7 @@ const UserManagement: React.FC = () => {
     try {
       setLoading(true);
       const params = new URLSearchParams();
-      
+
       // Map tab to role
       const roleMap: { [key: string]: string } = {
         "L0": "L0",
@@ -153,22 +154,27 @@ const UserManagement: React.FC = () => {
         "L2": "L2",
         "BoothAgent": "BoothAgent"
       };
-      
+
       if (activeTab && roleMap[activeTab]) {
         params.append("role", roleMap[activeTab]);
       }
-      
+
       if (statusFilter !== "all") {
         params.append("status", statusFilter);
       }
 
+      // Add AC filter for BoothAgent and L2 tabs
+      if ((activeTab === "BoothAgent" || activeTab === "L2") && acFilter !== "all") {
+        params.append("ac", acFilter);
+      }
+
       const response = await api.get(`/rbac/users?${params.toString()}`);
       const usersList = response.users || [];
-      
+
       // Log for debugging
       console.log(`[UserManagement] Fetched ${usersList.length} users for tab: ${activeTab}`);
       console.log(`[UserManagement] Total matching query: ${response.totalCount || response.count || usersList.length}`);
-      
+
       setUsers(usersList);
     } catch (error: any) {
       console.error("Error fetching users:", error);
@@ -756,10 +762,58 @@ const UserManagement: React.FC = () => {
             </TabsContent>
             
             <TabsContent value="L2" className="mt-4">
+              {/* Constituency Filter for ACI users */}
+              <div className="flex items-center gap-4 mb-4">
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm font-medium whitespace-nowrap">Filter by Constituency:</Label>
+                  <Select
+                    value={acFilter}
+                    onValueChange={(value) => {
+                      setAcFilter(value);
+                    }}
+                  >
+                    <SelectTrigger className="w-[280px]">
+                      <SelectValue placeholder="All Constituencies" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Constituencies</SelectItem>
+                      {CONSTITUENCIES.map((ac) => (
+                        <SelectItem key={ac.number} value={ac.number.toString()}>
+                          AC {ac.number} - {ac.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
               {renderUsersTable()}
             </TabsContent>
             
             <TabsContent value="BoothAgent" className="mt-4">
+              {/* Constituency Filter for Booth Agents */}
+              <div className="flex items-center gap-4 mb-4">
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm font-medium whitespace-nowrap">Filter by Constituency:</Label>
+                  <Select
+                    value={acFilter}
+                    onValueChange={(value) => {
+                      setAcFilter(value);
+                    }}
+                  >
+                    <SelectTrigger className="w-[280px]">
+                      <SelectValue placeholder="All Constituencies" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Constituencies</SelectItem>
+                      {CONSTITUENCIES.map((ac) => (
+                        <SelectItem key={ac.number} value={ac.number.toString()}>
+                          AC {ac.number} - {ac.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
               {renderUsersTable()}
             </TabsContent>
           </Tabs>

@@ -936,28 +936,26 @@ app.get("/api/dashboard/stats/:acId", async (req, res) => {
     // Surveys Completed: Count all members who have surveyed: true
     const surveysCompleted = await countVoters(acId, { surveyed: true });
 
-    // Get unique booths for this AC
+    // Get unique booths for this AC - group by booth_id for accuracy
     const boothsAggregation = await aggregateVoters(acId, [
       { $match: {} },
-      { $group: { _id: "$boothno" } },
+      { $group: { _id: "$booth_id" } },
       { $count: "total" },
     ]);
     const totalBooths = boothsAggregation.length > 0 ? boothsAggregation[0].total : 0;
 
-    // Get booth-wise data
+    // Get booth-wise data - group by booth_id only to avoid duplicates
     const boothStats = await aggregateVoters(acId, [
       { $match: {} },
       {
         $group: {
-          _id: {
-            boothno: "$boothno",
-            boothname: "$boothname",
-            booth_id: "$booth_id",
-          },
+          _id: "$booth_id",
+          boothno: { $first: "$boothno" },
+          boothname: { $first: "$boothname" },
           voters: { $sum: 1 },
         },
       },
-      { $sort: { "_id.boothno": 1 } },
+      { $sort: { boothno: 1 } },
       { $limit: 10 },
     ]);
 
@@ -973,9 +971,9 @@ app.get("/api/dashboard/stats/:acId", async (req, res) => {
       surveysCompleted,   // Families with all members surveyed
       totalBooths,        // Total Booths
       boothStats: boothStats.map((booth) => ({
-        boothNo: booth._id.boothno,
-        boothName: booth._id.boothname,
-        boothId: booth._id.booth_id,
+        boothNo: booth.boothno,
+        boothName: booth.boothname,
+        boothId: booth._id,
         voters: booth.voters,
       })),
     });
@@ -1464,75 +1462,175 @@ app.get("/api/survey-responses", async (req, res) => {
   console.log("Survey responses endpoint hit:", req.query);
   try {
     await connectToDatabase();
-    
-    const { booth, survey, page = 1, limit = 50, search } = req.query;
-    
+
+    const { booth, survey, ac, page = 1, limit = 50, search } = req.query;
+
     // Use the surveyresponses collection (all lowercase, one word)
-    const SurveyResponse = mongoose.models.SurveyResponse || 
+    const SurveyResponse = mongoose.models.SurveyResponse ||
       mongoose.model('SurveyResponse', new mongoose.Schema({}, { strict: false, collection: 'surveyresponses' }));
-    
+
     // Build query
     const query = {};
-    
+    let boothNamesFromAC = [];
+
+    // Filter by AC (constituency)
+    // Survey responses may not have acId directly, but we can filter by booth names from that AC
+    if (ac && ac !== 'all') {
+      const acId = parseInt(ac);
+
+      // Get all booth names from the voter collection for this AC
+      try {
+        const voterBooths = await aggregateVoters(acId, [
+          { $match: {} },
+          { $group: { _id: "$boothname" } }
+        ]);
+        boothNamesFromAC = voterBooths.map(b => b._id).filter(Boolean);
+        console.log(`Found ${boothNamesFromAC.length} unique booth names for AC ${acId}`);
+
+        if (boothNamesFromAC.length > 0) {
+          // Filter survey responses that have booth names matching this AC
+          query.booth = { $in: boothNamesFromAC };
+        } else {
+          // If no booths found, also check for direct AC fields
+          query.$or = [
+            { acId: acId },
+            { aci_id: acId },
+            { aci_num: acId },
+            { assignedAC: acId }
+          ];
+        }
+      } catch (voterError) {
+        console.error("Error getting booth names from voter data:", voterError);
+        // Fall back to direct AC filtering
+        query.$or = [
+          { acId: acId },
+          { aci_id: acId },
+          { aci_num: acId },
+          { assignedAC: acId }
+        ];
+      }
+    }
+
+    // Filter by booth - booth field contains full booth name like "10-Panchayat Union Elementary School,Alanthurai - 641101"
     if (booth && booth !== 'all') {
-      query.booth = booth;
+      console.log(`Booth filter requested: "${booth}"`);
+      // If we're already filtering by AC's booth names, narrow it down
+      if (boothNamesFromAC.length > 0) {
+        // First try exact match (when full booth name is provided from dropdown)
+        if (boothNamesFromAC.includes(booth)) {
+          query.booth = booth;
+          console.log(`Exact booth match found: "${booth}"`);
+        } else {
+          // Find the booth name that matches the given booth code (partial match)
+          const matchingBoothNames = boothNamesFromAC.filter(name =>
+            name && name.toLowerCase().includes(booth.toLowerCase())
+          );
+          if (matchingBoothNames.length > 0) {
+            query.booth = { $in: matchingBoothNames };
+            console.log(`Partial booth match found ${matchingBoothNames.length} booths`);
+          } else {
+            // Try regex match
+            query.booth = { $regex: booth, $options: 'i' };
+            console.log(`Using regex booth match for: "${booth}"`);
+          }
+        }
+      } else if (query.$or) {
+        // If we have AC filter via $or
+        query.$and = [
+          { $or: query.$or },
+          { $or: [
+            { booth: { $regex: booth, $options: 'i' } },
+            { boothCode: booth },
+            { booth_id: booth }
+          ]}
+        ];
+        delete query.$or;
+      } else {
+        query.$or = [
+          { booth: { $regex: booth, $options: 'i' } },
+          { boothCode: booth },
+          { booth_id: booth }
+        ];
+      }
     }
-    
+
     if (survey && survey !== 'all') {
-      query.surveyId = survey;
+      const surveyFilter = { $or: [{ surveyId: survey }, { formId: survey }] };
+      if (query.$and) {
+        query.$and.push(surveyFilter);
+      } else if (query.$or) {
+        query.$and = [{ $or: query.$or }, surveyFilter];
+        delete query.$or;
+      } else {
+        query.$or = surveyFilter.$or;
+      }
     }
-    
+
     // Search functionality
     if (search) {
-      const searchRegex = new RegExp(search, 'i');
-      // Check if search is a valid ObjectId for direct matching
+      const searchRegex = new RegExp(escapeRegExp(search), 'i');
       const isObjectId = mongoose.Types.ObjectId.isValid(search);
-      
-      if (isObjectId) {
-        // If it's an ObjectId, search by exact match first, then regex
-        query.$or = [
-          { voterId: search }, // Exact ObjectId match
+
+      const searchFilter = isObjectId ? {
+        $or: [
+          { voterId: search },
           { voterName: searchRegex },
           { respondentName: searchRegex },
           { voterID: searchRegex },
+          { respondentVoterId: searchRegex },
           { surveyId: search },
           { formId: search }
-        ];
-      } else {
-        // Regular text search
-        query.$or = [
+        ]
+      } : {
+        $or: [
           { voterName: searchRegex },
           { respondentName: searchRegex },
           { voterId: searchRegex },
           { voterID: searchRegex },
+          { respondentVoterId: searchRegex },
           { surveyId: searchRegex },
           { formId: searchRegex }
-        ];
+        ]
+      };
+
+      if (query.$and) {
+        query.$and.push(searchFilter);
+      } else if (query.$or) {
+        query.$and = [{ $or: query.$or }, searchFilter];
+        delete query.$or;
+      } else if (query.booth) {
+        query.$and = [{ booth: query.booth }, searchFilter];
+        delete query.booth;
+      } else {
+        query.$or = searchFilter.$or;
       }
     }
-    
+
+    console.log("Survey responses query:", JSON.stringify(query, null, 2));
+
     // Calculate pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
-    
+
     // Fetch survey responses
     const responses = await SurveyResponse.find(query)
       .skip(skip)
       .limit(parseInt(limit))
       .sort({ createdAt: -1 });
-    
+
     const totalResponses = await SurveyResponse.countDocuments(query);
-    
+
     return res.json({
       responses: responses.map(response => ({
         id: response._id,
         survey_id: response.surveyId || response.formId || 'N/A',
         respondent_name: response.voterName || response.respondentName || 'N/A',
-        voter_id: response.voterId || 'N/A',
-        voterID: response.voterID || '', // Also include voterID field
-        voterId: response.voterId || response.voterID || 'N/A', // Alias for compatibility
+        voter_id: response.respondentVoterId || response.voterId || response.voterID || 'N/A',
+        voterID: response.respondentVoterId || response.voterID || '',
+        voterId: response.respondentVoterId || response.voterId || response.voterID || 'N/A',
         booth: response.booth || 'N/A',
+        ac_id: response.acId || response.aci_id || response.aci_num || null,
         survey_date: response.createdAt || response.submittedAt || new Date(),
-        status: response.status || 'Completed',
+        status: response.isComplete ? 'Completed' : (response.status || 'Pending'),
         answers: response.answers || response.responses || []
       })),
       pagination: {
@@ -1542,7 +1640,7 @@ app.get("/api/survey-responses", async (req, res) => {
         pages: Math.ceil(totalResponses / parseInt(limit))
       }
     });
-    
+
   } catch (error) {
     console.error("Error fetching survey responses:", error);
     return res.status(500).json({ message: "Failed to fetch survey responses" });

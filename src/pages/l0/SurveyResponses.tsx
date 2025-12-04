@@ -299,7 +299,7 @@ export const SurveyResponses = () => {
                 <SelectContent>
                   <SelectItem value="all">All Booths</SelectItem>
                   {booths.map((booth) => (
-                    <SelectItem key={booth._id} value={booth.boothCode}>
+                    <SelectItem key={booth._id} value={booth.boothName || booth.boothCode}>
                       {booth.boothName || booth.boothCode}
                     </SelectItem>
                   ))}
