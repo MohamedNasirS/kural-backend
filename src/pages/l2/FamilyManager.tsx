@@ -38,7 +38,7 @@ export const FamilyManager = () => {
 
   // API state
   const [families, setFamilies] = useState<Family[]>([]);
-  const [booths, setBooths] = useState<string[]>([]);
+  const [booths, setBooths] = useState<{ boothNo: number; boothName: string; label: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pagination, setPagination] = useState<Pagination>({
@@ -149,13 +149,15 @@ export const FamilyManager = () => {
               />
             </div>
             <Select value={boothFilter} onValueChange={setBoothFilter}>
-              <SelectTrigger className="w-[220px]">
+              <SelectTrigger className="w-[350px]">
                 <SelectValue placeholder="All Booths" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Booths</SelectItem>
                 {booths.map((booth) => (
-                  <SelectItem key={booth} value={booth}>{booth}</SelectItem>
+                  <SelectItem key={booth.boothNo} value={String(booth.boothNo)}>
+                    {booth.boothName}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>

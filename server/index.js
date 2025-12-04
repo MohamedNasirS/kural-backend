@@ -1121,9 +1121,15 @@ app.get(/^\/api\/voters\/(?!fields|details)([^/]+)$/, async (req, res) => {
     // Build query for the AC-specific collection (no need for acQuery since collection is already AC-specific)
     const queryClauses = [];
 
-    // Add booth filter if provided
+    // Add booth filter if provided (now uses booth number)
     if (booth && booth !== "all") {
-      queryClauses.push({ boothname: booth });
+      const boothNum = parseInt(booth);
+      if (!isNaN(boothNum)) {
+        queryClauses.push({ boothno: boothNum });
+      } else {
+        // Fallback to boothname for backwards compatibility
+        queryClauses.push({ boothname: booth });
+      }
     }
 
     // Add status filter if provided
@@ -1240,15 +1246,28 @@ app.get("/api/voters/:acId/booths", async (req, res) => {
     // Get the AC-specific voter model
     const VoterModel = getVoterModel(acId);
 
-    // Get distinct booth names for this AC collection
-    const booths = await VoterModel.distinct("boothname", {});
+    // Get unique booth numbers with their names using aggregation
+    const boothsAggregation = await VoterModel.aggregate([
+      {
+        $group: {
+          _id: "$boothno",
+          boothname: { $first: "$boothname" }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
 
-    // Filter out null/empty values and sort
-    const validBooths = booths
-      .filter((booth) => booth && booth.trim())
-      .sort();
+    // Format booths as array of objects with boothNo and boothName
+    const booths = boothsAggregation
+      .filter((booth) => booth._id != null)
+      .map((booth) => ({
+        boothNo: booth._id,
+        boothName: booth.boothname || `Booth ${booth._id}`,
+        // Display label: "Booth 1 - Aided Primary School, Kalampalayam"
+        label: `Booth ${booth._id}${booth.boothname ? ' - ' + booth.boothname.replace(/^\d+-/, '').trim() : ''}`
+      }));
 
-    return res.json({ booths: validBooths });
+    return res.json({ booths });
   } catch (error) {
     console.error("Error fetching booths:", error);
     return res.status(500).json({ message: "Failed to fetch booths" });
@@ -1270,9 +1289,15 @@ app.get("/api/families/:acId", async (req, res) => {
     // Build match query for the AC-specific collection (no AC filter needed)
     const matchQuery = {};
 
-    // Add booth filter if provided
+    // Add booth filter if provided (now uses booth number)
     if (booth && booth !== 'all') {
-      matchQuery.boothname = booth;
+      const boothNum = parseInt(booth);
+      if (!isNaN(boothNum)) {
+        matchQuery.boothno = boothNum;
+      } else {
+        // Fallback to boothname for backwards compatibility
+        matchQuery.boothname = booth;
+      }
     }
 
     // Aggregate families by grouping voters with same address and booth
