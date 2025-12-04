@@ -1190,11 +1190,16 @@ router.get("/booths", isAuthenticated, canManageBooths, validateACAccess, async 
           const existingBooth = existingBoothMap[boothId];
           const agentsFromUsers = boothAgentMap[boothId] || [];
 
-          // Prefer existing booth data if available, but update voter count from voter data
+          // Prefer existing booth data if available, but always use agents from users collection
+          // The booth collection's assignedAgents may be outdated
           if (existingBooth) {
+            const boothData = existingBooth.toObject();
             return {
-              ...existingBooth.toObject(),
+              ...boothData,
               totalVoters: vb.totalVoters,
+              // Always use agent data from users collection (more accurate than booth.assignedAgents)
+              assignedAgents: agentsFromUsers.length > 0 ? agentsFromUsers : boothData.assignedAgents,
+              primaryAgent: agentsFromUsers.length > 0 ? agentsFromUsers[0] : boothData.primaryAgent,
               isFromVoterData: false
             };
           }

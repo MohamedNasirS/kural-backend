@@ -59,6 +59,11 @@ export const BoothManagement = () => {
   const [creating, setCreating] = useState(false);
   const [updating, setUpdating] = useState(false);
 
+  // AC Filter state for Admin (L0) users
+  const [selectedAC, setSelectedAC] = useState<number | null>(
+    user?.role === 'L2' ? user.assignedAC : null
+  );
+
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -105,10 +110,12 @@ export const BoothManagement = () => {
     }
   }, [user]);
 
-  const fetchBooths = async (page = 1) => {
+  const fetchBooths = async (page = 1, acFilter?: number | null) => {
     try {
       setLoading(true);
-      const response = await api.get(`/rbac/booths?page=${page}&limit=50`);
+      const ac = acFilter !== undefined ? acFilter : selectedAC;
+      const acParam = ac ? `&ac=${ac}` : '';
+      const response = await api.get(`/rbac/booths?page=${page}&limit=50${acParam}`);
       console.log('Fetched booths:', response);
       setBooths(response.booths || []);
 
@@ -134,6 +141,13 @@ export const BoothManagement = () => {
     if (newPage >= 1 && newPage <= totalPages) {
       fetchBooths(newPage);
     }
+  };
+
+  const handleACChange = (acId: string) => {
+    const newAC = acId === 'all' ? null : parseInt(acId);
+    setSelectedAC(newAC);
+    setCurrentPage(1);
+    fetchBooths(1, newAC);
   };
 
   const handleCreateBooth = async () => {
@@ -297,11 +311,33 @@ export const BoothManagement = () => {
           <div>
             <h1 className="text-4xl font-bold mb-2">Booth Management</h1>
             <p className="text-muted-foreground">
-              {user?.role === 'L2' 
+              {user?.role === 'L2'
                 ? `Manage booths for AC ${user.assignedAC || '...'}`
-                : 'Manage booths across all constituencies'}
+                : selectedAC
+                  ? `Viewing booths for AC ${selectedAC} - ${getConstituencyName(selectedAC)}`
+                  : 'Select an AC to view booths'}
             </p>
           </div>
+          <div className="flex items-center gap-4">
+            {/* AC Filter for Admin (L0) users */}
+            {user?.role !== 'L2' && (
+              <Select
+                value={selectedAC?.toString() || 'all'}
+                onValueChange={handleACChange}
+              >
+                <SelectTrigger className="w-[250px]">
+                  <SelectValue placeholder="Select AC to filter" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Constituencies</SelectItem>
+                  {CONSTITUENCIES.map(c => (
+                    <SelectItem key={c.number} value={c.number.toString()}>
+                      {c.number} - {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           <Dialog open={isOpen} onOpenChange={setIsOpen}>
             <DialogTrigger asChild>
               <Button>
@@ -385,6 +421,7 @@ export const BoothManagement = () => {
               </div>
             </DialogContent>
           </Dialog>
+          </div>
         </div>
 
         {loading ? (
