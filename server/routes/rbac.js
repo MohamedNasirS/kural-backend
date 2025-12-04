@@ -980,14 +980,14 @@ router.put("/users/:userId", isAuthenticated, async (req, res) => {
 /**
  * DELETE /api/rbac/users/:userId
  * Permanently delete a user from the database
- * Access: L0 (all users), L1 (users they created)
+ * Access: L0 (all users), L1 (users they created), L2 (booth agents in their AC)
  */
 router.delete("/users/:userId", isAuthenticated, async (req, res) => {
   try {
     const { userId } = req.params;
 
-    // Check permissions
-    if (req.user.role !== "L0" && req.user.role !== "L1") {
+    // Check permissions - L0, L1, and L2 can delete users
+    if (!["L0", "L1", "L2"].includes(req.user.role)) {
       return res.status(403).json({
         success: false,
         message: "You don't have permission to delete users",
@@ -1002,11 +1002,27 @@ router.delete("/users/:userId", isAuthenticated, async (req, res) => {
       });
     }
 
+    // L2 users can only delete booth agents within their assigned AC
+    if (req.user.role === "L2") {
+      if (user.role !== "BoothAgent") {
+        return res.status(403).json({
+          success: false,
+          message: "You can only delete booth agents",
+        });
+      }
+      if (user.assignedAC !== req.user.assignedAC) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only delete booth agents in your assigned AC",
+        });
+      }
+    }
+
     // L1 users can only delete users they created
     if (req.user.role === "L1") {
       const userCreatedBy = user.createdBy?.toString();
       const currentUserId = req.user._id.toString();
-      
+
       if (userCreatedBy !== currentUserId) {
         return res.status(403).json({
           success: false,
