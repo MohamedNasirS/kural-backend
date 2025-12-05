@@ -1,7 +1,10 @@
 import { Card } from '../ui/card';
 import { Badge } from '../ui/badge';
-import { TrendingUp, TrendingDown, AlertTriangle, Target } from 'lucide-react';
+import { TrendingUp, TrendingDown, AlertTriangle, Target, Loader2 } from 'lucide-react';
 import { Progress } from '../ui/progress';
+import { useState, useEffect } from 'react';
+import { api } from '@/lib/api';
+import { CONSTITUENCIES } from '@/constants/constituencies';
 
 interface PredictionData {
   acNumber: number;
@@ -16,57 +19,104 @@ interface PredictionData {
   velocity: number; // surveys per day
 }
 
-const mockPredictions: PredictionData[] = [
-  {
-    acNumber: 101,
-    currentCompletion: 12.5,
-    projected7Days: 16.2,
-    projected14Days: 21.8,
-    projected30Days: 35.4,
-    targetCompletion: 40.0,
-    onTrack: false,
-    riskLevel: 'medium',
-    recommendation: 'Increase agent allocation by 20% to meet target',
-    velocity: 0.54,
-  },
-  {
-    acNumber: 102,
-    currentCompletion: 8.2,
-    projected7Days: 10.5,
-    projected14Days: 14.2,
-    projected30Days: 22.8,
-    targetCompletion: 40.0,
-    onTrack: false,
-    riskLevel: 'high',
-    recommendation: 'Critical: Double survey efforts, consider additional agents',
-    velocity: 0.33,
-  },
-  {
-    acNumber: 118,
-    currentCompletion: 18.7,
-    projected7Days: 24.1,
-    projected14Days: 32.5,
-    projected30Days: 48.2,
-    targetCompletion: 40.0,
-    onTrack: true,
-    riskLevel: 'low',
-    recommendation: 'On track: Maintain current pace',
-    velocity: 0.77,
-  },
-];
-
 export const PredictiveInsights = () => {
+  const [predictions, setPredictions] = useState<PredictionData[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchPredictions = async () => {
+      try {
+        setIsLoading(true);
+        const predictionData: PredictionData[] = [];
+
+        // Fetch data for first 6 ACs
+        const promises = CONSTITUENCIES.slice(0, 6).map(async (c) => {
+          try {
+            const data = await api.get(`/dashboard/stats/${c.number}`);
+            const totalVoters = data.totalMembers || 1;
+            const surveys = data.surveysCompleted || 0;
+            const currentCompletion = (surveys / totalVoters) * 100;
+
+            // Calculate velocity based on surveys (assume 30-day period)
+            const velocity = surveys / 30;
+
+            // Project future completions
+            const projected7Days = Math.min(currentCompletion + (velocity * 7 / totalVoters * 100), 100);
+            const projected14Days = Math.min(currentCompletion + (velocity * 14 / totalVoters * 100), 100);
+            const projected30Days = Math.min(currentCompletion + (velocity * 30 / totalVoters * 100), 100);
+
+            const targetCompletion = 40.0;
+            const onTrack = projected30Days >= targetCompletion;
+
+            let riskLevel: 'low' | 'medium' | 'high' = 'low';
+            let recommendation = 'On track: Maintain current pace';
+
+            if (projected30Days < targetCompletion * 0.5) {
+              riskLevel = 'high';
+              recommendation = 'Critical: Double survey efforts, consider additional agents';
+            } else if (projected30Days < targetCompletion * 0.75) {
+              riskLevel = 'medium';
+              recommendation = 'Increase agent allocation by 20% to meet target';
+            }
+
+            return {
+              acNumber: c.number,
+              currentCompletion: parseFloat(currentCompletion.toFixed(1)),
+              projected7Days: parseFloat(projected7Days.toFixed(1)),
+              projected14Days: parseFloat(projected14Days.toFixed(1)),
+              projected30Days: parseFloat(projected30Days.toFixed(1)),
+              targetCompletion,
+              onTrack,
+              riskLevel,
+              recommendation,
+              velocity: parseFloat(velocity.toFixed(2)),
+            };
+          } catch {
+            return null;
+          }
+        });
+
+        const results = await Promise.all(promises);
+        results.forEach(r => {
+          if (r) predictionData.push(r);
+        });
+
+        setPredictions(predictionData);
+      } catch (error) {
+        console.error('Error fetching prediction data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchPredictions();
+  }, []);
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-2xl font-bold">Predictive Completion Forecasts</h2>
+          <p className="text-muted-foreground mt-1">Loading predictions...</p>
+        </div>
+        <div className="flex items-center justify-center min-h-[200px]">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold">Predictive Completion Forecasts</h2>
         <p className="text-muted-foreground mt-1">
-          AI-powered projections based on current velocity and trends
+          Projections based on current velocity and trends
         </p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-        {mockPredictions.map((prediction) => (
+        {predictions.map((prediction) => (
           <Card key={prediction.acNumber} className="p-6">
             <div className="flex items-start justify-between mb-4">
               <div>

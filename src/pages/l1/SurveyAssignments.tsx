@@ -9,15 +9,10 @@ import { Search, Trash2, Plus } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useToast } from '@/components/ui/use-toast';
 import { fetchSurveys } from '@/lib/surveys';
+import { CONSTITUENCIES } from '@/constants/constituencies';
 
 interface FormOption {
   id: string;
-  name: string;
-}
-
-interface AC {
-  id: number;
-  number: number;
   name: string;
 }
 
@@ -29,12 +24,6 @@ interface Assignment {
   acName: string;
   dateAssigned: string;
 }
-
-const mockACs: AC[] = Array.from({ length: 21 }, (_, i) => ({
-  id: i + 1,
-  number: 100 + i,
-  name: i === 18 ? 'Thondamuthur' : `AC ${100 + i}`
-}));
 
 const initialAssignments: Assignment[] = [];
 
@@ -100,7 +89,7 @@ export const SurveyAssignments = () => {
     }
 
     const form = forms.find((f) => f.id === selectedForm);
-    const ac = mockACs.find((a) => a.id.toString() === selectedAC);
+    const ac = CONSTITUENCIES.find((a) => a.number.toString() === selectedAC);
 
     if (!form || !ac) {
       toast({
@@ -195,8 +184,8 @@ export const SurveyAssignments = () => {
                   <SelectValue placeholder="Choose an AC" />
                 </SelectTrigger>
                 <SelectContent>
-                  {mockACs.map((ac) => (
-                    <SelectItem key={ac.id} value={ac.id.toString()}>
+                  {CONSTITUENCIES.map((ac) => (
+                    <SelectItem key={ac.number} value={ac.number.toString()}>
                       {ac.number} - {ac.name}
                     </SelectItem>
                   ))}
@@ -260,8 +249,8 @@ export const SurveyAssignments = () => {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All ACs</SelectItem>
-                    {mockACs.map((ac) => (
-                      <SelectItem key={ac.id} value={ac.number.toString()}>
+                    {CONSTITUENCIES.map((ac) => (
+                      <SelectItem key={ac.number} value={ac.number.toString()}>
                         {ac.number} - {ac.name}
                       </SelectItem>
                     ))}

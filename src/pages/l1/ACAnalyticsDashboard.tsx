@@ -1,41 +1,99 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Users, Home, FileCheck, MapPin, Search, TrendingUp, TrendingDown } from 'lucide-react';
+import { Users, Home, FileCheck, MapPin, Search, TrendingUp, TrendingDown, Loader2 } from 'lucide-react';
+import { CONSTITUENCIES } from '@/constants/constituencies';
+import { api } from '@/lib/api';
 
-// Expanded mock data for all 26 ACs (101-126)
-const allACsData = [
-  { acNumber: '101', name: 'Dharapuram (SC)', voters: 2134, families: 589, surveys: 389, booths: 106, completion: 82 },
-  { acNumber: '102', name: 'Kangayam', voters: 1845, families: 489, surveys: 256, booths: 87, completion: 66 },
-  { acNumber: '108', name: 'Udhagamandalam', voters: 1678, families: 434, surveys: 223, booths: 79, completion: 67 },
-  { acNumber: '109', name: 'Gudalur (SC)', voters: 1234, families: 298, surveys: 134, booths: 65, completion: 58 },
-  { acNumber: '110', name: 'Coonoor', voters: 1890, families: 501, surveys: 278, booths: 91, completion: 71 },
-  { acNumber: '111', name: 'Mettupalayam', voters: 2023, families: 556, surveys: 334, booths: 101, completion: 77 },
-  { acNumber: '112', name: 'Avanashi (SC)', voters: 1756, families: 467, surveys: 245, booths: 84, completion: 69 },
-  { acNumber: '113', name: 'Tiruppur North', voters: 2456, families: 689, surveys: 478, booths: 123, completion: 92 },
-  { acNumber: '114', name: 'Tiruppur South', voters: 2189, families: 601, surveys: 401, booths: 109, completion: 84 },
-  { acNumber: '115', name: 'Palladam', voters: 1823, families: 478, surveys: 267, booths: 88, completion: 70 },
-  { acNumber: '116', name: 'Sulur', voters: 1678, families: 445, surveys: 234, booths: 82, completion: 65 },
-  { acNumber: '117', name: 'Kavundampalayam', voters: 1956, families: 521, surveys: 312, booths: 97, completion: 73 },
-  { acNumber: '118', name: 'Coimbatore North', voters: 2340, families: 678, surveys: 423, booths: 112, completion: 85 },
-  { acNumber: '119', name: 'Thondamuthur', voters: 1247, families: 342, surveys: 156, booths: 89, completion: 78 },
-  { acNumber: '120', name: 'Coimbatore South', voters: 1890, families: 534, surveys: 289, booths: 95, completion: 72 },
-  { acNumber: '121', name: 'Singanallur', voters: 2145, families: 598, surveys: 387, booths: 108, completion: 91 },
-  { acNumber: '122', name: 'Kinathukadavu', voters: 1678, families: 434, surveys: 223, booths: 79, completion: 67 },
-  { acNumber: '123', name: 'Pollachi', voters: 2378, families: 645, surveys: 456, booths: 118, completion: 89 },
-  { acNumber: '124', name: 'Valparai (SC)', voters: 1234, families: 298, surveys: 134, booths: 65, completion: 58 },
-  { acNumber: '125', name: 'Udumalaipettai', voters: 1945, families: 534, surveys: 298, booths: 93, completion: 75 },
-  { acNumber: '126', name: 'Madathukulam', voters: 1567, families: 412, surveys: 189, booths: 71, completion: 62 },
-];
+interface ACData {
+  acNumber: string;
+  name: string;
+  voters: number;
+  families: number;
+  surveys: number;
+  booths: number;
+  completion: number;
+}
 
 export const ACAnalyticsDashboard = () => {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('completion');
+  const [allACsData, setAllACsData] = useState<ACData[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchACData = async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+
+        // Fetch real data from the API
+        const data = await api.get('/rbac/dashboard/ac-overview');
+
+        if (data.success && data.acPerformance) {
+          // Map API data to our format, enriching with constituency names
+          const mappedData: ACData[] = data.acPerformance.map((ac: {
+            acNumber: number;
+            acName: string | null;
+            voters: number;
+            surveyedMembers: number;
+            completion: number;
+            agents: number;
+          }) => {
+            const constituency = CONSTITUENCIES.find(c => c.number === ac.acNumber);
+            return {
+              acNumber: String(ac.acNumber),
+              name: ac.acName || constituency?.name || `AC ${ac.acNumber}`,
+              voters: ac.voters || 0,
+              families: Math.round(ac.voters / 3.5) || 0, // Estimate families
+              surveys: ac.surveyedMembers || 0,
+              booths: Math.round(ac.voters / 25) || 0, // Estimate booths
+              completion: ac.completion || 0,
+            };
+          });
+
+          setAllACsData(mappedData);
+        } else {
+          // Fallback to constituency list with zeros if API returns no data
+          const fallbackData: ACData[] = CONSTITUENCIES.map(c => ({
+            acNumber: String(c.number),
+            name: c.name,
+            voters: 0,
+            families: 0,
+            surveys: 0,
+            booths: 0,
+            completion: 0,
+          }));
+          setAllACsData(fallbackData);
+        }
+      } catch (err) {
+        console.error('Error fetching AC data:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load data');
+
+        // Fallback to constituency list with zeros on error
+        const fallbackData: ACData[] = CONSTITUENCIES.map(c => ({
+          acNumber: String(c.number),
+          name: c.name,
+          voters: 0,
+          families: 0,
+          surveys: 0,
+          booths: 0,
+          completion: 0,
+        }));
+        setAllACsData(fallbackData);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchACData();
+  }, []);
 
   const getPerformanceColor = (completion: number) => {
     if (completion >= 80) return 'success';
@@ -69,13 +127,27 @@ export const ACAnalyticsDashboard = () => {
       }
     });
 
+  if (isLoading) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <span className="ml-2 text-muted-foreground">Loading AC data...</span>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
   return (
     <DashboardLayout>
       <div className="space-y-8">
         {/* Header */}
         <div>
           <h1 className="text-4xl font-bold mb-2">AC Analytics Dashboard</h1>
-          <p className="text-xl text-muted-foreground">Overview of all 26 Assembly Constituencies</p>
+          <p className="text-xl text-muted-foreground">
+            Overview of {allACsData.length} Assembly Constituencies
+            {error && <span className="text-destructive text-sm ml-2">(Some data may be unavailable)</span>}
+          </p>
         </div>
 
         {/* Search and Filter */}

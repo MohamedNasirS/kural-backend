@@ -6,56 +6,116 @@ import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Users, Home, FileCheck, TrendingUp, TrendingDown, Calendar as CalendarIcon, Filter, Map, Activity } from 'lucide-react';
-import { useState } from 'react';
+import { Users, Home, FileCheck, TrendingUp, TrendingDown, Calendar as CalendarIcon, Filter, Activity, Loader2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LineChart, Line, BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { api } from '@/lib/api';
 
-const acPerformance = [
-  { ac: '119 - Thondamuthur', acNumber: 119, voters: 1247, completion: 12.5, activity: 'Medium' },
-  { ac: '119 - Coimbatore North', acNumber: 119, voters: 2340, completion: 18.1, activity: 'High' },
-  { ac: '120 - Coimbatore South', acNumber: 120, voters: 1890, completion: 15.3, activity: 'High' },
-  { ac: '121 - Singanallur', acNumber: 121, voters: 1678, completion: 8.2, activity: 'Low' },
-  { ac: '122 - Sulur', acNumber: 122, voters: 1534, completion: 14.7, activity: 'Medium' },
-];
-
-const voterTurnoutData = [
-  { date: 'Jan 1', turnout: 45 },
-  { date: 'Jan 8', turnout: 52 },
-  { date: 'Jan 15', turnout: 61 },
-  { date: 'Jan 22', turnout: 68 },
-  { date: 'Jan 29', turnout: 73 },
-];
-
-const surveyProgressData = [
-  { week: 'Week 1', surveys: 420 },
-  { week: 'Week 2', surveys: 580 },
-  { week: 'Week 3', surveys: 690 },
-  { week: 'Week 4', surveys: 820 },
-  { week: 'Week 5', surveys: 779 },
-];
-
-const agentActivityData = [
-  { day: 'Mon', submissions: 125 },
-  { day: 'Tue', submissions: 142 },
-  { day: 'Wed', submissions: 158 },
-  { day: 'Thu', submissions: 137 },
-  { day: 'Fri', submissions: 165 },
-  { day: 'Sat', submissions: 148 },
-  { day: 'Sun', submissions: 134 },
-];
+interface ACPerformance {
+  ac: string;
+  acNumber: number;
+  voters: number;
+  completion: number;
+  activity: string;
+  surveyedMembers: number;
+}
 
 export const GlobalAnalytics = () => {
   const navigate = useNavigate();
   const [dateRange, setDateRange] = useState<Date | undefined>(new Date());
   const [activityFilter, setActivityFilter] = useState<string>('all');
   const [isLive, setIsLive] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
+  const [acPerformance, setAcPerformance] = useState<ACPerformance[]>([]);
+  const [totals, setTotals] = useState({
+    totalVoters: 0,
+    totalFamilies: 0,
+    totalSurveyedMembers: 0,
+    avgCompletion: 0,
+  });
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setIsLoading(true);
+        const data = await api.get('/rbac/dashboard/ac-overview');
+
+        if (data.success && data.acPerformance) {
+          const mappedData: ACPerformance[] = data.acPerformance.map((ac: {
+            ac: string;
+            acNumber: number;
+            acName: string | null;
+            voters: number;
+            surveyedMembers: number;
+            completion: number;
+          }) => ({
+            ac: ac.ac || `AC ${ac.acNumber}`,
+            acNumber: ac.acNumber,
+            voters: ac.voters || 0,
+            completion: ac.completion || 0,
+            surveyedMembers: ac.surveyedMembers || 0,
+            activity: ac.completion >= 15 ? 'High' : ac.completion >= 8 ? 'Medium' : 'Low',
+          }));
+
+          setAcPerformance(mappedData);
+
+          // Calculate totals
+          const totalVoters = mappedData.reduce((sum, ac) => sum + ac.voters, 0);
+          const totalSurveyedMembers = mappedData.reduce((sum, ac) => sum + ac.surveyedMembers, 0);
+          const avgCompletion = mappedData.length > 0
+            ? Math.round((mappedData.reduce((sum, ac) => sum + ac.completion, 0) / mappedData.length) * 10) / 10
+            : 0;
+
+          setTotals({
+            totalVoters,
+            totalFamilies: Math.round(totalVoters / 3.5),
+            totalSurveyedMembers,
+            avgCompletion,
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching analytics data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  // Generate chart data from AC performance
+  const voterTurnoutData = acPerformance.slice(0, 7).map((ac, idx) => ({
+    date: `Day ${idx + 1}`,
+    turnout: ac.completion,
+  }));
+
+  const surveyProgressData = acPerformance.slice(0, 6).map((ac, idx) => ({
+    week: `Week ${idx + 1}`,
+    surveys: ac.surveyedMembers,
+  }));
+
+  const agentActivityData = acPerformance.slice(0, 7).map((ac, idx) => ({
+    day: `Day ${idx + 1}`,
+    submissions: ac.surveyedMembers,
+  }));
 
   const handleACClick = (acNumber: number) => {
     navigate(`/l1/ac/${acNumber}`);
   };
+
+  if (isLoading) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <span className="ml-2 text-muted-foreground">Loading analytics data...</span>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -72,7 +132,7 @@ export const GlobalAnalytics = () => {
                 {isLive ? 'Live' : 'Offline'}
               </span>
             </h1>
-            <p className="text-muted-foreground">Overall performance across all 21 Assembly Constituencies</p>
+            <p className="text-muted-foreground">Overall performance across {acPerformance.length} Assembly Constituencies</p>
           </div>
         </div>
 
@@ -122,10 +182,10 @@ export const GlobalAnalytics = () => {
         </Card>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <StatCard title="Total Voters" value="26,247" icon={Users} variant="primary" />
-          <StatCard title="Total Families" value="7,182" icon={Home} variant="primary" />
-          <StatCard title="Surveys Completed" value="3,289" icon={FileCheck} variant="success" />
-          <StatCard title="Avg Completion" value="12.5%" icon={TrendingUp} variant="warning" />
+          <StatCard title="Total Voters" value={totals.totalVoters.toLocaleString()} icon={Users} variant="primary" />
+          <StatCard title="Total Families" value={totals.totalFamilies.toLocaleString()} icon={Home} variant="primary" />
+          <StatCard title="Surveys Completed" value={totals.totalSurveyedMembers.toLocaleString()} icon={FileCheck} variant="success" />
+          <StatCard title="Avg Completion" value={`${totals.avgCompletion}%`} icon={TrendingUp} variant="warning" />
         </div>
 
         {/* Interactive Charts */}
@@ -244,9 +304,22 @@ export const GlobalAnalytics = () => {
               Highest Activity AC
             </h3>
             <div className="space-y-2">
-              <p className="text-2xl font-bold text-primary">119 - Coimbatore North</p>
-              <p className="text-sm text-muted-foreground">18.1% completion rate</p>
-              <p className="text-sm text-muted-foreground">423 surveys completed</p>
+              {acPerformance.length > 0 ? (
+                <>
+                  {(() => {
+                    const highest = [...acPerformance].sort((a, b) => b.completion - a.completion)[0];
+                    return (
+                      <>
+                        <p className="text-2xl font-bold text-primary">{highest.ac}</p>
+                        <p className="text-sm text-muted-foreground">{highest.completion}% completion rate</p>
+                        <p className="text-sm text-muted-foreground">{highest.surveyedMembers.toLocaleString()} surveys completed</p>
+                      </>
+                    );
+                  })()}
+                </>
+              ) : (
+                <p className="text-muted-foreground">No data available</p>
+              )}
             </div>
           </Card>
 
@@ -256,9 +329,22 @@ export const GlobalAnalytics = () => {
               Lowest Activity AC
             </h3>
             <div className="space-y-2">
-              <p className="text-2xl font-bold text-primary">121 - Singanallur</p>
-              <p className="text-sm text-muted-foreground">8.2% completion rate</p>
-              <p className="text-sm text-muted-foreground">138 surveys completed</p>
+              {acPerformance.length > 0 ? (
+                <>
+                  {(() => {
+                    const lowest = [...acPerformance].sort((a, b) => a.completion - b.completion)[0];
+                    return (
+                      <>
+                        <p className="text-2xl font-bold text-primary">{lowest.ac}</p>
+                        <p className="text-sm text-muted-foreground">{lowest.completion}% completion rate</p>
+                        <p className="text-sm text-muted-foreground">{lowest.surveyedMembers.toLocaleString()} surveys completed</p>
+                      </>
+                    );
+                  })()}
+                </>
+              ) : (
+                <p className="text-muted-foreground">No data available</p>
+              )}
             </div>
           </Card>
         </div>
