@@ -297,6 +297,7 @@ export const ACFamilyManager = () => {
         open={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
         familyData={selectedFamily}
+        acId={acNumber}
       />
     </DashboardLayout>
   );

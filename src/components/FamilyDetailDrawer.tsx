@@ -66,12 +66,94 @@ export const FamilyDetailDrawer = ({ open, onClose, familyData, acId: propAcId }
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [details, setDetails] = useState<FamilyDetails | null>(null);
+  const [selectedVoter, setSelectedVoter] = useState<any>(null);
+  const [voterDrawerOpen, setVoterDrawerOpen] = useState(false);
 
+  const handleVoterClick = (member: FamilyMember) => {
+    // Convert FamilyMember to VoterDetailDrawer format
+    const voterData = {
+      id: member.id,
+      name: member.name,
+      age: member.age,
+      gender: member.gender,
+      booth: details?.family.booth || familyData?.booth || '',
+      boothNo: details?.family.boothNo || familyData?.boothNo || 0,
+      family: details?.family.headName || familyData?.family_head || '',
+      phone: member.phone,
+      surveyed: member.surveyed,
+      voterID: member.voterID,
+      relationship: member.relationship,
+      religion: member.religion,
+      caste: member.caste
+    };
+    setSelectedVoter(voterData);
+    setVoterDrawerOpen(true);
+  };
+
+  // Build details from familyData.voters (instant) or fetch from API (fallback)
   useEffect(() => {
     if (open && familyData) {
-      fetchFamilyDetails();
+      // If voters data is already available, use it directly (instant loading)
+      if (familyData.voters && familyData.voters.length > 0) {
+        buildDetailsFromVoters();
+      } else {
+        // Fallback to API call if voters not available
+        fetchFamilyDetails();
+      }
     }
   }, [open, familyData]);
+
+  const buildDetailsFromVoters = () => {
+    if (!familyData || !familyData.voters) return;
+
+    const voters = familyData.voters;
+    const acId = propAcId || user?.assignedAC || 119;
+
+    // Calculate demographics from voters
+    const demographics = {
+      totalMembers: voters.length,
+      male: voters.filter((v: any) => v.gender === 'Male').length,
+      female: voters.filter((v: any) => v.gender === 'Female').length,
+      surveyed: voters.filter((v: any) => v.surveyed === true).length,
+      pending: voters.filter((v: any) => v.surveyed !== true).length,
+      averageAge: Math.round(voters.reduce((sum: number, v: any) => sum + (v.age || 0), 0) / voters.length)
+    };
+
+    // Format members from voters
+    const formattedMembers: FamilyMember[] = voters.map((voter: any) => ({
+      id: voter.id?.toString() || voter._id?.toString() || '',
+      name: voter.name || 'N/A',
+      voterID: voter.voterID || 'N/A',
+      age: voter.age || 0,
+      gender: voter.gender || 'N/A',
+      relationship: voter.relationToHead || 'Member',
+      phone: voter.mobile ? `+91 ${voter.mobile}` : '',
+      surveyed: voter.surveyed === true,
+      surveyedAt: voter.surveyedAt || null,
+      religion: voter.religion || 'N/A',
+      caste: voter.caste || 'N/A'
+    }));
+
+    // Build family details
+    const familyDetails: FamilyDetails = {
+      family: {
+        id: familyData.id,
+        headName: familyData.family_head,
+        address: familyData.address || 'N/A',
+        booth: familyData.booth || 'N/A',
+        boothNo: typeof familyData.boothNo === 'number' ? familyData.boothNo : parseInt(familyData.boothNo?.toString() || '0') || 0,
+        acId: typeof acId === 'number' ? acId : parseInt(acId?.toString() || '119'),
+        acName: `AC ${acId}`,
+        phone: familyData.phone || 'N/A'
+      },
+      members: formattedMembers,
+      demographics
+    };
+
+    setDetails(familyDetails);
+    setLoading(false);
+    setError(null);
+  };
 
   const fetchFamilyDetails = async () => {
     if (!familyData || !user) return;
@@ -101,24 +183,15 @@ export const FamilyDetailDrawer = ({ open, onClose, familyData, acId: propAcId }
       }
 
       const url = `${API_BASE_URL}/families/${acId}/details?${params}`;
-      console.log('Fetching family details:', {
-        familyData,
-        acId,
-        url
-      });
 
       const response = await fetch(url, { credentials: 'include' });
 
-      console.log('Response status:', response.status);
-      
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
-        console.error('Error response:', errorData);
         throw new Error(errorData.message || 'Failed to fetch family details');
       }
 
       const data = await response.json();
-      console.log('Family details received:', data);
       setDetails(data);
     } catch (err) {
       console.error('Error fetching family details:', err);
@@ -178,7 +251,11 @@ export const FamilyDetailDrawer = ({ open, onClose, familyData, acId: propAcId }
               </h3>
               <div className="space-y-3">
                 {details.members.map((member) => (
-                  <div key={member.id} className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                  <div
+                    key={member.id}
+                    className="flex items-center justify-between p-3 bg-muted rounded-lg cursor-pointer hover:bg-muted/80 transition-colors"
+                    onClick={() => handleVoterClick(member)}
+                  >
                     <div className="flex items-center gap-3">
                       <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
                         <UserCircle className="h-6 w-6 text-primary" />
@@ -193,9 +270,12 @@ export const FamilyDetailDrawer = ({ open, onClose, familyData, acId: propAcId }
                         )}
                       </div>
                     </div>
-                    <Badge variant={member.surveyed ? 'default' : 'secondary'}>
-                      {member.surveyed ? 'Surveyed' : 'Pending'}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={member.surveyed ? 'default' : 'secondary'}>
+                        {member.surveyed ? 'Surveyed' : 'Pending'}
+                      </Badge>
+                      <Eye className="h-4 w-4 text-muted-foreground" />
+                    </div>
                   </div>
                 ))}
               </div>
@@ -263,6 +343,16 @@ export const FamilyDetailDrawer = ({ open, onClose, familyData, acId: propAcId }
           </div>
         ) : null}
       </SheetContent>
+
+      {/* Voter Detail Drawer - opens when clicking on a family member */}
+      <VoterDetailDrawer
+        open={voterDrawerOpen}
+        onClose={() => {
+          setVoterDrawerOpen(false);
+          setSelectedVoter(null);
+        }}
+        voterData={selectedVoter}
+      />
     </Sheet>
   );
 };

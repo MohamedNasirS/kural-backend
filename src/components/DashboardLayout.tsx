@@ -122,6 +122,7 @@ const AppSidebar = () => {
           { icon: Home, label: 'Booth Management', path: '/shared/booth-management' },
           { icon: UserCircle, label: 'Booth Agent Management', path: '/shared/booth-agent-management' },
           { icon: Activity, label: 'Live Booth Updates', path: '/l2/live-updates' },
+          { icon: BarChart3, label: 'Reports', path: '/l2/reports' },
           { icon: ScrollText, label: 'Activity Logs', path: '/l2/activity-logs' },
         ];
       case 'L9':

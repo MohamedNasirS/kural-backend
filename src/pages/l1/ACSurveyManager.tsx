@@ -4,54 +4,130 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, FileCheck, Eye } from 'lucide-react';
-import { useState } from 'react';
+import { ArrowLeft, FileCheck, Eye, Loader2, Download } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { SurveyDetailDrawer } from '@/components/SurveyDetailDrawer';
+import API_BASE_URL from '@/lib/api';
 
-const mockSurveys = [
-  { id: 1, voter: 'Rajesh Kumar', voterId: 'VOT123456', booth: 'B-101', date: '2024-01-15', question: 'Which party do you prefer?', answer: 'Party A', agent: 'Rajesh Kumar' },
-  { id: 2, voter: 'Priya Sharma', voterId: 'VOT123457', booth: 'B-102', date: '2024-01-16', question: 'Main issues in your area?', answer: 'Infrastructure development', agent: 'Priya Sharma' },
-  { id: 3, voter: 'Arun Patel', voterId: 'VOT123458', booth: 'B-101', date: '2024-01-16', question: 'Which party do you prefer?', answer: 'Party B', agent: 'Arun Patel' },
-  { id: 4, voter: 'Suresh Reddy', voterId: 'VOT123459', booth: 'B-102', date: '2024-01-17', question: 'Main issues in your area?', answer: 'Water supply', agent: 'Suresh Reddy' },
-  { id: 5, voter: 'Meena Devi', voterId: 'VOT123460', booth: 'B-103', date: '2024-01-17', question: 'Which party do you prefer?', answer: 'Undecided', agent: 'Meena Devi' },
-];
+interface SurveyResponse {
+  id: string;
+  survey_id: string;
+  respondent_name: string;
+  voter_id: string;
+  booth: string;
+  booth_id: string | null;
+  survey_date: string;
+  status: string;
+  answers: any[];
+}
+
+interface Pagination {
+  page: number;
+  limit: number;
+  total: number;
+  pages: number;
+}
 
 export const ACSurveyManager = () => {
   const { acNumber } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [formFilter, setFormFilter] = useState('all');
   const [boothFilter, setBoothFilter] = useState('all');
   const [selectedSurvey, setSelectedSurvey] = useState<any>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
-  const filteredSurveys = mockSurveys.filter(survey => {
-    const matchesForm = formFilter === 'all' || 
-      (formFilter === 'form1' && survey.question.includes('party')) ||
-      (formFilter === 'form2' && survey.question.includes('issues'));
-    const matchesBooth = boothFilter === 'all' || survey.booth === boothFilter;
-    return matchesForm && matchesBooth;
+  // API state
+  const [surveys, setSurveys] = useState<SurveyResponse[]>([]);
+  const [booths, setBooths] = useState<{ boothId: string; boothNo: number; boothName: string; label: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [pagination, setPagination] = useState<Pagination>({
+    page: 1,
+    limit: 50,
+    total: 0,
+    pages: 0
   });
 
+  // Fetch booths on mount
+  useEffect(() => {
+    if (acNumber) {
+      fetchBooths();
+    }
+  }, [acNumber]);
+
+  // Fetch survey responses when filters change
+  useEffect(() => {
+    if (acNumber) {
+      fetchSurveyResponses();
+    }
+  }, [acNumber, boothFilter, pagination.page]);
+
+  const fetchBooths = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/voters/${acNumber}/booths`, {
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch booths');
+      }
+
+      const data = await response.json();
+      setBooths(data.booths || []);
+    } catch (err) {
+      console.error('Error fetching booths:', err);
+    }
+  };
+
+  const fetchSurveyResponses = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const params = new URLSearchParams({
+        page: pagination.page.toString(),
+        limit: pagination.limit.toString(),
+      });
+
+      if (boothFilter && boothFilter !== 'all') {
+        params.append('booth', boothFilter);
+      }
+
+      const response = await fetch(`${API_BASE_URL}/survey-responses/${acNumber}?${params}`, {
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch survey responses');
+      }
+
+      const data = await response.json();
+      setSurveys(data.responses || []);
+      setPagination(data.pagination);
+    } catch (err) {
+      console.error('Error fetching survey responses:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load survey responses');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleExportResults = () => {
-    // In a real application, this would export the actual data
-    // For now, we'll just show a toast notification
     toast({
       title: 'Export Started',
       description: 'Survey results export has been initiated. The file will be downloaded shortly.',
     });
-    
-    // Simulate export process
+
     setTimeout(() => {
       const csvContent = [
-        ['Voter', 'Booth', 'Date', 'Question', 'Answer'],
-        ...mockSurveys.map(survey => [
-          survey.voter,
+        ['Respondent', 'Voter ID', 'Booth', 'Date', 'Status'],
+        ...surveys.map(survey => [
+          survey.respondent_name,
+          survey.voter_id,
           survey.booth,
-          survey.date,
-          survey.question,
-          survey.answer
+          new Date(survey.survey_date).toLocaleDateString(),
+          survey.status
         ])
       ]
         .map(row => row.join(','))
@@ -69,87 +145,153 @@ export const ACSurveyManager = () => {
         title: 'Export Complete',
         description: 'Survey results have been successfully exported.',
       });
-    }, 1500);
+    }, 1000);
   };
 
-  const handleViewDetails = (survey: any) => {
-    setSelectedSurvey(survey);
+  const handleViewDetails = (survey: SurveyResponse) => {
+    setSelectedSurvey({
+      id: survey.id,
+      voter: survey.respondent_name,
+      voterId: survey.voter_id,
+      booth: survey.booth,
+      date: new Date(survey.survey_date).toLocaleDateString(),
+      status: survey.status,
+      answers: survey.answers
+    });
     setIsDrawerOpen(true);
+  };
+
+  const formatDate = (dateString: string) => {
+    try {
+      return new Date(dateString).toLocaleDateString('en-IN', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      });
+    } catch {
+      return 'N/A';
+    }
   };
 
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => navigate(`/l1/ac/${acNumber}`)}>
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <div>
-            <h1 className="text-4xl font-bold">Survey Manager</h1>
-            <p className="text-muted-foreground">AC {acNumber} - Review survey responses</p>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="icon" onClick={() => navigate(`/l1/ac/${acNumber}`)}>
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+            <div>
+              <h1 className="text-4xl font-bold">Survey Manager</h1>
+              <p className="text-muted-foreground">AC {acNumber} - Review survey responses</p>
+            </div>
           </div>
+          <Button variant="outline" className="gap-2" onClick={handleExportResults} disabled={surveys.length === 0}>
+            <Download className="h-4 w-4" />
+            Export Results
+          </Button>
         </div>
+
+        {error && (
+          <div className="bg-destructive/10 border border-destructive text-destructive px-4 py-3 rounded">
+            {error}
+          </div>
+        )}
 
         <Card className="p-4">
           <div className="flex flex-wrap gap-4">
-            <Select value={formFilter} onValueChange={setFormFilter}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Select survey form" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Forms</SelectItem>
-                <SelectItem value="form1">Voter Preference Survey</SelectItem>
-                <SelectItem value="form2">Issues Survey</SelectItem>
-              </SelectContent>
-            </Select>
-
             <Select value={boothFilter} onValueChange={setBoothFilter}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Filter by booth" />
+              <SelectTrigger className="w-[350px]">
+                <SelectValue placeholder="All Booths" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Booths</SelectItem>
-                <SelectItem value="B-101">Booth B-101</SelectItem>
-                <SelectItem value="B-102">Booth B-102</SelectItem>
-                <SelectItem value="B-103">Booth B-103</SelectItem>
+                {booths.map((booth) => (
+                  <SelectItem key={booth.boothId} value={booth.boothId}>
+                    {booth.boothName}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
-
-            <Button variant="outline" className="gap-2" onClick={handleExportResults}>
-              <FileCheck className="h-4 w-4" />
-              Export Results
-            </Button>
           </div>
         </Card>
 
-        <div className="space-y-4">
-          {filteredSurveys.map((survey) => (
-            <Card key={survey.id} className="p-6">
-              <div className="flex items-start justify-between">
-                <div className="space-y-2 flex-1">
-                  <div className="flex items-center gap-3">
-                    <h3 className="font-semibold text-lg">{survey.voter}</h3>
-                    <Badge variant="outline">{survey.booth}</Badge>
-                    <span className="text-sm text-muted-foreground">{survey.date}</span>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-muted-foreground">Q: {survey.question}</p>
-                    <p className="text-sm">A: {survey.answer}</p>
-                  </div>
-                </div>
-                <Button variant="ghost" size="sm" onClick={() => handleViewDetails(survey)}>
-                  <Eye className="h-4 w-4" />
+        {/* Pagination Info */}
+        {!loading && pagination.total > 0 && (
+          <div className="flex items-center justify-between text-sm text-muted-foreground">
+            <div>
+              Showing {((pagination.page - 1) * pagination.limit) + 1} to {Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total.toLocaleString()} responses
+            </div>
+            {pagination.pages > 1 && (
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPagination(prev => ({ ...prev, page: prev.page - 1 }))}
+                  disabled={pagination.page === 1}
+                >
+                  Previous
+                </Button>
+                <span className="flex items-center px-3">
+                  Page {pagination.page} of {pagination.pages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPagination(prev => ({ ...prev, page: prev.page + 1 }))}
+                  disabled={pagination.page === pagination.pages}
+                >
+                  Next
                 </Button>
               </div>
-            </Card>
-          ))}
-        </div>
+            )}
+          </div>
+        )}
+
+        {loading ? (
+          <Card className="p-8">
+            <div className="flex items-center justify-center gap-2 text-muted-foreground">
+              <Loader2 className="h-6 w-6 animate-spin" />
+              <span>Loading survey responses...</span>
+            </div>
+          </Card>
+        ) : surveys.length > 0 ? (
+          <div className="space-y-4">
+            {surveys.map((survey) => (
+              <Card key={survey.id} className="p-6">
+                <div className="flex items-start justify-between">
+                  <div className="space-y-2 flex-1">
+                    <div className="flex items-center gap-3">
+                      <h3 className="font-semibold text-lg">{survey.respondent_name}</h3>
+                      <Badge variant="outline">{survey.booth}</Badge>
+                      <span className="text-sm text-muted-foreground">{formatDate(survey.survey_date)}</span>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm text-muted-foreground">Voter ID: {survey.voter_id}</p>
+                      <Badge variant={survey.status === 'Completed' ? 'default' : 'secondary'}>
+                        {survey.status}
+                      </Badge>
+                    </div>
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={() => handleViewDetails(survey)}>
+                    <Eye className="h-4 w-4" />
+                  </Button>
+                </div>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <Card className="p-8 text-center">
+            <FileCheck className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+            <p className="text-muted-foreground">No survey responses found for the selected filters.</p>
+          </Card>
+        )}
       </div>
 
-      <SurveyDetailDrawer 
-        open={isDrawerOpen} 
-        onClose={() => setIsDrawerOpen(false)} 
-        surveyData={selectedSurvey} 
+      <SurveyDetailDrawer
+        open={isDrawerOpen}
+        onClose={() => setIsDrawerOpen(false)}
+        surveyData={selectedSurvey}
       />
     </DashboardLayout>
   );
