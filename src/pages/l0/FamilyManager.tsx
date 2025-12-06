@@ -1,13 +1,13 @@
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useParams, useNavigate } from 'react-router-dom';
-import { Search, ArrowLeft, Home, Users, Loader2, Filter } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/progress';
+import { Search, Eye, Users, Filter, Loader2, Home } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { FamilyDetailDrawer } from '@/components/FamilyDetailDrawer';
+import { CONSTITUENCIES } from '@/constants/constituencies';
 import API_BASE_URL from '@/lib/api';
 
 interface Family {
@@ -29,17 +29,16 @@ interface Pagination {
   pages: number;
 }
 
-export const ACFamilyManager = () => {
-  const { acNumber } = useParams();
-  const navigate = useNavigate();
-  const [searchTerm, setSearchTerm] = useState('');
-  const [boothFilter, setBoothFilter] = useState('all');
+export const FamilyManager = () => {
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [acFilter, setAcFilter] = useState<string>('111'); // Default to AC 111 (has data)
+  const [boothFilter, setBoothFilter] = useState<string>('all');
   const [selectedFamily, setSelectedFamily] = useState<any>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
   // API state
   const [families, setFamilies] = useState<Family[]>([]);
-  const [booths, setBooths] = useState<{ boothNo: number; boothName: string; label: string }[]>([]);
+  const [booths, setBooths] = useState<{ boothId: string; boothNo: string; boothName: string; label: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pagination, setPagination] = useState<Pagination>({
@@ -49,23 +48,24 @@ export const ACFamilyManager = () => {
     pages: 0
   });
 
-  // Fetch booths on mount
+  // Fetch booths when AC changes
   useEffect(() => {
-    if (acNumber) {
+    if (acFilter) {
       fetchBooths();
+      setBoothFilter('all'); // Reset booth filter when AC changes
     }
-  }, [acNumber]);
+  }, [acFilter]);
 
   // Fetch families when filters change
   useEffect(() => {
-    if (acNumber) {
+    if (acFilter) {
       fetchFamilies();
     }
-  }, [acNumber, boothFilter, pagination.page]);
+  }, [acFilter, boothFilter, pagination.page]);
 
   const fetchBooths = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/voters/${acNumber}/booths`, {
+      const response = await fetch(`${API_BASE_URL}/voters/${acFilter}/booths`, {
         credentials: 'include',
       });
 
@@ -77,6 +77,7 @@ export const ACFamilyManager = () => {
       setBooths(data.booths || []);
     } catch (err) {
       console.error('Error fetching booths:', err);
+      setBooths([]);
     }
   };
 
@@ -98,7 +99,7 @@ export const ACFamilyManager = () => {
         params.append('search', searchTerm.trim());
       }
 
-      const response = await fetch(`${API_BASE_URL}/families/${acNumber}?${params}`, {
+      const response = await fetch(`${API_BASE_URL}/families/${acFilter}?${params}`, {
         credentials: 'include',
       });
 
@@ -127,24 +128,25 @@ export const ACFamilyManager = () => {
     setIsDrawerOpen(true);
   };
 
-  // Calculate survey progress for a family (surveyed voters / total voters)
+  // Calculate survey progress for a family
   const getSurveyProgress = (family: Family) => {
     if (!family.voters || family.voters.length === 0) return { surveyed: 0, total: family.members };
     const surveyed = family.voters.filter((v: any) => v.surveyed === true).length;
     return { surveyed, total: family.members };
   };
 
+  // Get AC name
+  const getAcName = (acNum: string) => {
+    const ac = CONSTITUENCIES.find(c => c.number === parseInt(acNum));
+    return ac ? ac.name : `AC ${acNum}`;
+  };
+
   return (
     <DashboardLayout>
-      <div className="space-y-6">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => navigate(`/l1/ac/${acNumber}`)}>
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <div>
-            <h1 className="text-4xl font-bold">Family Manager</h1>
-            <p className="text-muted-foreground">AC {acNumber} - Manage family records</p>
-          </div>
+      <div className="space-y-8">
+        <div>
+          <h1 className="text-4xl font-bold mb-2">Family Manager</h1>
+          <p className="text-muted-foreground">View and manage family records across all Assembly Constituencies</p>
         </div>
 
         {error && (
@@ -159,12 +161,27 @@ export const ACFamilyManager = () => {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search by family head or address..."
+                className="pl-10"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                className="pl-10"
               />
             </div>
+            <Select value={acFilter} onValueChange={(value) => {
+              setAcFilter(value);
+              setPagination(prev => ({ ...prev, page: 1 }));
+            }}>
+              <SelectTrigger className="w-[250px]">
+                <SelectValue placeholder="Select AC" />
+              </SelectTrigger>
+              <SelectContent>
+                {CONSTITUENCIES.map((ac) => (
+                  <SelectItem key={ac.number} value={String(ac.number)}>
+                    {ac.number} - {ac.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Select value={boothFilter} onValueChange={setBoothFilter}>
               <SelectTrigger className="w-[350px]">
                 <SelectValue placeholder="All Booths" />
@@ -172,18 +189,61 @@ export const ACFamilyManager = () => {
               <SelectContent>
                 <SelectItem value="all">All Booths</SelectItem>
                 {booths.map((booth) => (
-                  <SelectItem key={booth.boothNo} value={String(booth.boothNo)}>
-                    {booth.boothName}
+                  <SelectItem key={booth.boothId} value={booth.boothId}>
+                    {booth.boothId}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <Button variant="outline" onClick={handleSearch}>
-              <Filter className="mr-2 h-4 w-4" />
-              Apply
+            <Button variant="outline" onClick={handleSearch} disabled={loading}>
+              {loading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Filter className="mr-2 h-4 w-4" />
+              )}
+              Apply Filters
             </Button>
           </div>
         </Card>
+
+        {/* Summary Stats */}
+        {!loading && pagination.total > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Card className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-full bg-blue-100">
+                  <Users className="h-5 w-5 text-blue-600" />
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Total Families</p>
+                  <p className="text-2xl font-bold">{pagination.total.toLocaleString()}</p>
+                </div>
+              </div>
+            </Card>
+            <Card className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-full bg-green-100">
+                  <Home className="h-5 w-5 text-green-600" />
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Current AC</p>
+                  <p className="text-lg font-bold">{getAcName(acFilter)}</p>
+                </div>
+              </div>
+            </Card>
+            <Card className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-full bg-purple-100">
+                  <Filter className="h-5 w-5 text-purple-600" />
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Available Booths</p>
+                  <p className="text-2xl font-bold">{booths.length}</p>
+                </div>
+              </div>
+            </Card>
+          </div>
+        )}
 
         {/* Pagination Info */}
         {!loading && pagination.total > 0 && (
@@ -223,36 +283,32 @@ export const ACFamilyManager = () => {
             <p className="text-muted-foreground">Loading families...</p>
           </Card>
         ) : families.length > 0 ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {families.map((family) => {
               const progress = getSurveyProgress(family);
               return (
                 <Card key={family.id} className="p-6 hover:shadow-lg transition-shadow">
                   <div className="space-y-4">
                     <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="p-3 rounded-lg bg-primary/10">
-                          <Home className="h-6 w-6 text-primary" />
-                        </div>
-                        <div>
-                          <h3 className="font-semibold text-lg">{family.id}</h3>
-                          <p className="text-sm text-muted-foreground">{family.family_head}</p>
-                        </div>
+                      <div className="p-3 rounded-full bg-primary/10">
+                        <Users className="h-6 w-6 text-primary" />
                       </div>
-                      <Button variant="outline" size="sm" onClick={() => handleViewDetails(family)}>View Details</Button>
+                      <span className="text-xs font-medium text-muted-foreground">{family.id}</span>
                     </div>
 
-                    <div className="space-y-2">
+                    <div>
+                      <h3 className="text-lg font-semibold mb-1">{family.family_head}</h3>
                       <p className="text-sm text-muted-foreground line-clamp-2">{family.address}</p>
-                      <div className="flex items-center gap-4 text-sm">
-                        <div className="flex items-center gap-1">
-                          <Users className="h-4 w-4" />
-                          <span>{family.members} members</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Home className="h-4 w-4" />
-                          <span>Booth {family.boothNo || 'N/A'}</span>
-                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div className="p-2 bg-muted rounded">
+                        <p className="text-xs text-muted-foreground">Members</p>
+                        <p className="font-semibold">{family.members}</p>
+                      </div>
+                      <div className="p-2 bg-muted rounded">
+                        <p className="text-xs text-muted-foreground">Booth</p>
+                        <p className="font-semibold">{family.boothNo || 'N/A'}</p>
                       </div>
                     </div>
 
@@ -281,6 +337,11 @@ export const ACFamilyManager = () => {
                       </div>
                       <Progress value={progress.total > 0 ? (progress.surveyed / progress.total) * 100 : 0} />
                     </div>
+
+                    <Button variant="outline" className="w-full" onClick={() => handleViewDetails(family)}>
+                      <Eye className="mr-2 h-4 w-4" />
+                      View Details
+                    </Button>
                   </div>
                 </Card>
               );
@@ -289,6 +350,9 @@ export const ACFamilyManager = () => {
         ) : (
           <Card className="p-8 text-center">
             <p className="text-muted-foreground">No families found for the selected filters.</p>
+            <p className="text-sm text-muted-foreground mt-2">
+              Try selecting a different AC or adjusting the filters.
+            </p>
           </Card>
         )}
       </div>
@@ -297,6 +361,7 @@ export const ACFamilyManager = () => {
         open={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
         familyData={selectedFamily}
+        acId={acFilter}
       />
     </DashboardLayout>
   );

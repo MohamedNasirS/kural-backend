@@ -2,23 +2,33 @@ import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { FileCheck, Filter, Eye } from 'lucide-react';
+import { FileCheck, Filter, Eye, Loader2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { SurveyDetailDrawer } from '@/components/SurveyDetailDrawer';
 import { useToast } from '@/components/ui/use-toast';
 import { fetchSurveys } from '@/lib/surveys';
+import API_BASE_URL from '@/lib/api';
 
-const mockSurveys = [
-  { id: 1, formName: 'Voter Intake Form 2025', voter: 'Rajesh Kumar', voterId: 'TND1234567', booth: 'Booth 1', question: 'Which party will you vote for?', answer: 'Party A', date: '2024-03-15', agent: 'Rajesh Kumar' },
-  { id: 2, formName: 'Local Issues Survey', voter: 'Priya Sharma', voterId: 'TND1234568', booth: 'Booth 1', question: 'What is your primary concern?', answer: 'Healthcare', date: '2024-03-15', agent: 'Rajesh Kumar' },
-  { id: 3, formName: 'Local Issues Survey', voter: 'Suresh Babu', voterId: 'TND1234571', booth: 'Booth 3', question: 'Rate government performance', answer: '7/10', date: '2024-03-14', agent: 'Priya Sharma' },
-  { id: 4, formName: 'Voter Intake Form 2025', voter: 'Arun Patel', voterId: 'TND1234569', booth: 'Booth 2', question: 'Which party will you vote for?', answer: 'Party B', date: '2024-03-14', agent: 'Arun Patel' },
-];
+interface SurveyResponse {
+  id: string;
+  survey_id: string;
+  respondent_name: string;
+  voter_id: string;
+  voterId: string;
+  booth: string;
+  booth_id: string | null;
+  boothno: string | null;
+  ac_id: number | null;
+  survey_date: string;
+  status: string;
+  answers: any[];
+}
 
 export const SurveyManager = () => {
   const { user } = useAuth();
   const acNumber = user?.assignedAC || 119;
+  const acName = user?.aciName || 'Assembly Constituency';
   const { toast } = useToast();
   const [selectedSurvey, setSelectedSurvey] = useState<any>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -26,6 +36,46 @@ export const SurveyManager = () => {
   const [boothFilter, setBoothFilter] = useState<string>('all');
   const [assignedForms, setAssignedForms] = useState<Array<{ id: string; name: string }>>([]);
   const [isLoadingForms, setIsLoadingForms] = useState(false);
+  const [surveyResponses, setSurveyResponses] = useState<SurveyResponse[]>([]);
+  const [isLoadingResponses, setIsLoadingResponses] = useState(false);
+  const [uniqueBooths, setUniqueBooths] = useState<string[]>([]);
+
+  // Fetch survey responses from the API
+  const fetchSurveyResponses = useCallback(async () => {
+    setIsLoadingResponses(true);
+    try {
+      const params = new URLSearchParams();
+      if (formFilter !== 'all') params.append('survey', formFilter);
+      if (boothFilter !== 'all') params.append('booth', boothFilter);
+
+      const response = await fetch(
+        `${API_BASE_URL}/survey-responses/${acNumber}?${params.toString()}`,
+        { credentials: 'include' }
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch survey responses');
+      }
+
+      const data = await response.json();
+      setSurveyResponses(data.responses || []);
+
+      // Extract unique booths from responses for filtering
+      const booths = [...new Set(data.responses?.map((r: SurveyResponse) => r.booth).filter((b: string) => b && b !== 'N/A') || [])];
+      if (booths.length > 0) {
+        setUniqueBooths(booths as string[]);
+      }
+    } catch (error) {
+      console.error('Failed to load survey responses', error);
+      toast({
+        title: 'Unable to load survey responses',
+        description: error instanceof Error ? error.message : 'Please try again later.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoadingResponses(false);
+    }
+  }, [acNumber, formFilter, boothFilter, toast]);
 
   useEffect(() => {
     const loadAssignedForms = async () => {
@@ -55,28 +105,30 @@ export const SurveyManager = () => {
     loadAssignedForms();
   }, [acNumber, toast]);
 
-  // Get unique booths for filter options
-  const uniqueBooths = Array.from(new Set(mockSurveys.map(survey => survey.booth)));
+  // Fetch survey responses on mount
+  useEffect(() => {
+    fetchSurveyResponses();
+  }, [acNumber]);
 
-  // Filter surveys based on selected filters
-  const activeFormNames = new Set(assignedForms.map((form) => form.name));
+  // Handle filter application
+  const handleApplyFilters = () => {
+    fetchSurveyResponses();
+  };
 
-  const filteredSurveys = mockSurveys.filter((survey) => {
-    const selectedForm = assignedForms.find((form) => form.id === formFilter);
-    const matchesForm =
-      formFilter === 'all'
-        ? activeFormNames.size > 0 && activeFormNames.has(survey.formName)
-        : selectedForm
-          ? survey.formName === selectedForm.name
-          : false;
-    
-    // Booth filter
-    const matchesBooth = boothFilter === 'all' || survey.booth === boothFilter;
-    
-    return matchesForm && matchesBooth;
-  });
+  // Format date for display
+  const formatDate = (dateString: string) => {
+    try {
+      return new Date(dateString).toLocaleDateString('en-IN', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      });
+    } catch {
+      return dateString;
+    }
+  };
 
-  const handleViewDetails = (survey: any) => {
+  const handleViewDetails = (survey: SurveyResponse) => {
     setSelectedSurvey(survey);
     setIsDrawerOpen(true);
   };
@@ -86,7 +138,7 @@ export const SurveyManager = () => {
       <div className="space-y-8">
         <div>
           <h1 className="text-4xl font-bold mb-2">Survey Manager</h1>
-          <p className="text-muted-foreground">Review survey responses for AC {acNumber} - Thondamuthur</p>
+          <p className="text-muted-foreground">Review survey responses for AC {acNumber} - {acName}</p>
         </div>
 
         <Card className="p-4">
@@ -127,44 +179,73 @@ export const SurveyManager = () => {
                 ))}
               </SelectContent>
             </Select>
-            <Button variant="outline" onClick={() => {}}>
-              <Filter className="mr-2 h-4 w-4" />
+            <Button variant="outline" onClick={handleApplyFilters} disabled={isLoadingResponses}>
+              {isLoadingResponses ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Filter className="mr-2 h-4 w-4" />
+              )}
               Apply Filters
             </Button>
           </div>
         </Card>
 
         <div className="space-y-4">
-          {filteredSurveys.length > 0 ? (
-            filteredSurveys.map((survey) => (
+          {isLoadingResponses ? (
+            <Card className="p-8 text-center">
+              <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+              <p className="text-muted-foreground">Loading survey responses...</p>
+            </Card>
+          ) : surveyResponses.length > 0 ? (
+            surveyResponses.map((survey) => (
               <Card key={survey.id} className="p-6">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center space-x-3 mb-3">
                       <FileCheck className="h-5 w-5 text-success" />
-                      <h3 className="text-lg font-semibold">{survey.voter}</h3>
-                      <span className="text-sm text-muted-foreground">({survey.voterId})</span>
+                      <h3 className="text-lg font-semibold">{survey.respondent_name || 'Unknown'}</h3>
+                      <span className="text-sm text-muted-foreground">({survey.voterId || survey.voter_id || 'N/A'})</span>
                     </div>
 
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 text-sm">
                       <div>
+                        <span className="text-muted-foreground">Survey:</span>
+                        <span className="ml-2 font-medium">{survey.survey_id || 'N/A'}</span>
+                      </div>
+                      <div>
                         <span className="text-muted-foreground">Booth:</span>
-                        <span className="ml-2 font-medium">{survey.booth}</span>
+                        <span className="ml-2 font-medium">{survey.booth || 'N/A'}</span>
                       </div>
                       <div>
                         <span className="text-muted-foreground">Date:</span>
-                        <span className="ml-2 font-medium">{survey.date}</span>
+                        <span className="ml-2 font-medium">{formatDate(survey.survey_date)}</span>
                       </div>
                       <div>
-                        <span className="text-muted-foreground">Agent:</span>
-                        <span className="ml-2 font-medium">{survey.agent}</span>
+                        <span className="text-muted-foreground">Status:</span>
+                        <span className={`ml-2 font-medium ${survey.status === 'Completed' ? 'text-green-600' : 'text-yellow-600'}`}>
+                          {survey.status || 'Unknown'}
+                        </span>
                       </div>
                     </div>
 
-                    <div className="p-4 bg-muted rounded-lg">
-                      <p className="text-sm font-medium text-muted-foreground mb-2">{survey.question}</p>
-                      <p className="text-base font-semibold">{survey.answer}</p>
-                    </div>
+                    {survey.answers && survey.answers.length > 0 && (
+                      <div className="p-4 bg-muted rounded-lg">
+                        <p className="text-sm font-medium text-muted-foreground mb-2">
+                          {survey.answers.length} answer(s) recorded
+                        </p>
+                        {survey.answers.slice(0, 2).map((answer: any, index: number) => (
+                          <p key={index} className="text-sm">
+                            <span className="font-medium">{answer.question || answer.questionId || `Q${index + 1}`}:</span>{' '}
+                            {answer.answer || answer.value || 'N/A'}
+                          </p>
+                        ))}
+                        {survey.answers.length > 2 && (
+                          <p className="text-sm text-muted-foreground mt-1">
+                            +{survey.answers.length - 2} more answers...
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <Button variant="ghost" size="sm" onClick={() => handleViewDetails(survey)}>
                     <Eye className="h-4 w-4" />
@@ -174,16 +255,19 @@ export const SurveyManager = () => {
             ))
           ) : (
             <Card className="p-8 text-center">
-              <p className="text-muted-foreground">No surveys match the current filters.</p>
+              <p className="text-muted-foreground">No survey responses found for this constituency.</p>
+              <p className="text-sm text-muted-foreground mt-2">
+                Survey responses will appear here once booth agents submit surveys.
+              </p>
             </Card>
           )}
         </div>
       </div>
 
-      <SurveyDetailDrawer 
-        open={isDrawerOpen} 
-        onClose={() => setIsDrawerOpen(false)} 
-        surveyData={selectedSurvey} 
+      <SurveyDetailDrawer
+        open={isDrawerOpen}
+        onClose={() => setIsDrawerOpen(false)}
+        surveyData={selectedSurvey}
       />
     </DashboardLayout>
   );

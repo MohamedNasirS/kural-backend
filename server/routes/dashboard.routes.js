@@ -126,8 +126,8 @@ router.get("/stats/:acId", async (req, res) => {
       totalBooths,        // Total Booths
       boothStats: boothStats.map((booth) => ({
         boothNo: booth.boothno,
-        boothName: booth.boothname,
-        boothId: booth._id,
+        boothName: booth._id,  // _id contains boothname from the $group stage
+        boothId: booth.booth_id,
         voters: booth.voters,
       })),
     });

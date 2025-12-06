@@ -4,7 +4,7 @@ import { getVoterModel, aggregateVoters } from "../utils/voterCollection.js";
 
 const router = express.Router();
 
-// Get families for a specific AC (aggregated from voters)
+// Get families for a specific AC (aggregated from voters by familyId)
 router.get("/:acId", async (req, res) => {
   try {
     await connectToDatabase();
@@ -16,46 +16,81 @@ router.get("/:acId", async (req, res) => {
       return res.status(400).json({ message: "Invalid AC ID" });
     }
 
-    // Build match query
-    const matchQuery = {};
+    // Build match query - only include voters with valid familyId
+    const matchQuery = {
+      familyId: { $exists: true, $nin: [null, ""] }
+    };
 
     if (booth && booth !== 'all') {
+      // booth can be:
+      // - A number like "1" (filter by boothno)
+      // - A booth ID like "BOOTH1-111" (filter by booth_id)
+      // - A booth number string like "BOOTH1" (filter by boothno string)
       const boothNum = parseInt(booth);
-      if (!isNaN(boothNum)) {
+      if (!isNaN(boothNum) && String(boothNum) === booth) {
+        // Pure numeric value - filter by numeric boothno
         matchQuery.boothno = boothNum;
+      } else if (booth.includes('-')) {
+        // Contains hyphen - likely a booth_id like "BOOTH1-111"
+        matchQuery.booth_id = booth;
       } else {
-        matchQuery.boothname = booth;
+        // String like "BOOTH1" - filter by boothno string OR booth_id pattern
+        matchQuery.$or = [
+          { boothno: booth },
+          { booth_id: new RegExp(`^${booth}-`, 'i') }
+        ];
       }
     }
 
-    // Aggregate families by grouping voters with same address and booth
+    // Aggregate families by grouping voters by familyId (proper family grouping)
     const familiesAggregation = await aggregateVoters(acId, [
       { $match: matchQuery },
       {
         $group: {
-          _id: {
-            address: "$address",
-            booth: "$boothname",
-            boothno: "$boothno"
-          },
-          family_head: { $first: "$name" },
+          _id: "$familyId",
+          family_head: { $first: "$familyHead" },
+          first_member_name: { $first: "$name" },
           members: { $sum: 1 },
-          voters: { $push: { name: "$name", voterID: "$voterID", age: "$age", gender: "$gender", mobile: "$mobile" } },
+          voters: {
+            $push: {
+              id: "$_id",
+              name: "$name",
+              voterID: "$voterID",
+              age: "$age",
+              gender: "$gender",
+              mobile: "$mobile",
+              relationToHead: "$relationToHead",
+              surveyed: "$surveyed"
+            }
+          },
+          address: { $first: "$address" },
+          booth: { $first: "$boothname" },
+          boothno: { $first: "$boothno" },
+          booth_id: { $first: "$booth_id" },
           mobile: { $first: "$mobile" }
         }
       },
-      { $sort: { "_id.boothno": 1, "_id.address": 1 } }
+      { $sort: { "boothno": 1, "_id": 1 } }
     ]);
 
     // Apply search filter
     let filteredFamilies = familiesAggregation;
     if (search) {
       const searchLower = search.toLowerCase();
-      filteredFamilies = familiesAggregation.filter(family =>
-        (family.family_head?.english?.toLowerCase().includes(searchLower) ||
-         family.family_head?.tamil?.toLowerCase().includes(searchLower) ||
-         family._id.address?.toLowerCase().includes(searchLower))
-      );
+      filteredFamilies = familiesAggregation.filter(family => {
+        // Search in family head name
+        const headMatch = family.family_head?.toLowerCase().includes(searchLower);
+        // Search in first member name (english or tamil)
+        const firstMemberMatch =
+          family.first_member_name?.english?.toLowerCase().includes(searchLower) ||
+          family.first_member_name?.tamil?.toLowerCase().includes(searchLower);
+        // Search in address
+        const addressMatch = family.address?.toLowerCase().includes(searchLower);
+        // Search in familyId
+        const familyIdMatch = family._id?.toLowerCase().includes(searchLower);
+
+        return headMatch || firstMemberMatch || addressMatch || familyIdMatch;
+      });
     }
 
     // Pagination
@@ -64,17 +99,31 @@ router.get("/:acId", async (req, res) => {
     const paginatedFamilies = filteredFamilies.slice(skip, skip + parseInt(limit));
 
     return res.json({
-      families: paginatedFamilies.map((family, index) => ({
-        id: `FAM${skip + index + 1}`.padStart(8, '0'),
-        family_head: family.family_head?.english || family.family_head?.tamil || family.voters[0]?.name?.english || 'N/A',
-        members: family.members,
-        address: family._id.address || 'N/A',
-        booth: family._id.booth || `Booth ${family._id.boothno || 'N/A'}`,
-        boothNo: family._id.boothno,
-        phone: family.mobile ? `+91 ${family.mobile}` : 'N/A',
-        status: family.members > 0 ? 'Active' : 'Inactive',
-        voters: family.voters
-      })),
+      families: paginatedFamilies.map((family) => {
+        // Get the family head name - prefer familyHead field, then first member's name
+        const headName = family.family_head ||
+                        family.first_member_name?.english ||
+                        family.first_member_name?.tamil ||
+                        family.voters[0]?.name?.english ||
+                        family.voters[0]?.name?.tamil ||
+                        'N/A';
+
+        return {
+          id: family._id, // Use the actual familyId
+          family_head: headName,
+          members: family.members,
+          address: family.address || 'N/A',
+          booth: family.booth || `Booth ${family.boothno || 'N/A'}`,
+          boothNo: family.boothno,
+          booth_id: family.booth_id,
+          phone: family.mobile ? `+91 ${family.mobile}` : 'N/A',
+          status: family.members > 0 ? 'Active' : 'Inactive',
+          voters: family.voters.map(v => ({
+            ...v,
+            name: v.name?.english || v.name?.tamil || v.name || 'N/A'
+          }))
+        };
+      }),
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -89,38 +138,51 @@ router.get("/:acId", async (req, res) => {
   }
 });
 
-// Get detailed family information by address and booth
+// Get detailed family information by familyId
 router.get("/:acId/details", async (req, res) => {
   try {
     await connectToDatabase();
 
     const acId = parseInt(req.params.acId);
-    const { address, booth, boothNo } = req.query;
+    const { familyId, address, booth, boothNo } = req.query;
 
-    console.log('Family details request:', { acId, address, booth, boothNo });
+    console.log('Family details request:', { acId, familyId, address, booth, boothNo });
 
     if (isNaN(acId)) {
       return res.status(400).json({ message: "Invalid AC ID" });
     }
 
-    if (!address || !booth) {
-      return res.status(400).json({ message: "Address and booth are required" });
-    }
-
-    const matchQuery = {
-      address: address,
-      boothname: booth
-    };
-
-    if (boothNo) {
-      matchQuery.boothno = parseInt(boothNo);
-    }
-
     const VoterModel = getVoterModel(acId);
+    let members = [];
 
-    const members = await VoterModel.find(matchQuery)
-      .sort({ age: -1 })
-      .lean();
+    // Primary lookup by familyId (preferred method)
+    if (familyId) {
+      members = await VoterModel.find({ familyId: familyId })
+        .sort({ relationToHead: 1, age: -1 })
+        .lean();
+    }
+
+    // Fallback to address+booth lookup for backward compatibility
+    if (members.length === 0 && address && booth) {
+      const matchQuery = {
+        address: address,
+        boothname: booth
+      };
+
+      if (boothNo) {
+        // Handle boothNo - it could be a number or string like "BOOTH1"
+        const boothNoNum = parseInt(boothNo);
+        if (!isNaN(boothNoNum)) {
+          matchQuery.boothno = boothNoNum;
+        } else {
+          matchQuery.boothno = boothNo;
+        }
+      }
+
+      members = await VoterModel.find(matchQuery)
+        .sort({ age: -1 })
+        .lean();
+    }
 
     console.log('Found members:', members.length);
 
@@ -138,18 +200,19 @@ router.get("/:acId/details", async (req, res) => {
       averageAge: Math.round(members.reduce((sum, m) => sum + (m.age || 0), 0) / members.length)
     };
 
-    const familyHead = members[0];
+    // Find the family head - prefer member with relationToHead === 'Self'
+    const familyHead = members.find(m => m.relationToHead === 'Self') || members[0];
 
-    const formattedMembers = members.map((member, index) => ({
+    const formattedMembers = members.map((member) => ({
       id: member._id.toString(),
       name: member.name?.english || member.name?.tamil || 'N/A',
       voterID: member.voterID || 'N/A',
       age: member.age || 0,
       gender: member.gender || 'N/A',
-      relationship: index === 0 ? 'Head' : 'Member',
+      relationship: member.relationToHead || (member._id.toString() === familyHead._id.toString() ? 'Head' : 'Member'),
       phone: member.mobile ? `+91 ${member.mobile}` : '',
       surveyed: member.surveyed === true,
-      surveyedAt: member.verifiedAt || null,
+      surveyedAt: member.verifiedAt || member.surveyedAt || null,
       religion: member.religion || 'N/A',
       caste: member.caste || 'N/A'
     }));
@@ -157,13 +220,14 @@ router.get("/:acId/details", async (req, res) => {
     return res.json({
       success: true,
       family: {
-        id: `${address}-${booth}`.replace(/[^a-zA-Z0-9]/g, '').substring(0, 10).toUpperCase(),
-        headName: familyHead.name?.english || familyHead.name?.tamil || 'N/A',
-        address: address,
-        booth: booth,
-        boothNo: members[0].boothno || 0,
+        id: familyId || members[0].familyId || `${address}-${booth}`.replace(/[^a-zA-Z0-9]/g, '').substring(0, 10).toUpperCase(),
+        headName: familyHead.familyHead || familyHead.name?.english || familyHead.name?.tamil || 'N/A',
+        address: familyHead.address || address || 'N/A',
+        booth: familyHead.boothname || booth || 'N/A',
+        boothNo: familyHead.boothno || 0,
+        booth_id: familyHead.booth_id || '',
         acId: acId,
-        acName: members[0].aci_name || `AC ${acId}`,
+        acName: familyHead.aci_name || `AC ${acId}`,
         phone: familyHead.mobile ? `+91 ${familyHead.mobile}` : 'N/A'
       },
       members: formattedMembers,

@@ -350,9 +350,12 @@ function formatMobileAppResponse(responseDoc) {
   const metadata = {};
   const metadataMappings = [
     ["formId", ["formId", "form_id", "surveyId", "form.id"]],
-    ["aciName", ["aciName", "aci_name", "acName", "ac_name"]],
-    ["acNumber", ["aciNumber", "aci_num", "acNumber", "ac_no"]],
-    ["booth", ["booth", "boothNumber", "booth_no", "boothName"]],
+    ["aciName", ["aci_name", "aciName", "acName", "ac_name"]],
+    ["acNumber", ["aci_id", "aciId", "aciNumber", "aci_num", "acNumber", "ac_no"]],
+    // Booth fields - prioritize new structure, fallback to legacy
+    ["booth", ["boothname", "booth", "boothName", "boothNumber", "booth_no"]],
+    ["booth_id", ["booth_id", "boothId", "boothCode"]],
+    ["boothno", ["boothno"]],
     ["ward", ["ward", "wardNumber", "ward_no"]],
     ["location", ["location", "village", "town", "district", "address", "geo.location"]],
     ["agent", ["agentName", "agent", "agent_id", "fieldAgent", "collectedBy"]],
@@ -395,32 +398,69 @@ function formatMobileAppResponse(responseDoc) {
   };
 }
 
-function buildSearchQuery(search) {
-  if (!search) {
+function buildSearchQuery(search, acId, boothId) {
+  const conditions = [];
+
+  // Add AC filter
+  if (acId) {
+    const numericAcId = parseInt(acId, 10);
+    if (!Number.isNaN(numericAcId)) {
+      conditions.push({
+        $or: [
+          { aci_id: numericAcId },
+          { aciId: numericAcId },
+          { acId: numericAcId },
+          { "metadata.acNumber": numericAcId },
+        ],
+      });
+    }
+  }
+
+  // Add booth filter
+  if (boothId) {
+    conditions.push({
+      $or: [
+        { booth_id: boothId },
+        { boothId: boothId },
+        { booth: boothId },
+        { "metadata.booth_id": boothId },
+      ],
+    });
+  }
+
+  // Add search filter
+  if (search) {
+    const regex = new RegExp(escapeRegExp(search), "i");
+    const searchableFields = [
+      "respondentName",
+      "respondent_name",
+      "name",
+      "fullName",
+      "phone",
+      "phoneNumber",
+      "mobile",
+      "mobileNumber",
+      "voterId",
+      "voter_id",
+      "aciName",
+      "aci_name",
+      "booth",
+      "boothNumber",
+    ];
+    conditions.push({
+      $or: searchableFields.map((field) => ({ [field]: regex })),
+    });
+  }
+
+  if (conditions.length === 0) {
     return {};
   }
 
-  const regex = new RegExp(escapeRegExp(search), "i");
-  const searchableFields = [
-    "respondentName",
-    "respondent_name",
-    "name",
-    "fullName",
-    "phone",
-    "phoneNumber",
-    "mobile",
-    "mobileNumber",
-    "voterId",
-    "voter_id",
-    "aciName",
-    "aci_name",
-    "booth",
-    "boothNumber",
-  ];
+  if (conditions.length === 1) {
+    return conditions[0];
+  }
 
-  return {
-    $or: searchableFields.map((field) => ({ [field]: regex })),
-  };
+  return { $and: conditions };
 }
 
 function isNamespaceMissingError(error) {
@@ -435,7 +475,7 @@ router.get("/responses", async (req, res) => {
   try {
     await connectToDatabase();
 
-    const { limit = "25", cursor, search } = req.query ?? {};
+    const { limit = "25", cursor, search, acId, boothId } = req.query ?? {};
     const parsedLimit = Number.parseInt(limit, 10);
     const effectiveLimit = Number.isFinite(parsedLimit)
       ? Math.min(Math.max(parsedLimit, 1), 200)
@@ -445,9 +485,11 @@ router.get("/responses", async (req, res) => {
       limit: effectiveLimit,
       cursor: typeof cursor === "string" && cursor.trim() ? cursor.trim() : null,
       search: typeof search === "string" && search.trim() ? search.trim() : null,
+      acId: typeof acId === "string" && acId.trim() ? acId.trim() : null,
+      boothId: typeof boothId === "string" && boothId.trim() ? boothId.trim() : null,
     };
 
-    const searchQuery = buildSearchQuery(options.search);
+    const searchQuery = buildSearchQuery(options.search, options.acId, options.boothId);
 
     const paginatedQuery = { ...searchQuery };
     if (typeof options.cursor === "string" && mongoose.Types.ObjectId.isValid(options.cursor)) {
@@ -460,7 +502,7 @@ router.get("/responses", async (req, res) => {
         MobileAppResponse.find(paginatedQuery)
           .sort({ createdAt: -1, _id: -1 })
           .limit(options.limit + 1),
-        MobileAppResponse.countDocuments(searchQuery.$or ? { $or: searchQuery.$or } : {}),
+        MobileAppResponse.countDocuments(searchQuery),
       ]);
 
       const hasMore = responses.length > options.limit;
@@ -588,6 +630,10 @@ function buildAnswerSearchQuery(search) {
     $or: [
       { respondentName: regex },
       { submittedByName: regex },
+      // Booth fields - aligned with voters collection
+      { booth_id: regex },
+      { boothname: regex },
+      // Legacy fields for backward compatibility
       { boothId: regex },
       { booth: regex },
     ],
@@ -600,7 +646,8 @@ function buildAnswerGroupKey(answer) {
 
   const submittedBy = answer.submittedBy?.toString?.() ?? "";
   const voterId = answer.voterId?.toString?.() ?? "";
-  const boothId = answer.boothId ?? answer.booth ?? "";
+  // Booth fields - prioritize new structure, fallback to legacy
+  const boothId = answer.booth_id ?? answer.boothId ?? answer.booth ?? "";
   const formId = answer.formId ?? answer.surveyId ?? "";
   const submittedAt = safeDateToISOString(answer.submittedAt ?? answer.createdAt);
 
@@ -702,18 +749,20 @@ router.get("/live-updates", async (req, res) => {
       if (!grouped.has(groupKey)) {
         const lookupName = voterLookup.get(answer.voterId?.toString());
         const voterName = lookupName || answer.respondentName || "Unknown Voter";
-        const boothId = answer.boothId || answer.booth || "Unknown Booth";
-        const boothName = boothNameLookup.get(boothId) || boothId;
+        // Booth fields - prioritize new structure, fallback to legacy
+        const boothId = answer.booth_id || answer.boothId || answer.booth || "Unknown Booth";
+        const boothName = answer.boothname || boothNameLookup.get(boothId) || boothId;
 
         grouped.set(groupKey, {
           id: answer._id?.toString() || groupKey,
           voter: voterName,
           booth: boothName,
+          booth_id: answer.booth_id || answer.boothId || null,
           agent: answer.submittedByName || "Unknown Agent",
           timestamp: submittedDate,
           activity: "Survey completed",
           question: questionLookup.get(answer.questionId?.toString?.()) || null,
-          acId: answer.acId || answer.aciId || null,
+          acId: answer.aci_id || answer.acId || answer.aciId || null,
         });
       }
     });

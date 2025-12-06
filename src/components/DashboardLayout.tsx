@@ -85,6 +85,7 @@ const AppSidebar = () => {
         return [
           { icon: LayoutDashboard, label: 'System Dashboard', path: '/l0/dashboard' },
           { icon: Users, label: 'User Management', path: '/l0/users' },
+          { icon: Home, label: 'Family Manager', path: '/l0/families' },
           { icon: Database, label: 'Voter Field Manager', path: '/l0/voter-fields' },
           { icon: Layers, label: 'Master Data', path: '/l0/master-data' },
           { icon: FileText, label: 'Survey Forms', path: '/l0/surveys' },

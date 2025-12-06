@@ -2,23 +2,27 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { Users, Home, UserCircle, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { Users, Home, UserCircle, CheckCircle, XCircle, Loader2, Eye } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import API_BASE_URL from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { VoterDetailDrawer } from './VoterDetailDrawer';
 
 interface FamilyDetailDrawerProps {
   open: boolean;
   onClose: () => void;
   familyData: {
-    id: string;
+    id: string; // This is the familyId
     family_head: string;
     members: number;
     booth: string;
-    boothNo: number;
+    boothNo: number | string;
+    booth_id?: string;
     address: string;
     phone: string;
+    voters?: any[];
   } | null;
+  acId?: number | string; // Optional acId prop for L0 admin
 }
 
 interface FamilyMember {
@@ -57,7 +61,7 @@ interface FamilyDetails {
   };
 }
 
-export const FamilyDetailDrawer = ({ open, onClose, familyData }: FamilyDetailDrawerProps) => {
+export const FamilyDetailDrawer = ({ open, onClose, familyData, acId: propAcId }: FamilyDetailDrawerProps) => {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,12 +80,25 @@ export const FamilyDetailDrawer = ({ open, onClose, familyData }: FamilyDetailDr
       setLoading(true);
       setError(null);
 
-      const acId = user.assignedAC || 119;
-      const params = new URLSearchParams({
-        address: familyData.address,
-        booth: familyData.booth,
-        boothNo: familyData.boothNo?.toString() || ''
-      });
+      // Use prop acId first (for L0), then user.assignedAC (for L1/L2), fallback to 119
+      const acId = propAcId || user?.assignedAC || 119;
+      const params = new URLSearchParams();
+
+      // Use familyId as primary lookup method
+      if (familyData.id) {
+        params.append('familyId', familyData.id);
+      }
+
+      // Also pass address/booth as fallback
+      if (familyData.address) {
+        params.append('address', familyData.address);
+      }
+      if (familyData.booth) {
+        params.append('booth', familyData.booth);
+      }
+      if (familyData.boothNo) {
+        params.append('boothNo', familyData.boothNo?.toString() || '');
+      }
 
       const url = `${API_BASE_URL}/families/${acId}/details?${params}`;
       console.log('Fetching family details:', {

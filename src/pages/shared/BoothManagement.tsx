@@ -38,17 +38,18 @@ export const BoothManagement = () => {
   };
 
   const getDefaultAcId = () => {
-    if (user?.role === 'L2' && user.assignedAC) {
+    // L1 and L2 users should use their assigned AC
+    if ((user?.role === 'L1' || user?.role === 'L2') && user.assignedAC) {
       return user.assignedAC;
     }
-    return 119;
+    return null; // L0 users have no default - they must select
   };
 
   const getDefaultAcName = () => {
-    if (user?.role === 'L2') {
+    if (user?.role === 'L1' || user?.role === 'L2') {
       return user.aciName || getConstituencyName(user.assignedAC) || '';
     }
-    return getConstituencyName(119) || '';
+    return '';
   };
 
   const [booths, setBooths] = useState<Booth[]>([]);
@@ -59,9 +60,9 @@ export const BoothManagement = () => {
   const [creating, setCreating] = useState(false);
   const [updating, setUpdating] = useState(false);
 
-  // AC Filter state for Admin (L0) users
+  // AC Filter state for Admin (L0) users - L1/L2 users have fixed AC
   const [selectedAC, setSelectedAC] = useState<number | null>(
-    user?.role === 'L2' ? user.assignedAC : null
+    (user?.role === 'L1' || user?.role === 'L2') ? user.assignedAC : null
   );
 
   // Pagination state
@@ -89,10 +90,13 @@ export const BoothManagement = () => {
 
   // Keep AC defaults in sync with authenticated user
   useEffect(() => {
+    // L1 and L2 users should have their assigned AC
+    const isRestrictedRole = user?.role === 'L1' || user?.role === 'L2';
+
     setNewBooth((prev) => {
-      const updatedAcId = user?.role === 'L2' && user.assignedAC ? user.assignedAC : prev.acId;
+      const updatedAcId = isRestrictedRole && user.assignedAC ? user.assignedAC : prev.acId;
       const updatedAcName =
-        user?.role === 'L2'
+        isRestrictedRole
           ? user.aciName || getConstituencyName(updatedAcId) || prev.acName
           : prev.acName || getConstituencyName(updatedAcId);
       return {
@@ -101,6 +105,11 @@ export const BoothManagement = () => {
         acName: updatedAcName,
       };
     });
+
+    // Also update selectedAC for L1/L2 users if not already set
+    if (isRestrictedRole && user.assignedAC && !selectedAC) {
+      setSelectedAC(user.assignedAC);
+    }
   }, [user]);
 
   // Fetch booths on mount
@@ -311,16 +320,16 @@ export const BoothManagement = () => {
           <div>
             <h1 className="text-4xl font-bold mb-2">Booth Management</h1>
             <p className="text-muted-foreground">
-              {user?.role === 'L2'
-                ? `Manage booths for AC ${user.assignedAC || '...'}`
+              {(user?.role === 'L1' || user?.role === 'L2')
+                ? `Manage booths for AC ${user.assignedAC || '...'} - ${getConstituencyName(user.assignedAC)}`
                 : selectedAC
                   ? `Viewing booths for AC ${selectedAC} - ${getConstituencyName(selectedAC)}`
                   : 'Select an AC to view booths'}
             </p>
           </div>
           <div className="flex items-center gap-4">
-            {/* AC Filter for Admin (L0) users */}
-            {user?.role !== 'L2' && (
+            {/* AC Filter for Admin (L0) users only - L1/L2 have fixed AC */}
+            {user?.role === 'L0' && (
               <Select
                 value={selectedAC?.toString() || 'all'}
                 onValueChange={handleACChange}
@@ -362,15 +371,16 @@ export const BoothManagement = () => {
                     Booth number will be auto-generated based on existing booths in this AC
                   </p>
                 </div>
-                {user?.role !== 'L2' && (
+                {/* Only L0 can select AC - L1/L2 have fixed AC */}
+                {user?.role === 'L0' && (
                   <div className="space-y-2">
                     <Label htmlFor="ac">Assembly Constituency <span className="text-destructive">*</span></Label>
-                    <Select 
-                      value={newBooth.acId?.toString() || ''} 
+                    <Select
+                      value={newBooth.acId?.toString() || ''}
                       onValueChange={(value) => {
                         const constituency = CONSTITUENCIES.find(c => c.number === parseInt(value));
                         setNewBooth({
-                          ...newBooth, 
+                          ...newBooth,
                           acId: parseInt(value, 10),
                           acName: constituency?.name || ''
                         });
@@ -432,12 +442,21 @@ export const BoothManagement = () => {
         ) : booths.length === 0 ? (
           <Card className="p-8 text-center">
             <Building2 className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-            <h3 className="text-lg font-semibold mb-2">No Booths Found</h3>
-            <p className="text-muted-foreground mb-4">Get started by creating your first booth</p>
-            <Button onClick={() => setIsOpen(true)}>
-              <Building2 className="mr-2 h-4 w-4" />
-              Create New Booth
-            </Button>
+            {user?.role === 'L0' && !selectedAC ? (
+              <>
+                <h3 className="text-lg font-semibold mb-2">Select a Constituency</h3>
+                <p className="text-muted-foreground mb-4">Please select an Assembly Constituency from the dropdown above to view and manage booths</p>
+              </>
+            ) : (
+              <>
+                <h3 className="text-lg font-semibold mb-2">No Booths Found</h3>
+                <p className="text-muted-foreground mb-4">Get started by creating your first booth</p>
+                <Button onClick={() => setIsOpen(true)}>
+                  <Building2 className="mr-2 h-4 w-4" />
+                  Create New Booth
+                </Button>
+              </>
+            )}
           </Card>
         ) : (
           <>
@@ -448,7 +467,7 @@ export const BoothManagement = () => {
                     <tr>
                       <th className="px-4 py-3 text-left text-sm font-semibold">Booth ID</th>
                       <th className="px-4 py-3 text-left text-sm font-semibold">Name</th>
-                      {user?.role !== 'L2' && (
+                      {user?.role === 'L0' && (
                         <th className="px-4 py-3 text-left text-sm font-semibold">AC</th>
                       )}
                       <th className="px-4 py-3 text-left text-sm font-semibold">Address</th>
@@ -462,7 +481,7 @@ export const BoothManagement = () => {
                       <tr key={booth._id} className="hover:bg-muted/50">
                         <td className="px-4 py-3 text-sm font-medium">{booth.boothCode}</td>
                         <td className="px-4 py-3 text-sm">{booth.boothName}</td>
-                        {user?.role !== 'L2' && (
+                        {user?.role === 'L0' && (
                           <td className="px-4 py-3 text-sm">{booth.ac_id}</td>
                         )}
                         <td className="px-4 py-3 text-sm max-w-xs truncate">{booth.address || '-'}</td>
@@ -560,15 +579,16 @@ export const BoothManagement = () => {
                   onChange={(e) => setEditBooth({...editBooth, boothName: e.target.value})}
                 />
               </div>
-              {user?.role !== 'L2' && (
+              {/* Only L0 can change AC - L1/L2 have fixed AC */}
+              {user?.role === 'L0' && (
                 <div className="space-y-2">
                   <Label htmlFor="editAc">Assembly Constituency <span className="text-destructive">*</span></Label>
-                  <Select 
-                    value={editBooth.ac_id.toString()} 
+                  <Select
+                    value={editBooth.ac_id.toString()}
                     onValueChange={(value) => {
                       const constituency = CONSTITUENCIES.find(c => c.number === parseInt(value));
                       setEditBooth({
-                        ...editBooth, 
+                        ...editBooth,
                         ac_id: parseInt(value),
                         ac_name: constituency?.name || ''
                       });

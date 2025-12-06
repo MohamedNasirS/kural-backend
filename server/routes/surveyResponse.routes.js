@@ -2,7 +2,14 @@ import express from "express";
 import mongoose from "mongoose";
 import { connectToDatabase } from "../config/database.js";
 import { escapeRegExp } from "../utils/helpers.js";
-import { aggregateVoters, getVoterModel } from "../utils/voterCollection.js";
+import { aggregateVoters, getVoterModel, ALL_AC_IDS } from "../utils/voterCollection.js";
+import {
+  getSurveyResponseModel,
+  querySurveyResponses,
+  countSurveyResponses,
+  queryAllSurveyResponses,
+  countAllSurveyResponses
+} from "../utils/surveyResponseCollection.js";
 
 const router = express.Router();
 
@@ -14,89 +21,67 @@ router.get("/", async (req, res) => {
 
     const { booth, survey, ac, page = 1, limit = 50, search } = req.query;
 
-    // Use the surveyresponses collection
-    const SurveyResponse = mongoose.models.SurveyResponse ||
-      mongoose.model('SurveyResponse', new mongoose.Schema({}, { strict: false, collection: 'surveyresponses' }));
-
     const query = {};
     let boothNamesFromAC = [];
+    const acId = ac && ac !== 'all' ? parseInt(ac) : null;
 
-    // Filter by AC
-    if (ac && ac !== 'all') {
-      const acId = parseInt(ac);
-
+    // Filter by AC - use booth names from voters collection
+    if (acId) {
       try {
         const voterBooths = await aggregateVoters(acId, [
           { $match: {} },
-          { $group: { _id: "$boothname" } }
+          { $group: { _id: "$boothname", booth_id: { $first: "$booth_id" } } }
         ]);
         boothNamesFromAC = voterBooths.map(b => b._id).filter(Boolean);
         console.log(`Found ${boothNamesFromAC.length} unique booth names for AC ${acId}`);
 
+        // For AC-specific collection, we use boothname field (aligned with voters)
         if (boothNamesFromAC.length > 0) {
-          query.booth = { $in: boothNamesFromAC };
-        } else {
-          query.$or = [
-            { acId: acId },
-            { aci_id: acId },
-            { aci_num: acId },
-            { assignedAC: acId }
-          ];
+          query.boothname = { $in: boothNamesFromAC };
         }
       } catch (voterError) {
         console.error("Error getting booth names from voter data:", voterError);
-        query.$or = [
-          { acId: acId },
-          { aci_id: acId },
-          { aci_num: acId },
-          { assignedAC: acId }
-        ];
       }
     }
 
-    // Filter by booth
+    // Filter by booth - use boothname (primary), booth_id, or legacy booth field
     if (booth && booth !== 'all') {
       console.log(`Booth filter requested: "${booth}"`);
       if (boothNamesFromAC.length > 0) {
         if (boothNamesFromAC.includes(booth)) {
-          query.booth = booth;
+          query.boothname = booth;
           console.log(`Exact booth match found: "${booth}"`);
         } else {
           const matchingBoothNames = boothNamesFromAC.filter(name =>
             name && name.toLowerCase().includes(booth.toLowerCase())
           );
           if (matchingBoothNames.length > 0) {
-            query.booth = { $in: matchingBoothNames };
+            query.boothname = { $in: matchingBoothNames };
             console.log(`Partial booth match found ${matchingBoothNames.length} booths`);
           } else {
-            query.booth = { $regex: booth, $options: 'i' };
+            // Try matching on multiple booth fields
+            query.$or = [
+              { boothname: { $regex: booth, $options: 'i' } },
+              { booth_id: { $regex: booth, $options: 'i' } },
+              { booth: { $regex: booth, $options: 'i' } }
+            ];
             console.log(`Using regex booth match for: "${booth}"`);
           }
         }
-      } else if (query.$or) {
-        query.$and = [
-          { $or: query.$or },
-          { $or: [
-            { booth: { $regex: booth, $options: 'i' } },
-            { boothCode: booth },
-            { booth_id: booth }
-          ]}
-        ];
-        delete query.$or;
       } else {
+        // When no AC context, search across all booth field variants
         query.$or = [
+          { boothname: { $regex: booth, $options: 'i' } },
+          { booth_id: booth },
           { booth: { $regex: booth, $options: 'i' } },
-          { boothCode: booth },
-          { booth_id: booth }
+          { boothCode: booth }
         ];
       }
     }
 
     if (survey && survey !== 'all') {
       const surveyFilter = { $or: [{ surveyId: survey }, { formId: survey }] };
-      if (query.$and) {
-        query.$and.push(surveyFilter);
-      } else if (query.$or) {
+      if (query.$or) {
         query.$and = [{ $or: query.$or }, surveyFilter];
         delete query.$or;
       } else {
@@ -147,13 +132,30 @@ router.get("/", async (req, res) => {
     console.log("Survey responses query:", JSON.stringify(query, null, 2));
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
+    const limitNum = parseInt(limit);
 
-    const responses = await SurveyResponse.find(query)
-      .skip(skip)
-      .limit(parseInt(limit))
-      .sort({ createdAt: -1 });
+    let responses = [];
+    let totalResponses = 0;
 
-    const totalResponses = await SurveyResponse.countDocuments(query);
+    // If AC is specified, query that specific collection
+    if (acId) {
+      responses = await querySurveyResponses(acId, query, {
+        skip,
+        limit: limitNum,
+        sort: { createdAt: -1 }
+      });
+      totalResponses = await countSurveyResponses(acId, query);
+    } else {
+      // Query all AC collections for L0 admin
+      responses = await queryAllSurveyResponses(query, {
+        limit: limitNum,
+        sort: { createdAt: -1 }
+      });
+      totalResponses = await countAllSurveyResponses(query);
+
+      // Apply pagination on combined results
+      responses = responses.slice(skip, skip + limitNum);
+    }
 
     return res.json({
       responses: responses.map(response => ({
@@ -163,8 +165,13 @@ router.get("/", async (req, res) => {
         voter_id: response.respondentVoterId || response.voterId || response.voterID || 'N/A',
         voterID: response.respondentVoterId || response.voterID || '',
         voterId: response.respondentVoterId || response.voterId || response.voterID || 'N/A',
-        booth: response.booth || 'N/A',
-        ac_id: response.acId || response.aci_id || response.aci_num || null,
+        // Booth fields - prioritize new structure, fallback to legacy
+        booth: response.boothname || response.booth || 'N/A',
+        booth_id: response.booth_id || response.boothCode || null,
+        boothno: response.boothno || null,
+        // AC fields
+        ac_id: response.aci_id || response.acId || response.aci_num || response._acId || null,
+        aci_name: response.aci_name || null,
         survey_date: response.createdAt || response.submittedAt || new Date(),
         status: response.isComplete ? 'Completed' : (response.status || 'Pending'),
         answers: response.answers || response.responses || []
@@ -195,27 +202,41 @@ router.get("/:acId", async (req, res) => {
       return res.status(400).json({ message: "Invalid AC ID" });
     }
 
-    const SurveyResponse = mongoose.models.SurveyResponse ||
-      mongoose.model('SurveyResponse', new mongoose.Schema({}, { strict: false, collection: 'surveyresponses' }));
-
     const query = {};
 
+    // Filter by booth - use boothname (primary), booth_id, or legacy booth field
     if (booth && booth !== 'all') {
-      query.booth = booth;
+      query.$or = [
+        { boothname: { $regex: booth, $options: 'i' } },
+        { booth_id: { $regex: booth, $options: 'i' } },
+        { booth: { $regex: booth, $options: 'i' } },
+        { boothCode: booth }
+      ];
     }
 
     if (survey && survey !== 'all') {
-      query.surveyId = survey;
+      if (query.$or) {
+        query.$and = [
+          { $or: query.$or },
+          { $or: [{ surveyId: survey }, { formId: survey }] }
+        ];
+        delete query.$or;
+      } else {
+        query.$or = [{ surveyId: survey }, { formId: survey }];
+      }
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
+    const limitNum = parseInt(limit);
 
-    const responses = await SurveyResponse.find(query)
-      .skip(skip)
-      .limit(parseInt(limit))
-      .sort({ createdAt: -1 });
+    // Query the AC-specific collection
+    const responses = await querySurveyResponses(acId, query, {
+      skip,
+      limit: limitNum,
+      sort: { createdAt: -1 }
+    });
 
-    const totalResponses = await SurveyResponse.countDocuments(query);
+    const totalResponses = await countSurveyResponses(acId, query);
 
     return res.json({
       responses: responses.map(response => ({
@@ -225,7 +246,13 @@ router.get("/:acId", async (req, res) => {
         voter_id: response.voterId || 'N/A',
         voterID: response.voterID || '',
         voterId: response.voterId || response.voterID || 'N/A',
-        booth: response.booth || 'N/A',
+        // Booth fields - prioritize new structure, fallback to legacy
+        booth: response.boothname || response.booth || 'N/A',
+        booth_id: response.booth_id || response.boothCode || null,
+        boothno: response.boothno || null,
+        // AC fields
+        ac_id: acId,
+        aci_name: response.aci_name || null,
         survey_date: response.createdAt || response.submittedAt || new Date(),
         status: response.status || 'Completed',
         answers: response.answers || response.responses || []

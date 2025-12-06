@@ -18,6 +18,29 @@ import {
   ALL_AC_IDS
 } from "../utils/voterCollection.js";
 import {
+  getSurveyResponseModel as getACSurveyResponseModel,
+  querySurveyResponses,
+  countSurveyResponses,
+  queryAllSurveyResponses,
+  countAllSurveyResponses,
+  aggregateSurveyResponses,
+  aggregateAllSurveyResponses
+} from "../utils/surveyResponseCollection.js";
+import {
+  getMobileAppAnswerModel,
+  queryMobileAppAnswers,
+  countMobileAppAnswers,
+  queryAllMobileAppAnswers,
+  countAllMobileAppAnswers
+} from "../utils/mobileAppAnswerCollection.js";
+import {
+  getBoothAgentActivityModel,
+  queryBoothAgentActivities,
+  countBoothAgentActivities,
+  queryAllBoothAgentActivities,
+  countAllBoothAgentActivities
+} from "../utils/boothAgentActivityCollection.js";
+import {
   isAuthenticated,
   canManageUsers,
   canManageBooths,
@@ -32,7 +55,13 @@ const router = express.Router();
 
 const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-const getSurveyResponseModel = () => {
+// Legacy function for backward compatibility - use getACSurveyResponseModel from utility instead
+const getSurveyResponseModel = (acId = null) => {
+  if (acId) {
+    // Use AC-specific collection
+    return getACSurveyResponseModel(acId);
+  }
+  // Fallback to legacy global collection (for backward compatibility)
   if (mongoose.models.SurveyResponse) {
     return mongoose.models.SurveyResponse;
   }
@@ -150,6 +179,55 @@ const aggregateCountsByMonth = async (model, baseMatch, buckets, dateField = "cr
   return buckets.map((bucket) => lookup.get(`${bucket.year}-${bucket.month}`) || 0);
 };
 
+// Aggregate voter counts using AC-specific collections
+const aggregateVoterCountsByMonth = async (assignedAC, buckets, dateField = "createdAt") => {
+  if (buckets.length === 0) {
+    return [];
+  }
+
+  const matchStage = {
+    [dateField]: {
+      $gte: buckets[0].start,
+      $lt: buckets[buckets.length - 1].end,
+    },
+  };
+
+  const pipeline = [
+    { $match: matchStage },
+    {
+      $group: {
+        _id: {
+          year: { $year: `$${dateField}` },
+          month: { $month: `$${dateField}` },
+        },
+        count: { $sum: 1 },
+      },
+    },
+  ];
+
+  let results = [];
+  try {
+    if (assignedAC !== null) {
+      // Query specific AC collection
+      results = await aggregateVoters(assignedAC, pipeline);
+    } else {
+      // Query all AC collections
+      results = await aggregateAllVoters(pipeline);
+    }
+  } catch (error) {
+    console.error("Error aggregating voter counts:", error);
+  }
+
+  // Merge results from all collections (for L0)
+  const lookup = new Map();
+  results.forEach((item) => {
+    const key = `${item._id.year}-${item._id.month}`;
+    lookup.set(key, (lookup.get(key) || 0) + item.count);
+  });
+
+  return buckets.map((bucket) => lookup.get(`${bucket.year}-${bucket.month}`) || 0);
+};
+
 const buildDashboardAnalytics = async ({ assignedAC, totalBooths, boothsActive }) => {
   const monthBuckets = createMonthBuckets(5);
   const weekBuckets = createWeekBuckets(6);
@@ -193,7 +271,8 @@ const buildDashboardAnalytics = async ({ assignedAC, totalBooths, boothsActive }
       : surveyResponseDateFilter;
 
   const [voterMonthlyCounts, surveyMonthlyCounts, agentMonthlyCounts] = await Promise.all([
-    aggregateCountsByMonth(Voter, voterMatch, monthBuckets, "createdAt"),
+    // Use AC-specific voter collections
+    aggregateVoterCountsByMonth(assignedAC, monthBuckets, "createdAt"),
     aggregateCountsByMonth(Survey, surveyMatch, monthBuckets, "createdAt"),
     aggregateCountsByMonth(User, agentMatch, monthBuckets, "createdAt"),
   ]);
@@ -208,13 +287,19 @@ const buildDashboardAnalytics = async ({ assignedAC, totalBooths, boothsActive }
 
   let surveyResponses = [];
   try {
-    surveyResponses = await getSurveyResponseModel()
-      .find(surveyResponseMatch)
-      .select({ createdAt: 1, submittedAt: 1, updatedAt: 1, status: 1 })
-      .lean();
+    // Use AC-specific collection if assignedAC is set, otherwise query all AC collections
+    if (assignedAC !== null) {
+      surveyResponses = await querySurveyResponses(assignedAC, surveyResponseDateFilter, {
+        select: { createdAt: 1, submittedAt: 1, updatedAt: 1, status: 1 }
+      });
+    } else {
+      surveyResponses = await queryAllSurveyResponses(surveyResponseDateFilter, {
+        select: { createdAt: 1, submittedAt: 1, updatedAt: 1, status: 1 }
+      });
+    }
   } catch (error) {
     if (!isNamespaceMissingError(error)) {
-      throw error;
+      console.error("Error fetching survey responses for analytics:", error);
     }
   }
 

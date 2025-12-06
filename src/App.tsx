@@ -37,6 +37,7 @@ import { FormBuilder } from "@/pages/l0/FormBuilder";
 import { MasterData } from "@/pages/l0/MasterData";
 import { MobileAppQuestions } from "@/pages/l0/MobileAppQuestions";
 import { MobileAppResponses } from "@/pages/l0/MobileAppResponses";
+import { FamilyManager as L0FamilyManager } from "@/pages/l0/FamilyManager";
 import { SurveyForms } from "@/pages/l1/SurveyForms";
 import { L2Dashboard } from "@/pages/l2/Dashboard";
 import { VoterManager } from "@/pages/l2/VoterManager";
@@ -128,7 +129,8 @@ const AppRoutes = () => {
       <Route path="/l0/surveys/builder/:formId" element={<ProtectedRoute allowedRoles={['L0']}><FormBuilder /></ProtectedRoute>} />
       <Route path="/l0/surveys/preview/:formId" element={<ProtectedRoute allowedRoles={['L0']}><FormPreview /></ProtectedRoute>} />
       <Route path="/l0/activity-logs" element={<ProtectedRoute allowedRoles={['L0']}><L0ActivityLogs /></ProtectedRoute>} />
-      
+      <Route path="/l0/families" element={<ProtectedRoute allowedRoles={['L0']}><L0FamilyManager /></ProtectedRoute>} />
+
       {/* Shared Routes (RBAC-enabled) */}
       <Route path="/shared/booth-management" element={<ProtectedRoute allowedRoles={['L0', 'L1', 'L2']}><BoothManagement /></ProtectedRoute>} />
       <Route path="/shared/booth-agent-management" element={<ProtectedRoute allowedRoles={['L0', 'L1', 'L2']}><BoothAgentManagementNew /></ProtectedRoute>} />

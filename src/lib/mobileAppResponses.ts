@@ -36,6 +36,8 @@ interface FetchParams {
   limit?: number;
   cursor?: string | null;
   search?: string;
+  acId?: string | null;
+  boothId?: string | null;
 }
 
 export async function fetchMobileAppResponses(params: FetchParams = {}): Promise<MobileAppResponsesResponse> {
@@ -51,6 +53,14 @@ export async function fetchMobileAppResponses(params: FetchParams = {}): Promise
 
   if (params.search && params.search.trim()) {
     query.append("search", params.search.trim());
+  }
+
+  if (params.acId && params.acId.trim()) {
+    query.append("acId", params.acId.trim());
+  }
+
+  if (params.boothId && params.boothId.trim()) {
+    query.append("boothId", params.boothId.trim());
   }
 
   const queryString = query.toString();

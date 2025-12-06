@@ -5,6 +5,12 @@ import MappedField from "../models/MappedField.js";
 import MasterDataSection from "../models/MasterDataSection.js";
 import { connectToDatabase } from "../config/database.js";
 import { findVoterById, findOneVoter, getVoterModel } from "../utils/voterCollection.js";
+import {
+  getSurveyResponseModel,
+  querySurveyResponses,
+  findSurveyResponseById,
+  queryAllSurveyResponses
+} from "../utils/surveyResponseCollection.js";
 
 const router = express.Router();
 
@@ -227,19 +233,33 @@ router.post("/mapped-fields/apply-mapping", async (req, res) => {
       });
     }
 
-    const SurveyResponse = mongoose.models.SurveyResponse ||
-      mongoose.model('SurveyResponse', new mongoose.Schema({}, { strict: false, collection: 'surveyresponses' }));
-
     let surveyResponses = [];
     if (applyToAll) {
-      const responses = await SurveyResponse.find({ surveyId: mapping.surveyId }).limit(1000);
-      surveyResponses = responses;
-    } else {
-      const response = await SurveyResponse.findById(surveyResponseId);
-      if (!response) {
-        return res.status(404).json({ message: "Survey response not found" });
+      // If acNumber is provided, query that specific collection
+      if (acNumber) {
+        const responses = await querySurveyResponses(acNumber, { surveyId: mapping.surveyId }, { limit: 1000 });
+        surveyResponses = responses;
+      } else {
+        // Query all AC collections (for L0 admin)
+        const responses = await queryAllSurveyResponses({ surveyId: mapping.surveyId }, { limit: 1000 });
+        surveyResponses = responses;
       }
-      surveyResponses = [response];
+    } else {
+      // Find single response - search across all collections if acNumber not provided
+      if (acNumber) {
+        const SurveyResponseModel = getSurveyResponseModel(acNumber);
+        const response = await SurveyResponseModel.findById(surveyResponseId);
+        if (!response) {
+          return res.status(404).json({ message: "Survey response not found" });
+        }
+        surveyResponses = [response];
+      } else {
+        const result = await findSurveyResponseById(surveyResponseId);
+        if (!result) {
+          return res.status(404).json({ message: "Survey response not found" });
+        }
+        surveyResponses = [result.response];
+      }
     }
 
     const masterSection = await MasterDataSection.findById(mapping.masterDataSectionId);

@@ -2,6 +2,7 @@ import express from "express";
 import mongoose from "mongoose";
 import { connectToDatabase } from "../config/database.js";
 import { getVoterModel } from "../utils/voterCollection.js";
+import { aggregateSurveyResponses } from "../utils/surveyResponseCollection.js";
 
 const router = express.Router();
 
@@ -23,7 +24,7 @@ router.get("/:acId/booth-performance", async (req, res) => {
       matchQuery.boothname = booth;
     }
 
-    // Aggregate booth performance data
+    // Aggregate booth performance data using AC-specific voter collection
     const VoterModel = getVoterModel(acId);
     const boothPerformance = await VoterModel.aggregate([
       { $match: matchQuery },
@@ -31,7 +32,8 @@ router.get("/:acId/booth-performance", async (req, res) => {
         $group: {
           _id: {
             boothname: "$boothname",
-            boothno: "$boothno"
+            boothno: "$boothno",
+            booth_id: "$booth_id"
           },
           total_voters: { $sum: 1 },
           male_voters: {
@@ -49,17 +51,22 @@ router.get("/:acId/booth-performance", async (req, res) => {
       { $sort: { "_id.boothno": 1 } }
     ]);
 
-    // Get survey completion data
-    const SurveyResponse = mongoose.models.SurveyResponse ||
-      mongoose.model('SurveyResponse', new mongoose.Schema({}, { strict: false, collection: 'surveyresponses' }));
-    const surveysByBooth = await SurveyResponse.aggregate([
-      {
-        $group: {
-          _id: "$booth",
-          surveys_completed: { $sum: 1 }
+    // Get survey completion data from AC-specific collection
+    // Use boothname (primary), booth_id, or legacy booth field
+    let surveysByBooth = [];
+    try {
+      surveysByBooth = await aggregateSurveyResponses(acId, [
+        {
+          $group: {
+            // Group by boothname first, fallback to booth_id or legacy booth
+            _id: { $ifNull: ["$boothname", { $ifNull: ["$booth_id", "$booth"] }] },
+            surveys_completed: { $sum: 1 }
+          }
         }
-      }
-    ]);
+      ]);
+    } catch (error) {
+      console.error("Error aggregating survey responses:", error);
+    }
 
     const surveyMap = new Map(surveysByBooth.map(s => [s._id, s.surveys_completed]));
 
@@ -86,17 +93,22 @@ router.get("/:acId/booth-performance", async (req, res) => {
 
     return res.json({
       reports: boothPerformance.map(booth => ({
+        // Booth identification fields
         booth: booth._id.boothname || `Booth ${booth._id.boothno}`,
+        boothname: booth._id.boothname,
         boothNo: booth._id.boothno,
+        booth_id: booth._id.booth_id,
+        // Stats
         total_voters: booth.total_voters,
         total_families: familyMap.get(booth._id.boothname) || 0,
         male_voters: booth.male_voters,
         female_voters: booth.female_voters,
         verified_voters: booth.verified_voters,
-        surveys_completed: surveyMap.get(booth._id.boothname) || 0,
+        // Survey data - try matching by boothname first, then booth_id
+        surveys_completed: surveyMap.get(booth._id.boothname) || surveyMap.get(booth._id.booth_id) || 0,
         avg_age: Math.round(booth.avg_age || 0),
         completion_rate: booth.total_voters > 0
-          ? Math.round(((surveyMap.get(booth._id.boothname) || 0) / booth.total_voters) * 100)
+          ? Math.round(((surveyMap.get(booth._id.boothname) || surveyMap.get(booth._id.booth_id) || 0) / booth.total_voters) * 100)
           : 0
       }))
     });

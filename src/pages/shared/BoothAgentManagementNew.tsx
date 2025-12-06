@@ -74,24 +74,38 @@ export const BoothAgentManagementNew = () => {
     booth_id: '',
   });
 
-  // Fetch data on mount
+  // Booths available for the edit dialog (loaded when editing an agent)
+  const [editBoothsList, setEditBoothsList] = useState<Booth[]>([]);
+
+  // Fetch data on mount and when filter changes
   useEffect(() => {
     if (user) {
       fetchData();
     }
-  }, [user]);
+  }, [user, filterAC]);
 
   const fetchData = async () => {
     try {
       setLoading(true);
+
+      // Determine AC filter for booths - L2 always uses their AC, L0/L1 can filter
+      const acForBooths = user?.role === 'L2'
+        ? user.assignedAC
+        : (filterAC !== 'all' ? parseInt(filterAC) : null);
+
+      // Build booth API URL with AC filter if specified
+      const boothUrl = acForBooths
+        ? `/rbac/booths?ac=${acForBooths}&limit=1000`
+        : `/rbac/booths?limit=1000`;
+
       const [agentsResponse, boothsResponse] = await Promise.all([
         api.get('/rbac/users?role=Booth Agent'),
-        api.get('/rbac/booths')
+        api.get(boothUrl)
       ]);
-      
+
       console.log('Fetched agents:', agentsResponse);
       console.log('Fetched booths:', boothsResponse);
-      
+
       // Map backend fields to frontend interface
       const mappedAgents = (agentsResponse.users || []).map((agent: any) => ({
         ...agent,
@@ -104,7 +118,7 @@ export const BoothAgentManagementNew = () => {
         boothCode: agent.assignedBoothId?.boothCode || agent.boothCode || '',
         boothName: agent.assignedBoothId?.boothName || agent.boothName || '',
       }));
-      
+
       setAgents(mappedAgents);
       setBooths(boothsResponse.booths || []);
     } catch (error: any) {
@@ -116,6 +130,17 @@ export const BoothAgentManagementNew = () => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Fetch booths for a specific AC (used when editing an agent in a different AC)
+  const fetchBoothsForAC = async (acId: number): Promise<Booth[]> => {
+    try {
+      const response = await api.get(`/rbac/booths?ac=${acId}&limit=1000`);
+      return response.booths || [];
+    } catch (error) {
+      console.error('Error fetching booths for AC:', acId, error);
+      return [];
     }
   };
 
@@ -140,9 +165,10 @@ export const BoothAgentManagementNew = () => {
       ? booths.filter(booth => booth.ac_id === parseInt(newAgent.aci_id))
       : booths;
 
-  const editAvailableBooths = editingAgent
-    ? booths.filter(booth => booth.ac_id === editingAgent.aci_id)
-    : [];
+  // Use the dynamically loaded booths for edit dialog, with fallback to filtered booths
+  const editAvailableBooths = editBoothsList.length > 0
+    ? editBoothsList
+    : (editingAgent ? booths.filter(booth => booth.ac_id === editingAgent.aci_id) : []);
 
   const handleCreateAgent = async () => {
     // Validation
@@ -202,13 +228,22 @@ export const BoothAgentManagementNew = () => {
     }
   };
 
-  const handleEditClick = (agent: BoothAgent) => {
+  const handleEditClick = async (agent: BoothAgent) => {
     setEditingAgent(agent);
     setEditForm({
       fullName: agent.fullName,
       phoneNumber: agent.phoneNumber,
       booth_id: agent.booth_id,
     });
+
+    // Fetch booths for this agent's AC to populate dropdown
+    if (agent.aci_id) {
+      const acBooths = await fetchBoothsForAC(agent.aci_id);
+      setEditBoothsList(acBooths);
+    } else {
+      setEditBoothsList(booths);
+    }
+
     setIsEditOpen(true);
   };
 
@@ -521,7 +556,10 @@ export const BoothAgentManagementNew = () => {
         {/* Edit Agent Dialog */}
         <Dialog open={isEditOpen} onOpenChange={(open) => {
           setIsEditOpen(open);
-          if (!open) setEditingAgent(null);
+          if (!open) {
+            setEditingAgent(null);
+            setEditBoothsList([]);
+          }
         }}>
           <DialogContent className="max-w-md">
             <DialogHeader>

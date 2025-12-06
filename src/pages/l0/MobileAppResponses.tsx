@@ -15,14 +15,24 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/components/ui/use-toast';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   fetchMobileAppResponses,
   MobileAppResponse,
   MobileAppResponsesResponse,
 } from '@/lib/mobileAppResponses';
+import { api } from '@/lib/api';
+import { CONSTITUENCIES } from '@/constants/constituencies';
 import {
   CalendarClock,
   ClipboardList,
   Eye,
+  Filter,
   Loader2,
   MapPin,
   Phone,
@@ -44,6 +54,14 @@ interface LoadParams {
   reset: boolean;
   cursor?: string | null;
   search?: string;
+  acId?: string | null;
+  boothId?: string | null;
+}
+
+interface BoothOption {
+  boothNo: number;
+  boothName: string;
+  booth_id?: string;
 }
 
 const formatDateTime = (value?: string | null) => {
@@ -98,6 +116,10 @@ export const MobileAppResponses = () => {
   const [responses, setResponses] = useState<MobileAppResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedAC, setSelectedAC] = useState<string>('all');
+  const [selectedBooth, setSelectedBooth] = useState<string>('all');
+  const [booths, setBooths] = useState<BoothOption[]>([]);
+  const [loadingBooths, setLoadingBooths] = useState(false);
   const [pagination, setPagination] = useState<PaginationState>({
     hasMore: false,
     nextCursor: null,
@@ -108,13 +130,38 @@ export const MobileAppResponses = () => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
 
-  const loadResponses = useCallback(async ({ reset, cursor, search }: LoadParams) => {
+  // Fetch booths when AC changes
+  useEffect(() => {
+    if (selectedAC && selectedAC !== 'all') {
+      fetchBooths(selectedAC);
+    } else {
+      setBooths([]);
+      setSelectedBooth('all');
+    }
+  }, [selectedAC]);
+
+  const fetchBooths = async (acId: string) => {
+    try {
+      setLoadingBooths(true);
+      const response = await api.get(`/voters/${acId}/booths`);
+      setBooths(response.booths || []);
+    } catch (error) {
+      console.error('Error fetching booths:', error);
+      setBooths([]);
+    } finally {
+      setLoadingBooths(false);
+    }
+  };
+
+  const loadResponses = useCallback(async ({ reset, cursor, search, acId, boothId }: LoadParams) => {
     try {
       setLoading(true);
       const data: MobileAppResponsesResponse = await fetchMobileAppResponses({
         limit: ITEMS_PER_PAGE,
         cursor: reset ? null : cursor ?? null,
         search,
+        acId: acId && acId !== 'all' ? acId : null,
+        boothId: boothId && boothId !== 'all' ? boothId : null,
       });
 
       setResponses((prev) => (reset ? data.responses : [...prev, ...data.responses]));
@@ -145,16 +192,31 @@ export const MobileAppResponses = () => {
   }, [toast]);
 
   useEffect(() => {
-    void loadResponses({ reset: true, search: undefined });
-  }, [loadResponses]);
+    void loadResponses({
+      reset: true,
+      search: undefined,
+      acId: selectedAC,
+      boothId: selectedBooth,
+    });
+  }, [loadResponses, selectedAC, selectedBooth]);
 
   const handleSearch = () => {
-    void loadResponses({ reset: true, search: searchTerm.trim() || undefined });
+    void loadResponses({
+      reset: true,
+      search: searchTerm.trim() || undefined,
+      acId: selectedAC,
+      boothId: selectedBooth,
+    });
   };
 
   const handleRefresh = () => {
     setSearchTerm('');
-    void loadResponses({ reset: true, search: undefined });
+    void loadResponses({
+      reset: true,
+      search: undefined,
+      acId: selectedAC,
+      boothId: selectedBooth,
+    });
   };
 
   const handleLoadMore = () => {
@@ -166,7 +228,18 @@ export const MobileAppResponses = () => {
       reset: false,
       cursor: pagination.nextCursor,
       search: searchTerm.trim() || undefined,
+      acId: selectedAC,
+      boothId: selectedBooth,
     });
+  };
+
+  const handleACChange = (value: string) => {
+    setSelectedAC(value);
+    setSelectedBooth('all');
+  };
+
+  const handleBoothChange = (value: string) => {
+    setSelectedBooth(value);
   };
 
   const openResponseDialog = (response: MobileAppResponse) => {
@@ -235,21 +308,58 @@ export const MobileAppResponses = () => {
         </div>
 
         <Card className="p-6 space-y-4">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center">
-            <div className="flex w-full gap-2">
-              <Input
-                placeholder="Search by respondent, phone, voter ID or booth…"
-                value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
-                onKeyDown={(event) => event.key === 'Enter' && handleSearch()}
-              />
-              <Button onClick={handleSearch} disabled={loading}>
-                <Search className="h-4 w-4 mr-2" />
-                Search
-              </Button>
+          <div className="flex flex-col gap-4">
+            {/* Filter Row */}
+            <div className="flex flex-col gap-4 md:flex-row md:items-center">
+              <Select value={selectedAC} onValueChange={handleACChange}>
+                <SelectTrigger className="w-full md:w-[250px]">
+                  <Filter className="mr-2 h-4 w-4" />
+                  <SelectValue placeholder="Select AC" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Constituencies</SelectItem>
+                  {CONSTITUENCIES.map((ac) => (
+                    <SelectItem key={ac.number} value={String(ac.number)}>
+                      {ac.number} - {ac.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={selectedBooth}
+                onValueChange={handleBoothChange}
+                disabled={selectedAC === 'all' || loadingBooths}
+              >
+                <SelectTrigger className="w-full md:w-[300px]">
+                  <SelectValue placeholder={loadingBooths ? 'Loading booths...' : 'Select Booth'} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Booths</SelectItem>
+                  {booths.map((booth) => (
+                    <SelectItem key={booth.boothNo} value={booth.booth_id || String(booth.boothNo)}>
+                      {booth.boothName || `Booth ${booth.boothNo}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <div className="text-sm text-muted-foreground">
-              {pagination.total > 0 ? `${pagination.total} records matched` : 'No results yet'}
+            {/* Search Row */}
+            <div className="flex flex-col gap-4 md:flex-row md:items-center">
+              <div className="flex w-full gap-2">
+                <Input
+                  placeholder="Search by respondent, phone, voter ID or booth…"
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  onKeyDown={(event) => event.key === 'Enter' && handleSearch()}
+                />
+                <Button onClick={handleSearch} disabled={loading}>
+                  <Search className="h-4 w-4 mr-2" />
+                  Search
+                </Button>
+              </div>
+              <div className="text-sm text-muted-foreground whitespace-nowrap">
+                {pagination.total > 0 ? `${pagination.total} records matched` : 'No results yet'}
+              </div>
             </div>
           </div>
 
