@@ -76,6 +76,9 @@ export const BoothAgentManagementNew = () => {
 
   // Booths available for the edit dialog (loaded when editing an agent)
   const [editBoothsList, setEditBoothsList] = useState<Booth[]>([]);
+  // Booths available for the create dialog (loaded when AC is selected)
+  const [createBoothsList, setCreateBoothsList] = useState<Booth[]>([]);
+  const [loadingCreateBooths, setLoadingCreateBooths] = useState(false);
 
   // Fetch data on mount and when filter changes
   useEffect(() => {
@@ -144,6 +147,27 @@ export const BoothAgentManagementNew = () => {
     }
   };
 
+  // Fetch booths for create dialog when AC is selected
+  const fetchBoothsForCreateDialog = async (acId: number) => {
+    try {
+      setLoadingCreateBooths(true);
+      const boothsList = await fetchBoothsForAC(acId);
+      setCreateBoothsList(boothsList);
+    } catch (error) {
+      console.error('Error fetching booths for create dialog:', error);
+      setCreateBoothsList([]);
+    } finally {
+      setLoadingCreateBooths(false);
+    }
+  };
+
+  // Load booths for L2 user on mount (they have fixed AC)
+  useEffect(() => {
+    if (user?.role === 'L2' && user.assignedAC) {
+      fetchBoothsForCreateDialog(user.assignedAC);
+    }
+  }, [user]);
+
   // Filter agents based on role and AC filter
   const filteredAgents = (() => {
     let result = user?.role === 'L2' 
@@ -158,12 +182,12 @@ export const BoothAgentManagementNew = () => {
     return result;
   })();
 
-  // Get available booths for agent assignment
-  const availableBooths = user?.role === 'L2' 
-    ? booths.filter(booth => booth.ac_id === user.assignedAC)
-    : newAgent.aci_id 
-      ? booths.filter(booth => booth.ac_id === parseInt(newAgent.aci_id))
-      : booths;
+  // Get available booths for agent assignment in create dialog
+  // For L2: use createBoothsList (pre-loaded for their AC)
+  // For L0/L1: use createBoothsList (loaded when AC is selected in dialog)
+  const availableBooths = user?.role === 'L2'
+    ? createBoothsList
+    : createBoothsList;
 
   // Use the dynamically loaded booths for edit dialog, with fallback to filtered booths
   const editAvailableBooths = editBoothsList.length > 0
@@ -417,6 +441,12 @@ export const BoothAgentManagementNew = () => {
                             aci_name: constituency?.name || '',
                             booth_id: '' // Reset booth selection when AC changes
                           });
+                          // Fetch booths for the selected AC
+                          if (value) {
+                            fetchBoothsForCreateDialog(parseInt(value));
+                          } else {
+                            setCreateBoothsList([]);
+                          }
                         }}
                       >
                         <SelectTrigger>
@@ -434,20 +464,26 @@ export const BoothAgentManagementNew = () => {
                   )}
                   <div className="space-y-2">
                     <Label htmlFor="booth">Assign to Booth <span className="text-destructive">*</span></Label>
-                    <Select 
-                      value={newAgent.booth_id} 
+                    <Select
+                      value={newAgent.booth_id}
                       onValueChange={(value) => setNewAgent({...newAgent, booth_id: value})}
-                      disabled={!newAgent.aci_id && user?.role !== 'L2'}
+                      disabled={(!newAgent.aci_id && user?.role !== 'L2') || loadingCreateBooths}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Select booth" />
+                        <SelectValue placeholder={loadingCreateBooths ? "Loading booths..." : "Select booth"} />
                       </SelectTrigger>
                       <SelectContent>
-                        {availableBooths.map(booth => (
-                          <SelectItem key={booth._id} value={booth._id}>
-                            {booth.boothCode} - {booth.boothName}
+                        {availableBooths.length === 0 ? (
+                          <SelectItem value="__no_booths__" disabled>
+                            {loadingCreateBooths ? "Loading..." : "No booths available - select AC first"}
                           </SelectItem>
-                        ))}
+                        ) : (
+                          availableBooths.map(booth => (
+                            <SelectItem key={booth._id} value={booth._id}>
+                              {booth.boothCode} - {booth.boothName}
+                            </SelectItem>
+                          ))
+                        )}
                       </SelectContent>
                     </Select>
                   </div>

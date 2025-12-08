@@ -39,7 +39,7 @@ export const ACFamilyManager = () => {
 
   // API state
   const [families, setFamilies] = useState<Family[]>([]);
-  const [booths, setBooths] = useState<{ boothNo: number; boothName: string; label: string }[]>([]);
+  const [booths, setBooths] = useState<{ boothNo: number; boothName: string; label: string; boothId?: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pagination, setPagination] = useState<Pagination>({
@@ -172,7 +172,7 @@ export const ACFamilyManager = () => {
               <SelectContent>
                 <SelectItem value="all">All Booths</SelectItem>
                 {booths.map((booth) => (
-                  <SelectItem key={booth.boothNo} value={String(booth.boothNo)}>
+                  <SelectItem key={booth.boothNo} value={booth.boothId || `BOOTH${booth.boothNo}-${acNumber}`}>
                     {booth.boothName}
                   </SelectItem>
                 ))}

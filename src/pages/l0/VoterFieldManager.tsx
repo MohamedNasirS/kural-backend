@@ -129,7 +129,7 @@ export const VoterFieldManager = () => {
   // Voter data management state
   const [selectedAC, setSelectedAC] = useState<string>('119');
   const [voters, setVoters] = useState<Voter[]>([]);
-  const [booths, setBooths] = useState<{ boothNo: number; boothName: string; label: string }[]>([]);
+  const [booths, setBooths] = useState<{ boothNo: number; boothName: string; label: string; boothId?: string }[]>([]);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [boothFilter, setBoothFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -843,7 +843,7 @@ export const VoterFieldManager = () => {
                   <SelectContent>
                     <SelectItem value="all">All Booths</SelectItem>
                     {booths.map((booth) => (
-                      <SelectItem key={booth.boothNo} value={String(booth.boothNo)}>
+                      <SelectItem key={booth.boothNo} value={booth.boothId || `BOOTH${booth.boothNo}-${selectedAC}`}>
                         {booth.boothName}
                       </SelectItem>
                     ))}

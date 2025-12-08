@@ -848,21 +848,26 @@ router.post("/users/booth-agent", isAuthenticated, async (req, res) => {
     }
 
     // Verify booth exists and is in the correct AC
-    // First try to find by ObjectId, then by boothCode
+    // First try to find by ObjectId, then by boothCode/booth_id
     let booth = null;
+    const aciIdNum = typeof aci_id === 'number' ? aci_id : parseInt(aci_id);
 
-    // Check if booth_id is a valid MongoDB ObjectId
-    if (mongoose.Types.ObjectId.isValid(booth_id) && !booth_id.startsWith('voter-booth-')) {
+    // Check if booth_id is a valid MongoDB ObjectId (24 hex chars, not starting with BOOTH)
+    const isObjectId = mongoose.Types.ObjectId.isValid(booth_id) &&
+                       booth_id.length === 24 &&
+                       !booth_id.startsWith('BOOTH') &&
+                       !booth_id.startsWith('voter-booth-');
+
+    if (isObjectId) {
       booth = await Booth.findById(booth_id);
     }
 
-    // If not found by _id, try to find by boothCode (for voter-derived booths)
+    // If not found by _id, try to find by boothCode (for voter-derived booths like "BOOTH1-111")
     if (!booth) {
-      // Extract boothCode from synthetic ID like "voter-booth-111-1" or use as-is
       let boothCode = booth_id;
+
+      // Handle "voter-booth-111-1" format
       if (booth_id.startsWith('voter-booth-')) {
-        // Synthetic ID format: voter-booth-{acId}-{boothNumber}
-        // We need to find or create a booth with this info
         const parts = booth_id.split('-');
         const acIdFromId = parseInt(parts[2]);
         const boothNumberFromId = parseInt(parts[3]);
@@ -873,36 +878,70 @@ router.post("/users/booth-agent", isAuthenticated, async (req, res) => {
         $or: [
           { boothCode: boothCode },
           { booth_id: boothCode },
-          { boothCode: booth_id }
+          { boothCode: booth_id },
+          { booth_id: booth_id }
         ],
         isActive: true
       });
 
-      // If booth still doesn't exist, create it from voter data
-      if (!booth && booth_id.startsWith('voter-booth-')) {
-        const parts = booth_id.split('-');
-        const acIdFromId = parseInt(parts[2]);
-        const boothNumberFromId = parseInt(parts[3]);
-        const generatedBoothCode = `BOOTH${boothNumberFromId}-${acIdFromId}`;
+      // If booth doesn't exist in Booth collection, check for inactive or create from voter data
+      // This handles booths that are aggregated from voter_xxx collections
+      if (!booth) {
+        let finalBoothCode = boothCode;
+        let boothNumber = 1;
+        let acIdForBooth = aciIdNum;
 
-        // Try to get booth name from voter data
-        const voterCollection = mongoose.connection.collection(`voters_${acIdFromId}`);
-        const voterSample = await voterCollection.findOne({ booth_id: generatedBoothCode });
-        const boothName = voterSample?.boothname || `Booth ${boothNumberFromId}`;
+        // Extract booth number from code like "BOOTH1-111"
+        const boothMatch = finalBoothCode.match(/^BOOTH(\d+)-(\d+)$/);
+        if (boothMatch) {
+          boothNumber = parseInt(boothMatch[1]);
+          acIdForBooth = parseInt(boothMatch[2]);
+        }
 
-        booth = new Booth({
-          boothNumber: boothNumberFromId,
-          boothName: boothName,
-          boothCode: generatedBoothCode,
-          booth_id: generatedBoothCode,
-          ac_id: acIdFromId,
-          ac_name: aci_name || `AC ${acIdFromId}`,
-          isActive: true,
-          assignedAgents: [],
-          createdBy: req.user._id
+        // Check for an inactive booth with the same code - reactivate it instead of creating new
+        const inactiveBooth = await Booth.findOne({
+          $or: [
+            { boothCode: finalBoothCode },
+            { booth_id: finalBoothCode }
+          ],
+          isActive: false
         });
-        await booth.save();
-        console.log(`Created new booth from voter data: ${generatedBoothCode}`);
+
+        if (inactiveBooth) {
+          console.log(`Reactivating inactive booth: ${finalBoothCode}`);
+          inactiveBooth.isActive = true;
+          inactiveBooth.ac_name = aci_name || inactiveBooth.ac_name || `AC ${acIdForBooth}`;
+          await inactiveBooth.save();
+          booth = inactiveBooth;
+        } else {
+          // Try to get booth name from voter data
+          let boothName = `Booth ${boothNumber}`;
+          try {
+            const VoterModel = getVoterModel(acIdForBooth);
+            const voterSample = await VoterModel.findOne({ booth_id: finalBoothCode });
+            if (voterSample?.boothname) {
+              boothName = voterSample.boothname;
+            }
+          } catch (err) {
+            console.log(`Could not fetch booth name from voters: ${err.message}`);
+          }
+
+          console.log(`Creating booth from voter-derived data: ${finalBoothCode}, name: ${boothName}`);
+
+          booth = new Booth({
+            boothNumber: boothNumber,
+            boothName: boothName,
+            boothCode: finalBoothCode,
+            booth_id: finalBoothCode,
+            ac_id: acIdForBooth,
+            ac_name: aci_name || `AC ${acIdForBooth}`,
+            isActive: true,
+            assignedAgents: [],
+            createdBy: req.user._id
+          });
+          await booth.save();
+          console.log(`Created new booth from voter data: ${finalBoothCode}`);
+        }
       }
     }
 
@@ -913,7 +952,7 @@ router.post("/users/booth-agent", isAuthenticated, async (req, res) => {
       });
     }
 
-    const aciIdNum = typeof aci_id === 'number' ? aci_id : parseInt(aci_id);
+    // aciIdNum already declared above
     if (booth.ac_id !== aciIdNum) {
       return res.status(400).json({
         success: false,

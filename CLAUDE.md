@@ -245,6 +245,10 @@ ACI (L2) - AC 119:
   Email: aci119@kuralapp.com
   Password: aci123
 
+ACI (L2) - AC 111 (Mettupalayam - has test data):
+  Email: testaci111@test.com
+  Password: test123
+
 Booth Agents:
   Phone: 9999999001-9999999005
   Password: agent123

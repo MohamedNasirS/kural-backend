@@ -79,7 +79,7 @@ export const FormBuilder = () => {
   const resolvedFormId = formId ?? 'new';
   const isNewForm = resolvedFormId === 'new';
   const redirectPath =
-    user?.role === 'L0' ? '/l0/surveys' : user?.role === 'L1' ? '/l1/surveys' : '/l2/surveys';
+    user?.role === 'L0' ? '/l0/survey-bank' : user?.role === 'L1' ? '/l1/survey-forms' : '/l2/survey-forms';
 
   const [formData, setFormData] = useState<FormData>({
     title: '',
@@ -133,10 +133,14 @@ export const FormBuilder = () => {
   useEffect(() => {
     if (isNewForm) {
       setIsLoading(false);
+      // For L2 users, auto-assign their AC
+      const defaultACs = user?.role === 'L2' && user?.assignedAC
+        ? [user.assignedAC]
+        : [];
       setFormData({
         title: '',
         description: '',
-        assignedACs: [],
+        assignedACs: defaultACs,
         questions: [],
         status: 'Draft',
       });
@@ -519,26 +523,45 @@ export const FormBuilder = () => {
           <div className="space-y-2">
             <Label>Assign to Assembly Constituencies</Label>
             <p className="text-sm text-muted-foreground">
-              Select which constituencies will have access to this form
+              {user?.role === 'L2'
+                ? `This form will be created for your assigned constituency (AC ${user?.assignedAC})`
+                : 'Select which constituencies will have access to this form'}
             </p>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-h-96 overflow-y-auto p-4 border rounded-md">
-            {constituencies.map((ac) => (
-              <div key={ac.number} className="flex items-center space-x-2">
+          {user?.role === 'L2' ? (
+            /* L2 users can only create surveys for their assigned AC */
+            <div className="p-4 border rounded-md bg-muted/30">
+              <div className="flex items-center space-x-2">
                 <Checkbox
-                  id={`ac-${ac.number}`}
-                  checked={formData.assignedACs.includes(ac.number)}
-                  onCheckedChange={() => toggleAC(ac.number)}
+                  id={`ac-${user?.assignedAC}`}
+                  checked={true}
+                  disabled={true}
                 />
-                <label
-                  htmlFor={`ac-${ac.number}`}
-                  className="text-sm font-medium leading-none cursor-pointer"
-                >
-                  {ac.number} - {ac.name}
+                <label className="text-sm font-medium leading-none">
+                  AC {user?.assignedAC} - {constituencies.find(c => c.number === user?.assignedAC)?.name || 'Unknown'}
                 </label>
               </div>
-            ))}
-          </div>
+            </div>
+          ) : (
+            /* L0/L1 users can select multiple ACs */
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-h-96 overflow-y-auto p-4 border rounded-md">
+              {constituencies.map((ac) => (
+                <div key={ac.number} className="flex items-center space-x-2">
+                  <Checkbox
+                    id={`ac-${ac.number}`}
+                    checked={formData.assignedACs.includes(ac.number)}
+                    onCheckedChange={() => toggleAC(ac.number)}
+                  />
+                  <label
+                    htmlFor={`ac-${ac.number}`}
+                    className="text-sm font-medium leading-none cursor-pointer"
+                  >
+                    {ac.number} - {ac.name}
+                  </label>
+                </div>
+              ))}
+            </div>
+          )}
           <p className="text-sm text-muted-foreground">
             {formData.assignedACs.length} constituency(ies) selected
           </p>

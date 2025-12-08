@@ -10,8 +10,58 @@ import {
   queryAllSurveyResponses,
   countAllSurveyResponses
 } from "../utils/surveyResponseCollection.js";
+import Survey from "../models/Survey.js";
 
 const router = express.Router();
+
+// Helper function to populate question text from survey form
+const populateQuestionText = async (answers, surveyId) => {
+  if (!answers || !Array.isArray(answers) || answers.length === 0) {
+    return answers;
+  }
+
+  // Try to fetch the survey form to get question text
+  let surveyForm = null;
+  if (surveyId) {
+    try {
+      surveyForm = await Survey.findById(surveyId);
+    } catch (err) {
+      // surveyId might not be a valid ObjectId
+      console.log(`Could not fetch survey form: ${err.message}`);
+    }
+  }
+
+  // Build a map of questionId to question text
+  const questionMap = new Map();
+  if (surveyForm && surveyForm.questions) {
+    surveyForm.questions.forEach((q) => {
+      if (q.id) {
+        questionMap.set(q.id, q.text || q.prompt || `Question`);
+      }
+      if (q._id) {
+        questionMap.set(q._id.toString(), q.text || q.prompt || `Question`);
+      }
+    });
+  }
+
+  // Populate question text in answers
+  return answers.map((answer, index) => {
+    // If question text already exists, use it
+    if (answer.question && typeof answer.question === 'string' && answer.question.length > 0 && !/^\d+$/.test(answer.question)) {
+      return answer;
+    }
+
+    // Try to find question text from map
+    const qId = answer.questionId || answer.question;
+    const questionText = qId ? questionMap.get(String(qId)) : null;
+
+    return {
+      ...answer,
+      question: questionText || answer.prompt || `Question ${index + 1}`,
+      questionId: qId || answer.questionId
+    };
+  });
+};
 
 // Get all survey responses (for L0 admin)
 router.get("/", async (req, res) => {
@@ -157,10 +207,15 @@ router.get("/", async (req, res) => {
       responses = responses.slice(skip, skip + limitNum);
     }
 
-    return res.json({
-      responses: responses.map(response => ({
+    // Populate question text for all responses
+    const processedResponses = await Promise.all(responses.map(async (response) => {
+      const surveyId = response.surveyId || response.formId;
+      const answers = response.answers || response.responses || [];
+      const populatedAnswers = await populateQuestionText(answers, surveyId);
+
+      return {
         id: response._id,
-        survey_id: response.surveyId || response.formId || 'N/A',
+        survey_id: surveyId || 'N/A',
         respondent_name: response.voterName || response.respondentName || 'N/A',
         voter_id: response.respondentVoterId || response.voterId || response.voterID || 'N/A',
         voterID: response.respondentVoterId || response.voterID || '',
@@ -174,8 +229,12 @@ router.get("/", async (req, res) => {
         aci_name: response.aci_name || null,
         survey_date: response.createdAt || response.submittedAt || new Date(),
         status: response.isComplete ? 'Completed' : (response.status || 'Pending'),
-        answers: response.answers || response.responses || []
-      })),
+        answers: populatedAnswers
+      };
+    }));
+
+    return res.json({
+      responses: processedResponses,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -238,10 +297,15 @@ router.get("/:acId", async (req, res) => {
 
     const totalResponses = await countSurveyResponses(acId, query);
 
-    return res.json({
-      responses: responses.map(response => ({
+    // Populate question text for all responses
+    const processedResponses = await Promise.all(responses.map(async (response) => {
+      const surveyId = response.surveyId || response.formId;
+      const answers = response.answers || response.responses || [];
+      const populatedAnswers = await populateQuestionText(answers, surveyId);
+
+      return {
         id: response._id,
-        survey_id: response.surveyId || response.formId || 'N/A',
+        survey_id: surveyId || 'N/A',
         respondent_name: response.voterName || response.respondentName || 'N/A',
         voter_id: response.voterId || 'N/A',
         voterID: response.voterID || '',
@@ -255,8 +319,12 @@ router.get("/:acId", async (req, res) => {
         aci_name: response.aci_name || null,
         survey_date: response.createdAt || response.submittedAt || new Date(),
         status: response.status || 'Completed',
-        answers: response.answers || response.responses || []
-      })),
+        answers: populatedAnswers
+      };
+    }));
+
+    return res.json({
+      responses: processedResponses,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),

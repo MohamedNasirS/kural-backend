@@ -740,7 +740,13 @@ router.get("/:acId", async (req, res) => {
     const queryClauses = [];
 
     if (booth && booth !== "all") {
-      queryClauses.push({ boothname: booth });
+      // Support both booth_id (e.g., "BOOTH1-111") and boothname
+      queryClauses.push({
+        $or: [
+          { booth_id: booth },
+          { boothname: booth }
+        ]
+      });
     }
 
     if (status && status !== "all") {
@@ -858,10 +864,13 @@ router.get("/:acId/booths", async (req, res) => {
       .filter((booth) => booth._id != null && booth._id !== "")
       .map((booth) => ({
         boothId: booth._id,
+        booth_id: booth._id,
         boothNo: booth.boothno,
-        boothName: booth._id || `Booth ${booth.boothno}`,
+        boothName: booth.boothname || `Booth ${booth.boothno}`,
         voterCount: booth.voterCount,
-        label: booth.boothname || `Booth ${booth.boothno}`
+        label: booth.boothname || `Booth ${booth.boothno}`,
+        // Combined display for dropdowns: "BOOTH_ID - Booth Name"
+        displayName: `${booth._id} - ${booth.boothname || `Booth ${booth.boothno}`}`
       }));
 
     return res.json({ booths });

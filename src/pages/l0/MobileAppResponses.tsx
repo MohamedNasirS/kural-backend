@@ -62,6 +62,7 @@ interface BoothOption {
   boothNo: number;
   boothName: string;
   booth_id?: string;
+  displayName?: string;
 }
 
 const formatDateTime = (value?: string | null) => {
@@ -336,8 +337,8 @@ export const MobileAppResponses = () => {
                 <SelectContent>
                   <SelectItem value="all">All Booths</SelectItem>
                   {booths.map((booth) => (
-                    <SelectItem key={booth.boothNo} value={booth.booth_id || String(booth.boothNo)}>
-                      {booth.boothName || `Booth ${booth.boothNo}`}
+                    <SelectItem key={booth.booth_id || booth.boothNo} value={booth.booth_id || String(booth.boothNo)}>
+                      {booth.displayName || `${booth.booth_id || ''} - ${booth.boothName || `Booth ${booth.boothNo}`}`}
                     </SelectItem>
                   ))}
                 </SelectContent>
