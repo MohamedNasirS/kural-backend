@@ -7,8 +7,13 @@ import {
   aggregateVoters,
   findOneVoter,
 } from "../utils/voterCollection.js";
+import { isAuthenticated, canAccessAC } from "../middleware/auth.js";
+import { getCache, setCache, cacheKeys, TTL } from "../utils/cache.js";
 
 const router = express.Router();
+
+// Apply authentication to all routes
+router.use(isAuthenticated);
 
 // Dashboard Statistics API
 router.get("/stats/:acId", async (req, res) => {
@@ -17,6 +22,19 @@ router.get("/stats/:acId", async (req, res) => {
 
     const rawIdentifier = req.params.acId ?? req.query.aciName ?? req.query.acName;
     const acQuery = buildAcQuery(rawIdentifier);
+
+    // Try to get from cache first (for numeric AC IDs)
+    const numericAcId = Number(rawIdentifier);
+    if (Number.isFinite(numericAcId)) {
+      const cacheKey = cacheKeys.dashboardStats(numericAcId);
+      const cachedStats = getCache(cacheKey, TTL.DASHBOARD_STATS);
+      if (cachedStats) {
+        // Verify user has access before returning cached data
+        if (canAccessAC(req.user, numericAcId)) {
+          return res.json(cachedStats);
+        }
+      }
+    }
 
     if (!acQuery) {
       return res.status(400).json({ message: "Invalid AC identifier" });
@@ -33,6 +51,14 @@ router.get("/stats/:acId", async (req, res) => {
     let acId;
     if (hasNumericIdentifier) {
       acId = numericFromIdentifier;
+
+      // AC Isolation: Check if user can access this AC
+      if (!canAccessAC(req.user, acId)) {
+        return res.status(403).json({
+          success: false,
+          message: "Access denied. You do not have permission to view this AC's data."
+        });
+      }
     } else {
       // For name-based lookup, we need to search across collections to find the AC ID
       const voterResult = await findOneVoter({
@@ -113,7 +139,7 @@ router.get("/stats/:acId", async (req, res) => {
       { $limit: 10 },
     ]);
 
-    return res.json({
+    const responseData = {
       acIdentifier:
         (acName ?? (hasNumericIdentifier ? String(numericFromIdentifier) : identifierString)) ||
         null,
@@ -130,7 +156,15 @@ router.get("/stats/:acId", async (req, res) => {
         boothId: booth.booth_id,
         voters: booth.voters,
       })),
-    });
+    };
+
+    // Cache the response for future requests (5 minute TTL)
+    if (acId && Number.isFinite(acId)) {
+      const cacheKey = cacheKeys.dashboardStats(acId);
+      setCache(cacheKey, responseData, TTL.DASHBOARD_STATS);
+    }
+
+    return res.json(responseData);
   } catch (error) {
     console.error("Error fetching dashboard stats:", error);
     return res.status(500).json({ message: "Failed to fetch dashboard statistics" });

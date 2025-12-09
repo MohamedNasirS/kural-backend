@@ -74,8 +74,8 @@ const AppSidebar = () => {
   const location = useLocation();
   const { state } = useSidebar();
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate('/login');
   };
 

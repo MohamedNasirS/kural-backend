@@ -43,4 +43,14 @@ export const SESSION_COOKIE_DOMAIN =
 export const SESSION_COOKIE_SAMESITE =
   process.env.SESSION_COOKIE_SAMESITE?.toLowerCase() || (isProduction ? "lax" : "lax");
 
-export const SESSION_SECRET = process.env.SESSION_SECRET || "kural-election-management-secret-key-2024";
+// Session secret - MUST be set in production
+const defaultSecret = "kural-election-management-secret-key-2024";
+export const SESSION_SECRET = process.env.SESSION_SECRET || defaultSecret;
+
+// Warn if using default secret in production
+if (isProduction && (!process.env.SESSION_SECRET || process.env.SESSION_SECRET === defaultSecret)) {
+  console.error("=".repeat(80));
+  console.error("SECURITY WARNING: SESSION_SECRET is not set or using default value in production!");
+  console.error("Please set a strong SESSION_SECRET environment variable.");
+  console.error("=".repeat(80));
+}

@@ -1,8 +1,12 @@
 import express from "express";
 import { connectToDatabase } from "../config/database.js";
 import { getVoterModel, aggregateVoters } from "../utils/voterCollection.js";
+import { isAuthenticated, canAccessAC } from "../middleware/auth.js";
 
 const router = express.Router();
+
+// Apply authentication to all routes
+router.use(isAuthenticated);
 
 // Get families for a specific AC (aggregated from voters by familyId)
 router.get("/:acId", async (req, res) => {
@@ -14,6 +18,14 @@ router.get("/:acId", async (req, res) => {
 
     if (isNaN(acId)) {
       return res.status(400).json({ message: "Invalid AC ID" });
+    }
+
+    // AC Isolation: Check if user can access this AC
+    if (!canAccessAC(req.user, acId)) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied. You do not have permission to view this AC's data."
+      });
     }
 
     // Build match query - only include voters with valid familyId
@@ -150,6 +162,14 @@ router.get("/:acId/details", async (req, res) => {
 
     if (isNaN(acId)) {
       return res.status(400).json({ message: "Invalid AC ID" });
+    }
+
+    // AC Isolation: Check if user can access this AC
+    if (!canAccessAC(req.user, acId)) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied. You do not have permission to view this AC's data."
+      });
     }
 
     const VoterModel = getVoterModel(acId);

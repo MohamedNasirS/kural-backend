@@ -19,7 +19,8 @@ export const SurveyBank = () => {
     const loadSurveys = async () => {
       setIsLoading(true);
       try {
-        const data = await fetchSurveys({ role: 'L0' });
+        // Admin (L0) should see all surveys from all roles (L0, L1, L2)
+        const data = await fetchSurveys();
         setForms(data);
       } catch (error) {
         console.error('Failed to load surveys', error);
@@ -110,6 +111,7 @@ export const SurveyBank = () => {
               <thead className="bg-muted">
                 <tr>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Form Name</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold">Scope</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Questions</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Date Created</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Status</th>
@@ -119,7 +121,7 @@ export const SurveyBank = () => {
               <tbody className="divide-y">
                 {isLoading ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">
+                    <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">
                       Loading surveys...
                     </td>
                   </tr>
@@ -131,6 +133,17 @@ export const SurveyBank = () => {
                           <FileText className="h-4 w-4 text-primary" />
                           <span>{form.title}</span>
                         </div>
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        {form.createdByRole === 'L2' ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                            AC {form.assignedACs?.[0] || '—'}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200">
+                            Universal
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-sm">{form.questions.length} questions</td>
                       <td className="px-4 py-3 text-sm">
@@ -176,7 +189,7 @@ export const SurveyBank = () => {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">
+                    <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">
                       No surveys found. Create your first form to get started.
                     </td>
                   </tr>

@@ -8,7 +8,6 @@ import bcrypt from "bcryptjs";
 import mongoose from "mongoose";
 import User from "../models/User.js";
 import Booth from "../models/Booth.js";
-import Voter from "../models/Voter.js";
 import Survey from "../models/Survey.js";
 import { resolveAssignedACFromUser } from "../utils/ac.js";
 import {

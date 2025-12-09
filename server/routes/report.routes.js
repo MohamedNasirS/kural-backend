@@ -3,8 +3,12 @@ import mongoose from "mongoose";
 import { connectToDatabase } from "../config/database.js";
 import { getVoterModel } from "../utils/voterCollection.js";
 import { aggregateSurveyResponses } from "../utils/surveyResponseCollection.js";
+import { isAuthenticated, canAccessAC } from "../middleware/auth.js";
 
 const router = express.Router();
+
+// Apply authentication to all routes
+router.use(isAuthenticated);
 
 // Get booth performance reports
 router.get("/:acId/booth-performance", async (req, res) => {
@@ -16,6 +20,14 @@ router.get("/:acId/booth-performance", async (req, res) => {
 
     if (isNaN(acId)) {
       return res.status(400).json({ message: "Invalid AC ID" });
+    }
+
+    // AC Isolation: Check if user can access this AC
+    if (!canAccessAC(req.user, acId)) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied. You do not have permission to view this AC's data."
+      });
     }
 
     const matchQuery = {};

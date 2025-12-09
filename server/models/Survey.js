@@ -127,6 +127,12 @@ surveySchema.virtual("id").get(function getId() {
   return this._id.toString();
 });
 
+// Add indexes for common query patterns
+surveySchema.index({ status: 1 });
+surveySchema.index({ assignedACs: 1 });
+surveySchema.index({ createdBy: 1 });
+surveySchema.index({ createdAt: -1 });
+
 export default mongoose.models.Survey || mongoose.model("Survey", surveySchema);
 
 

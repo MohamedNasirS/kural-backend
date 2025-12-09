@@ -57,6 +57,15 @@ const boothAgentActivitySchema = new mongoose.Schema({
 // Add 2dsphere index for geospatial queries
 boothAgentActivitySchema.index({ location: '2dsphere' });
 
+// Add indexes for common query patterns
+boothAgentActivitySchema.index({ aci_id: 1 });
+boothAgentActivitySchema.index({ userId: 1 });
+boothAgentActivitySchema.index({ booth_id: 1 });
+boothAgentActivitySchema.index({ status: 1 });
+boothAgentActivitySchema.index({ loginTime: -1 });
+boothAgentActivitySchema.index({ aci_id: 1, loginTime: -1 }); // Combined filter + sort
+boothAgentActivitySchema.index({ userId: 1, status: 1 }); // User active sessions
+
 // Cache for compiled models to avoid recompilation
 const modelCache = {};
 
@@ -134,21 +143,24 @@ export async function aggregateBoothAgentActivities(acId, pipeline) {
 
 /**
  * Query booth agent activities across ALL AC collections (for L0 cross-AC queries)
+ * Uses parallel queries for better performance
  * @param {Object} query - MongoDB query object
  * @param {Object} options - Query options (limit, skip, sort, select)
  * @returns {Promise<Array>} Combined results from all collections
  */
 export async function queryAllBoothAgentActivities(query = {}, options = {}) {
-  const results = [];
+  // Run queries in parallel for better performance
+  const queryPromises = ALL_AC_IDS.map(acId =>
+    queryBoothAgentActivities(acId, query, options)
+      .then(activities => activities.map(a => ({ ...a, _acId: acId })))
+      .catch(err => {
+        console.error(`Error querying boothagentactivities_${acId}:`, err.message);
+        return [];
+      })
+  );
 
-  for (const acId of ALL_AC_IDS) {
-    try {
-      const activities = await queryBoothAgentActivities(acId, query, options);
-      results.push(...activities.map(a => ({ ...a, _acId: acId })));
-    } catch (err) {
-      console.error(`Error querying boothagentactivities_${acId}:`, err.message);
-    }
-  }
+  const resultsArrays = await Promise.all(queryPromises);
+  let results = resultsArrays.flat();
 
   // Sort combined results if sort option provided
   if (options.sort && results.length > 0) {
@@ -172,22 +184,22 @@ export async function queryAllBoothAgentActivities(query = {}, options = {}) {
 
 /**
  * Count booth agent activities across ALL AC collections (for L0 cross-AC queries)
+ * Uses parallel queries for better performance
  * @param {Object} query - MongoDB query object
  * @returns {Promise<number>} Total count
  */
 export async function countAllBoothAgentActivities(query = {}) {
-  let total = 0;
+  // Run count queries in parallel for better performance
+  const countPromises = ALL_AC_IDS.map(acId =>
+    countBoothAgentActivities(acId, query)
+      .catch(err => {
+        console.error(`Error counting boothagentactivities_${acId}:`, err.message);
+        return 0;
+      })
+  );
 
-  for (const acId of ALL_AC_IDS) {
-    try {
-      const count = await countBoothAgentActivities(acId, query);
-      total += count;
-    } catch (err) {
-      console.error(`Error counting boothagentactivities_${acId}:`, err.message);
-    }
-  }
-
-  return total;
+  const counts = await Promise.all(countPromises);
+  return counts.reduce((sum, count) => sum + count, 0);
 }
 
 /**
@@ -291,23 +303,24 @@ export async function getActivitySummary(acId, startDate, endDate) {
 
 /**
  * Aggregate across ALL AC collections (for L0 cross-AC aggregations)
+ * Uses parallel queries for better performance
  * @param {Array} pipeline - Aggregation pipeline
  * @returns {Promise<Array>} Combined aggregation results
  */
 export async function aggregateAllBoothAgentActivities(pipeline) {
-  const results = [];
+  // Run aggregations in parallel for better performance
+  const aggregatePromises = ALL_AC_IDS.map(acId => {
+    const BoothAgentActivityModel = getBoothAgentActivityModel(acId);
+    return BoothAgentActivityModel.aggregate(pipeline)
+      .then(results => results.map(r => ({ ...r, _acId: acId })))
+      .catch(err => {
+        console.error(`Error aggregating boothagentactivities_${acId}:`, err.message);
+        return [];
+      });
+  });
 
-  for (const acId of ALL_AC_IDS) {
-    try {
-      const BoothAgentActivityModel = getBoothAgentActivityModel(acId);
-      const partialResults = await BoothAgentActivityModel.aggregate(pipeline);
-      results.push(...partialResults.map(r => ({ ...r, _acId: acId })));
-    } catch (err) {
-      console.error(`Error aggregating boothagentactivities_${acId}:`, err.message);
-    }
-  }
-
-  return results;
+  const resultsArrays = await Promise.all(aggregatePromises);
+  return resultsArrays.flat();
 }
 
 /**

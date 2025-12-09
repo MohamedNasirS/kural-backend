@@ -11,10 +11,16 @@ import {
   MASTER_QUESTION_TYPES,
   OPTION_REQUIRED_TYPES,
 } from "../utils/helpers.js";
+import { isAuthenticated, hasRole } from "../middleware/auth.js";
+import { getCache, setCache, invalidateCache, TTL } from "../utils/cache.js";
+import { writeRateLimiter } from "../middleware/rateLimit.js";
 
 const router = express.Router();
 
-// Helper function to format section response
+// Apply authentication to all routes
+router.use(isAuthenticated);
+
+// Helper function to format section response (single section with individual query)
 async function formatMasterSectionResponse(sectionDoc, includeQuestions = true) {
   if (!sectionDoc) {
     return null;
@@ -28,7 +34,8 @@ async function formatMasterSectionResponse(sectionDoc, includeQuestions = true) 
   let formattedQuestions = [];
   if (includeQuestions) {
     const questions = await MasterQuestion.find({ sectionId: section._id || sectionDoc._id })
-      .sort({ order: 1, createdAt: 1 });
+      .sort({ order: 1, createdAt: 1 })
+      .lean();  // ISS-029 fix: use .lean()
     formattedQuestions = questions.map((question) => formatMasterQuestionResponse(question)).filter(Boolean);
   }
 
@@ -46,17 +53,110 @@ async function formatMasterSectionResponse(sectionDoc, includeQuestions = true) 
   };
 }
 
-// Get all sections
-router.get("/sections", async (_req, res) => {
+// Helper function to format section with pre-loaded questions (ISS-013 fix: avoid N+1)
+function formatMasterSectionWithQuestions(sectionDoc, questionsBySection) {
+  if (!sectionDoc) {
+    return null;
+  }
+
+  const section =
+    typeof sectionDoc.toObject === "function"
+      ? sectionDoc.toObject({ versionKey: false })
+      : sectionDoc;
+
+  const sectionId = (section._id || sectionDoc._id)?.toString?.();
+  const questions = questionsBySection.get(sectionId) || [];
+  const formattedQuestions = questions.map((question) => formatMasterQuestionResponse(question)).filter(Boolean);
+
+  return {
+    id: section._id?.toString?.() ?? section._id ?? undefined,
+    name: section.name,
+    description: section.description,
+    order: section.order ?? 0,
+    aci_id: Array.isArray(section.aci_id) ? section.aci_id : [],
+    aci_name: Array.isArray(section.aci_name) ? section.aci_name : [],
+    isVisible: section.isVisible !== undefined ? Boolean(section.isVisible) : true,
+    createdAt: section.createdAt,
+    updatedAt: section.updatedAt,
+    questions: formattedQuestions,
+  };
+}
+
+// Cache key for master data sections
+const MASTER_SECTIONS_CACHE_KEY = 'master-data:sections';
+
+// Get all sections (ISS-013 fix: batch query, ISS-014 fix: pagination, ISS-007 fix: caching)
+router.get("/sections", async (req, res) => {
   try {
     await connectToDatabase();
-    const sections = await MasterDataSection.find().sort({ order: 1, createdAt: 1 });
-    const formattedSections = await Promise.all(
-      sections.map((section) => formatMasterSectionResponse(section, true))
-    );
-    return res.json({
+
+    // ISS-014 fix: Add pagination support
+    const { limit, offset, includeQuestions = 'true' } = req.query;
+    const parsedLimit = limit ? Math.min(Math.max(parseInt(limit, 10) || 100, 1), 500) : undefined;
+    const parsedOffset = offset ? Math.max(parseInt(offset, 10) || 0, 0) : 0;
+    const shouldIncludeQuestions = includeQuestions === 'true' || includeQuestions === true;
+
+    // ISS-007 fix: Try cache for default query (no pagination, with questions)
+    const isDefaultQuery = !parsedLimit && parsedOffset === 0 && shouldIncludeQuestions;
+    if (isDefaultQuery) {
+      const cached = getCache(MASTER_SECTIONS_CACHE_KEY, TTL.LONG);
+      if (cached) {
+        return res.json(cached);
+      }
+    }
+
+    let sectionsQuery = MasterDataSection.find().sort({ order: 1, createdAt: 1 });
+    if (parsedOffset > 0) sectionsQuery = sectionsQuery.skip(parsedOffset);
+    if (parsedLimit) sectionsQuery = sectionsQuery.limit(parsedLimit);
+
+    const [sections, totalCount] = await Promise.all([
+      sectionsQuery.lean(),
+      MasterDataSection.countDocuments()
+    ]);
+
+    let formattedSections;
+    if (shouldIncludeQuestions && sections.length > 0) {
+      // Batch fetch all questions in a single query (ISS-013 fix)
+      const sectionIds = sections.map(s => s._id);
+      const allQuestions = await MasterQuestion.find({ sectionId: { $in: sectionIds } })
+        .sort({ order: 1, createdAt: 1 })
+        .lean();
+
+      // Group questions by sectionId
+      const questionsBySection = new Map();
+      allQuestions.forEach(q => {
+        const sectionId = q.sectionId?.toString?.();
+        if (!questionsBySection.has(sectionId)) {
+          questionsBySection.set(sectionId, []);
+        }
+        questionsBySection.get(sectionId).push(q);
+      });
+
+      formattedSections = sections.map(section =>
+        formatMasterSectionWithQuestions(section, questionsBySection)
+      );
+    } else {
+      formattedSections = sections.map(section =>
+        formatMasterSectionWithQuestions(section, new Map())
+      );
+    }
+
+    const responseData = {
       sections: formattedSections,
-    });
+      pagination: parsedLimit ? {
+        total: totalCount,
+        limit: parsedLimit,
+        offset: parsedOffset,
+        hasMore: parsedOffset + sections.length < totalCount
+      } : undefined
+    };
+
+    // Cache default query result
+    if (isDefaultQuery) {
+      setCache(MASTER_SECTIONS_CACHE_KEY, responseData, TTL.LONG);
+    }
+
+    return res.json(responseData);
   } catch (error) {
     console.error("Error fetching master data sections:", error);
     return res.status(500).json({
@@ -66,22 +166,41 @@ router.get("/sections", async (_req, res) => {
   }
 });
 
-// Get all questions
+// Get all questions (ISS-015 fix: pagination)
 router.get("/questions", async (req, res) => {
   try {
     await connectToDatabase();
-    const { isVisible } = req.query;
+    const { isVisible, limit, offset, sectionId } = req.query;
+
+    // ISS-015 fix: Add pagination support
+    const parsedLimit = limit ? Math.min(Math.max(parseInt(limit, 10) || 100, 1), 500) : undefined;
+    const parsedOffset = offset ? Math.max(parseInt(offset, 10) || 0, 0) : 0;
 
     let query = {};
     if (isVisible !== undefined) {
       query.isVisible = isVisible === 'true' || isVisible === true;
     }
+    if (sectionId) {
+      query.sectionId = sectionId;
+    }
 
-    const questions = await MasterQuestion.find(query)
-      .sort({ order: 1, createdAt: 1 });
+    let questionsQuery = MasterQuestion.find(query).sort({ order: 1, createdAt: 1 });
+    if (parsedOffset > 0) questionsQuery = questionsQuery.skip(parsedOffset);
+    if (parsedLimit) questionsQuery = questionsQuery.limit(parsedLimit);
+
+    const [questions, totalCount] = await Promise.all([
+      questionsQuery.lean(),
+      MasterQuestion.countDocuments(query)
+    ]);
 
     return res.json({
       questions: questions.map((question) => formatMasterQuestionResponse(question)),
+      pagination: parsedLimit ? {
+        total: totalCount,
+        limit: parsedLimit,
+        offset: parsedOffset,
+        hasMore: parsedOffset + questions.length < totalCount
+      } : undefined
     });
   } catch (error) {
     console.error("Error fetching master data questions:", error);
@@ -92,8 +211,8 @@ router.get("/questions", async (req, res) => {
   }
 });
 
-// Create section
-router.post("/sections", async (req, res) => {
+// Create section (ISS-022 fix: rate limited)
+router.post("/sections", writeRateLimiter, async (req, res) => {
   try {
     await connectToDatabase();
 
@@ -141,6 +260,9 @@ router.post("/sections", async (req, res) => {
     const section = await MasterDataSection.create(sectionData);
     const savedSection = await MasterDataSection.findById(section._id);
 
+    // ISS-007 fix: Invalidate cache on write
+    invalidateCache(MASTER_SECTIONS_CACHE_KEY);
+
     return res.status(201).json({
       message: "Section created successfully",
       section: await formatMasterSectionResponse(savedSection || section, true),
@@ -157,8 +279,8 @@ router.post("/sections", async (req, res) => {
   }
 });
 
-// Update section
-router.put("/sections/:sectionId", async (req, res) => {
+// Update section (ISS-022 fix: rate limited)
+router.put("/sections/:sectionId", writeRateLimiter, async (req, res) => {
   try {
     await connectToDatabase();
     const { sectionId } = req.params;
@@ -214,6 +336,9 @@ router.put("/sections/:sectionId", async (req, res) => {
     await section.save();
     const savedSection = await MasterDataSection.findById(section._id);
 
+    // ISS-007 fix: Invalidate cache on write
+    invalidateCache(MASTER_SECTIONS_CACHE_KEY);
+
     return res.json({
       message: "Section updated successfully",
       section: await formatMasterSectionResponse(savedSection || section, true),
@@ -230,8 +355,8 @@ router.put("/sections/:sectionId", async (req, res) => {
   }
 });
 
-// Delete section
-router.delete("/sections/:sectionId", async (req, res) => {
+// Delete section (ISS-022 fix: rate limited)
+router.delete("/sections/:sectionId", writeRateLimiter, async (req, res) => {
   try {
     await connectToDatabase();
     const { sectionId } = req.params;
@@ -243,6 +368,9 @@ router.delete("/sections/:sectionId", async (req, res) => {
 
     await MasterQuestion.deleteMany({ sectionId: section._id });
     await MasterDataSection.findByIdAndDelete(sectionId);
+
+    // ISS-007 fix: Invalidate cache on write
+    invalidateCache(MASTER_SECTIONS_CACHE_KEY);
 
     return res.json({
       message: "Section deleted successfully",
@@ -257,8 +385,8 @@ router.delete("/sections/:sectionId", async (req, res) => {
   }
 });
 
-// Add question to section
-router.post("/sections/:sectionId/questions", async (req, res) => {
+// Add question to section (ISS-022 fix: rate limited)
+router.post("/sections/:sectionId/questions", writeRateLimiter, async (req, res) => {
   try {
     await connectToDatabase();
     const { sectionId } = req.params;
@@ -280,6 +408,9 @@ router.post("/sections/:sectionId/questions", async (req, res) => {
       sectionId: section._id,
     });
 
+    // ISS-007 fix: Invalidate cache on write
+    invalidateCache(MASTER_SECTIONS_CACHE_KEY);
+
     return res.status(201).json({
       message: "Question added successfully",
       question: formatMasterQuestionResponse(question),
@@ -294,8 +425,8 @@ router.post("/sections/:sectionId/questions", async (req, res) => {
   }
 });
 
-// Update question
-router.put("/sections/:sectionId/questions/:questionId", async (req, res) => {
+// Update question (ISS-022 fix: rate limited)
+router.put("/sections/:sectionId/questions/:questionId", writeRateLimiter, async (req, res) => {
   try {
     await connectToDatabase();
     const { sectionId, questionId } = req.params;
@@ -391,6 +522,9 @@ router.put("/sections/:sectionId/questions/:questionId", async (req, res) => {
 
     await question.save();
 
+    // ISS-007 fix: Invalidate cache on write
+    invalidateCache(MASTER_SECTIONS_CACHE_KEY);
+
     return res.json({
       message: "Question updated successfully",
       question: formatMasterQuestionResponse(question),
@@ -405,8 +539,8 @@ router.put("/sections/:sectionId/questions/:questionId", async (req, res) => {
   }
 });
 
-// Delete question
-router.delete("/sections/:sectionId/questions/:questionId", async (req, res) => {
+// Delete question (ISS-022 fix: rate limited)
+router.delete("/sections/:sectionId/questions/:questionId", writeRateLimiter, async (req, res) => {
   try {
     await connectToDatabase();
     const { sectionId, questionId } = req.params;
@@ -425,6 +559,9 @@ router.delete("/sections/:sectionId/questions/:questionId", async (req, res) => 
     }
 
     await MasterQuestion.findByIdAndDelete(questionId);
+
+    // ISS-007 fix: Invalidate cache on write
+    invalidateCache(MASTER_SECTIONS_CACHE_KEY);
 
     return res.json({
       message: "Question deleted successfully",

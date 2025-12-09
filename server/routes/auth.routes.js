@@ -3,11 +3,12 @@ import User from "../models/User.js";
 import { connectToDatabase } from "../config/database.js";
 import { roleMap } from "../utils/helpers.js";
 import { isProduction, SESSION_COOKIE_SAMESITE, SESSION_COOKIE_DOMAIN } from "../config/index.js";
+import { loginRateLimiter, resetRateLimit } from "../middleware/rateLimit.js";
 
 const router = express.Router();
 
-// Login endpoint
-router.post("/login", async (req, res) => {
+// Login endpoint with rate limiting
+router.post("/login", loginRateLimiter, async (req, res) => {
   try {
     const { identifier, password } = req.body ?? {};
 
@@ -84,8 +85,11 @@ router.post("/login", async (req, res) => {
       }
     }
 
-    console.debug("Login lookup variants", Array.from(identifierVariants));
-    console.debug("Login lookup conditions", lookupConditions);
+    // Debug logging (sanitized - no sensitive data)
+    if (process.env.NODE_ENV === 'development') {
+      console.debug("Login lookup variants count:", identifierVariants.size);
+      console.debug("Login lookup conditions count:", lookupConditions.length);
+    }
     const activeFilter = { $or: [{ isActive: { $exists: false } }, { isActive: true }] };
 
     const user = await User.findOne({
@@ -93,18 +97,17 @@ router.post("/login", async (req, res) => {
     }).lean(false);
 
     if (!user) {
+      // Log sanitized info (no credentials)
       console.warn("Login failed: user not found", {
-        identifier: normalizedIdentifier,
-        lookupConditions: lookupConditions.length,
-        identifierVariants: Array.from(identifierVariants)
+        identifierType: normalizedIdentifier.includes('@') ? 'email' : 'phone',
+        lookupConditions: lookupConditions.length
       });
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
+    // Log user found (sanitized - no sensitive data)
     console.log("User found:", {
       userId: user._id.toString(),
-      email: user.email,
-      phone: user.phone,
       role: user.role,
       isActive: user.isActive
     });
@@ -122,11 +125,9 @@ router.post("/login", async (req, res) => {
     }
 
     if (!isPasswordValid) {
+      // Log sanitized info (no credentials)
       console.warn("Login failed: invalid password", {
-        userId: user._id.toString(),
-        identifier: normalizedIdentifier,
-        hasPasswordHash: !!user.passwordHash,
-        hasPassword: !!user.password,
+        userId: user._id.toString()
       });
       return res.status(401).json({ message: "Invalid credentials" });
     }
@@ -314,7 +315,13 @@ router.get("/me", async (req, res) => {
 });
 
 // Diagnostic endpoint to check session/cookie status
+// ISS-006 fix: Only available in development environment
 router.get("/debug", (req, res) => {
+  // Block in production to prevent information disclosure
+  if (isProduction) {
+    return res.status(404).json({ message: "Not found" });
+  }
+
   res.json({
     hasSession: !!req.session,
     hasSessionUser: !!(req.session && req.session.user),

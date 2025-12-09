@@ -26,7 +26,7 @@ interface LoginResult {
 interface AuthContextType {
   user: User | null;
   login: (identifier: string, password: string) => Promise<LoginResult>;
-  logout: () => void;
+  logout: () => Promise<void>;
   isAuthenticated: boolean;
   isCheckingSession: boolean;
 }
@@ -191,13 +191,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const logout = () => {
-    // Call logout API to destroy session
-    fetch(`${API_BASE_URL}/auth/logout`, {
-      method: "POST",
-      credentials: "include",
-    }).catch(console.error);
-    
+  const logout = async () => {
+    // Call logout API to destroy session - await to ensure it completes
+    try {
+      await fetch(`${API_BASE_URL}/auth/logout`, {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch (error) {
+      console.error("Logout request failed:", error);
+    }
+
+    // Clear user state regardless of API success
     setUser(null);
     setIsCheckingSession(false);
   };

@@ -16,8 +16,12 @@ import {
   queryAllVoters,
   ALL_AC_IDS,
 } from "../utils/voterCollection.js";
+import { isAuthenticated, canAccessAC } from "../middleware/auth.js";
 
 const router = express.Router();
+
+// Apply authentication to all routes
+router.use(isAuthenticated);
 
 // Reserved field names - EMPTY to allow full flexibility
 const RESERVED_FIELDS = [];
@@ -735,6 +739,14 @@ router.get("/:acId", async (req, res) => {
       return res.status(400).json({ message: `Invalid AC identifier: ${rawIdentifier}` });
     }
 
+    // AC Isolation: Check if user can access this AC
+    if (!canAccessAC(req.user, acId)) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied. You do not have permission to view this AC's data."
+      });
+    }
+
     const { booth, search, status, page = 1, limit = 50 } = req.query;
 
     const queryClauses = [];
@@ -844,6 +856,14 @@ router.get("/:acId/booths", async (req, res) => {
 
     if (!acId) {
       return res.status(400).json({ message: `Invalid AC identifier: ${rawIdentifier}` });
+    }
+
+    // AC Isolation: Check if user can access this AC
+    if (!canAccessAC(req.user, acId)) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied. You do not have permission to view this AC's data."
+      });
     }
 
     const VoterModel = getVoterModel(acId);

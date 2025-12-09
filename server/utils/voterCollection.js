@@ -57,6 +57,18 @@ const voterSchema = new mongoose.Schema({
   strict: false // Allow dynamic fields
 });
 
+// Add indexes for common query patterns
+voterSchema.index({ aci_id: 1 });
+voterSchema.index({ aci_id: 1, booth_id: 1 });
+voterSchema.index({ booth_id: 1 });
+voterSchema.index({ voterID: 1 });
+voterSchema.index({ surveyed: 1 });
+voterSchema.index({ aci_id: 1, surveyed: 1 });
+voterSchema.index({ familyId: 1 }, { sparse: true });
+voterSchema.index({ mobile: 1 }, { sparse: true });
+voterSchema.index({ boothno: 1, 'name.english': 1 }); // Sort index for voter listing
+voterSchema.index({ familyId: 1, relationToHead: 1 }, { sparse: true }); // Family details
+
 // Cache for compiled models to avoid recompilation
 const modelCache = {};
 
@@ -116,22 +128,25 @@ export function isValidACId(acId) {
 
 /**
  * Find a voter by ID across all AC collections
+ * Uses parallel queries for better performance (ISS-002 fix)
  * @param {string} voterId - Voter document ID
  * @returns {Promise<Object|null>} Voter document or null
  */
 export async function findVoterById(voterId) {
-  for (const acId of ALL_AC_IDS) {
+  // Parallel search across all ACs for better performance
+  const searchPromises = ALL_AC_IDS.map(async (acId) => {
     try {
       const VoterModel = getVoterModel(acId);
       const voter = await VoterModel.findById(voterId).lean();
-      if (voter) {
-        return { voter, acId };
-      }
+      return voter ? { voter, acId } : null;
     } catch (err) {
-      // Continue to next collection
+      // Collection may not exist or other error - continue
+      return null;
     }
-  }
-  return null;
+  });
+
+  const results = await Promise.all(searchPromises);
+  return results.find(r => r !== null) || null;
 }
 
 /**
@@ -199,25 +214,66 @@ export async function aggregateVoters(acId, pipeline) {
 
 /**
  * Query voters across ALL AC collections (for L0 cross-AC queries)
+ * Uses parallel queries with per-AC limits for memory efficiency (ISS-001 fix)
  * @param {Object} query - MongoDB query object
- * @param {Object} options - Query options (limit, skip, sort, select)
+ * @param {Object} options - Query options (limit, skip, sort, select, throwOnError)
  * @returns {Promise<Array>} Combined results from all collections
  */
 export async function queryAllVoters(query = {}, options = {}) {
-  const results = [];
+  const { throwOnError = false, ...queryOptions } = options;
 
-  for (const acId of ALL_AC_IDS) {
-    try {
-      const voters = await queryVoters(acId, query, options);
-      results.push(...voters);
-    } catch (err) {
-      console.error(`Error querying voters_${acId}:`, err.message);
-    }
+  // Calculate per-AC limit to prevent OOM (ISS-001 fix)
+  // Use 2x buffer per AC to account for uneven distribution
+  const perAcLimit = queryOptions.limit
+    ? Math.ceil(queryOptions.limit / ALL_AC_IDS.length) * 2
+    : undefined;
+
+  const perAcOptions = perAcLimit
+    ? { ...queryOptions, limit: perAcLimit }
+    : queryOptions;
+
+  // Track errors for optional error propagation (ISS-019 fix)
+  const errors = [];
+
+  // Run queries in parallel for better performance
+  const queryPromises = ALL_AC_IDS.map(acId =>
+    queryVoters(acId, query, perAcOptions)
+      .catch(err => {
+        const errorInfo = { acId, message: err.message };
+        errors.push(errorInfo);
+        console.error(`Error querying voters_${acId}:`, err.message);
+        return [];
+      })
+  );
+
+  const resultsArrays = await Promise.all(queryPromises);
+
+  // Throw aggregated error if requested and errors occurred
+  if (throwOnError && errors.length > 0) {
+    const errorMsg = `Errors querying ${errors.length} AC collections: ${errors.map(e => `AC${e.acId}: ${e.message}`).join(', ')}`;
+    throw new Error(errorMsg);
   }
 
-  // Apply global limit if specified
-  if (options.limit && results.length > options.limit) {
-    return results.slice(0, options.limit);
+  let results = resultsArrays.flat();
+
+  // Apply sorting if specified (needed after combining results)
+  if (queryOptions.sort && results.length > 0) {
+    const sortKey = Object.keys(queryOptions.sort)[0];
+    const sortOrder = queryOptions.sort[sortKey];
+    results.sort((a, b) => {
+      const aVal = a[sortKey];
+      const bVal = b[sortKey];
+      if (aVal === bVal) return 0;
+      if (aVal === null || aVal === undefined) return 1;
+      if (bVal === null || bVal === undefined) return -1;
+      if (sortOrder === -1) return bVal > aVal ? 1 : -1;
+      return aVal > bVal ? 1 : -1;
+    });
+  }
+
+  // Apply global limit after sorting (final limit enforcement)
+  if (queryOptions.limit && results.length > queryOptions.limit) {
+    return results.slice(0, queryOptions.limit);
   }
 
   return results;
@@ -225,64 +281,93 @@ export async function queryAllVoters(query = {}, options = {}) {
 
 /**
  * Count voters across ALL AC collections (for L0 cross-AC queries)
+ * Uses parallel queries for better performance
  * @param {Object} query - MongoDB query object
+ * @param {Object} options - Options (throwOnError)
  * @returns {Promise<number>} Total count
  */
-export async function countAllVoters(query = {}) {
-  let total = 0;
+export async function countAllVoters(query = {}, options = {}) {
+  const { throwOnError = false } = options;
+  const errors = [];
 
-  for (const acId of ALL_AC_IDS) {
-    try {
-      const count = await countVoters(acId, query);
-      total += count;
-    } catch (err) {
-      console.error(`Error counting voters_${acId}:`, err.message);
-    }
+  // Run count queries in parallel for better performance
+  const countPromises = ALL_AC_IDS.map(acId =>
+    countVoters(acId, query)
+      .catch(err => {
+        const errorInfo = { acId, message: err.message };
+        errors.push(errorInfo);
+        console.error(`Error counting voters_${acId}:`, err.message);
+        return 0;
+      })
+  );
+
+  const counts = await Promise.all(countPromises);
+
+  // Throw aggregated error if requested and errors occurred (ISS-019 fix)
+  if (throwOnError && errors.length > 0) {
+    const errorMsg = `Errors counting ${errors.length} AC collections: ${errors.map(e => `AC${e.acId}: ${e.message}`).join(', ')}`;
+    throw new Error(errorMsg);
   }
 
-  return total;
+  return counts.reduce((sum, count) => sum + count, 0);
 }
 
 /**
  * Find one voter across ALL AC collections
+ * Uses parallel queries for better performance (ISS-016 fix)
  * @param {Object} query - MongoDB query object
  * @returns {Promise<Object|null>} Voter document or null
  */
 export async function findOneVoter(query = {}) {
-  for (const acId of ALL_AC_IDS) {
+  // Parallel search across all ACs for better performance
+  const searchPromises = ALL_AC_IDS.map(async (acId) => {
     try {
       const VoterModel = getVoterModel(acId);
       const voter = await VoterModel.findOne(query).lean();
-      if (voter) {
-        return { voter, acId };
-      }
+      return voter ? { voter, acId } : null;
     } catch (err) {
-      // Continue to next collection
+      // Collection may not exist or other error - continue
+      return null;
     }
-  }
-  return null;
+  });
+
+  const results = await Promise.all(searchPromises);
+  return results.find(r => r !== null) || null;
 }
 
 /**
  * Aggregate across ALL AC collections (for L0 cross-AC aggregations)
+ * Uses parallel queries for better performance
  * Note: Results are combined, not merged. Use with caution for complex aggregations.
  * @param {Array} pipeline - Aggregation pipeline
+ * @param {Object} options - Options (throwOnError)
  * @returns {Promise<Array>} Combined aggregation results
  */
-export async function aggregateAllVoters(pipeline) {
-  const results = [];
+export async function aggregateAllVoters(pipeline, options = {}) {
+  const { throwOnError = false } = options;
+  const errors = [];
 
-  for (const acId of ALL_AC_IDS) {
-    try {
-      const VoterModel = getVoterModel(acId);
-      const partialResults = await VoterModel.aggregate(pipeline);
-      results.push(...partialResults);
-    } catch (err) {
-      console.error(`Error aggregating voters_${acId}:`, err.message);
-    }
+  // Run aggregations in parallel for better performance
+  const aggregatePromises = ALL_AC_IDS.map(acId => {
+    const VoterModel = getVoterModel(acId);
+    return VoterModel.aggregate(pipeline)
+      .catch(err => {
+        const errorInfo = { acId, message: err.message };
+        errors.push(errorInfo);
+        console.error(`Error aggregating voters_${acId}:`, err.message);
+        return [];
+      });
+  });
+
+  const resultsArrays = await Promise.all(aggregatePromises);
+
+  // Throw aggregated error if requested and errors occurred (ISS-019 fix)
+  if (throwOnError && errors.length > 0) {
+    const errorMsg = `Errors aggregating ${errors.length} AC collections: ${errors.map(e => `AC${e.acId}: ${e.message}`).join(', ')}`;
+    throw new Error(errorMsg);
   }
 
-  return results;
+  return resultsArrays.flat();
 }
 
 export default {

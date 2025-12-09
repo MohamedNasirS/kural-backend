@@ -12,8 +12,12 @@ import {
   OPTION_REQUIRED_TYPES,
 } from "../utils/helpers.js";
 import { getVoterModel } from "../utils/voterCollection.js";
+import { isAuthenticated } from "../middleware/auth.js";
 
 const router = express.Router();
+
+// Apply authentication to all routes
+router.use(isAuthenticated);
 
 // Helper function to format mobile app question response
 function formatMobileAppQuestionResponse(questionDoc) {
@@ -394,7 +398,7 @@ function formatMobileAppResponse(responseDoc) {
     submittedAt,
     metadata: Object.keys(metadata).length ? metadata : undefined,
     answers,
-    raw: response,
+    // ISS-024 fix: Removed raw document to reduce bandwidth
   };
 }
 
@@ -723,18 +727,23 @@ router.get("/live-updates", async (req, res) => {
       const numericAcId = parseInt(acId, 10);
       try {
         const VoterModel = getVoterModel(numericAcId);
-        const voters = await VoterModel.find({
-          _id: { $in: voterIds.map(id => {
-            try { return new mongoose.Types.ObjectId(id); } catch { return id; }
-          }) }
-        }).select("name voterID boothname booth_id").lean();
+        // ISS-028 fix: Only include valid ObjectIds in query
+        const validObjectIds = voterIds
+          .filter(id => mongoose.Types.ObjectId.isValid(id))
+          .map(id => new mongoose.Types.ObjectId(id));
 
-        voters.forEach(v => {
-          voterLookup.set(v._id?.toString(), v.name?.english || v.name?.tamil || "Unknown Voter");
-          if (v.booth_id && v.boothname) {
-            boothNameLookup.set(v.booth_id, v.boothname);
-          }
-        });
+        if (validObjectIds.length > 0) {
+          const voters = await VoterModel.find({
+            _id: { $in: validObjectIds }
+          }).select("name voterID boothname booth_id").lean();
+
+          voters.forEach(v => {
+            voterLookup.set(v._id?.toString(), v.name?.english || v.name?.tamil || "Unknown Voter");
+            if (v.booth_id && v.boothname) {
+              boothNameLookup.set(v.booth_id, v.boothname);
+            }
+          });
+        }
       } catch (err) {
         console.error("Error fetching voter names:", err);
       }

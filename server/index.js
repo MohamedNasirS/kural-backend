@@ -2,6 +2,7 @@ import cors from "cors";
 import express from "express";
 import session from "express-session";
 import MongoStore from "connect-mongo";
+import helmet from "helmet";
 
 // Import configuration
 import {
@@ -19,6 +20,12 @@ import { registerRoutes } from "./routes/index.js";
 
 const app = express();
 app.set("trust proxy", 1);
+
+// Security middleware - adds various HTTP headers for security
+app.use(helmet({
+  contentSecurityPolicy: false, // Disable CSP for now as it may break frontend
+  crossOriginEmbedderPolicy: false,
+}));
 
 // Helper function to check if origin is localhost
 function isLocalhostOrigin(origin) {
@@ -57,8 +64,9 @@ app.use(
   }),
 );
 
-// JSON body parser
-app.use(express.json());
+// JSON body parser with size limit
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Initialize MongoDB session store
 const sessionStore = MongoStore.create({

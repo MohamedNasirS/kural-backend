@@ -50,6 +50,16 @@ const mobileAppAnswerSchema = new mongoose.Schema({
   strict: false // Allow dynamic fields
 });
 
+// Add indexes for common query patterns
+mobileAppAnswerSchema.index({ aci_id: 1 });
+mobileAppAnswerSchema.index({ voterId: 1 });
+mobileAppAnswerSchema.index({ booth_id: 1 });
+mobileAppAnswerSchema.index({ questionId: 1 });
+mobileAppAnswerSchema.index({ submittedBy: 1 });
+mobileAppAnswerSchema.index({ submittedAt: -1 });
+mobileAppAnswerSchema.index({ aci_id: 1, submittedAt: -1 }); // Combined filter + sort
+mobileAppAnswerSchema.index({ aci_id: 1, booth_id: 1 }); // Combined AC + booth filter
+
 // Cache for compiled models to avoid recompilation
 const modelCache = {};
 
@@ -127,21 +137,24 @@ export async function aggregateMobileAppAnswers(acId, pipeline) {
 
 /**
  * Query mobile app answers across ALL AC collections (for L0 cross-AC queries)
+ * Uses parallel queries for better performance
  * @param {Object} query - MongoDB query object
  * @param {Object} options - Query options (limit, skip, sort, select)
  * @returns {Promise<Array>} Combined results from all collections
  */
 export async function queryAllMobileAppAnswers(query = {}, options = {}) {
-  const results = [];
+  // Run queries in parallel for better performance
+  const queryPromises = ALL_AC_IDS.map(acId =>
+    queryMobileAppAnswers(acId, query, options)
+      .then(answers => answers.map(a => ({ ...a, _acId: acId })))
+      .catch(err => {
+        console.error(`Error querying mobileappanswers_${acId}:`, err.message);
+        return [];
+      })
+  );
 
-  for (const acId of ALL_AC_IDS) {
-    try {
-      const answers = await queryMobileAppAnswers(acId, query, options);
-      results.push(...answers.map(a => ({ ...a, _acId: acId })));
-    } catch (err) {
-      console.error(`Error querying mobileappanswers_${acId}:`, err.message);
-    }
-  }
+  const resultsArrays = await Promise.all(queryPromises);
+  let results = resultsArrays.flat();
 
   // Sort combined results if sort option provided
   if (options.sort && results.length > 0) {
@@ -165,22 +178,22 @@ export async function queryAllMobileAppAnswers(query = {}, options = {}) {
 
 /**
  * Count mobile app answers across ALL AC collections (for L0 cross-AC queries)
+ * Uses parallel queries for better performance
  * @param {Object} query - MongoDB query object
  * @returns {Promise<number>} Total count
  */
 export async function countAllMobileAppAnswers(query = {}) {
-  let total = 0;
+  // Run count queries in parallel for better performance
+  const countPromises = ALL_AC_IDS.map(acId =>
+    countMobileAppAnswers(acId, query)
+      .catch(err => {
+        console.error(`Error counting mobileappanswers_${acId}:`, err.message);
+        return 0;
+      })
+  );
 
-  for (const acId of ALL_AC_IDS) {
-    try {
-      const count = await countMobileAppAnswers(acId, query);
-      total += count;
-    } catch (err) {
-      console.error(`Error counting mobileappanswers_${acId}:`, err.message);
-    }
-  }
-
-  return total;
+  const counts = await Promise.all(countPromises);
+  return counts.reduce((sum, count) => sum + count, 0);
 }
 
 /**
@@ -240,23 +253,24 @@ export async function getAnswersByVoter(acId, query = {}) {
 
 /**
  * Aggregate across ALL AC collections (for L0 cross-AC aggregations)
+ * Uses parallel queries for better performance
  * @param {Array} pipeline - Aggregation pipeline
  * @returns {Promise<Array>} Combined aggregation results
  */
 export async function aggregateAllMobileAppAnswers(pipeline) {
-  const results = [];
+  // Run aggregations in parallel for better performance
+  const aggregatePromises = ALL_AC_IDS.map(acId => {
+    const MobileAppAnswerModel = getMobileAppAnswerModel(acId);
+    return MobileAppAnswerModel.aggregate(pipeline)
+      .then(results => results.map(r => ({ ...r, _acId: acId })))
+      .catch(err => {
+        console.error(`Error aggregating mobileappanswers_${acId}:`, err.message);
+        return [];
+      });
+  });
 
-  for (const acId of ALL_AC_IDS) {
-    try {
-      const MobileAppAnswerModel = getMobileAppAnswerModel(acId);
-      const partialResults = await MobileAppAnswerModel.aggregate(pipeline);
-      results.push(...partialResults.map(r => ({ ...r, _acId: acId })));
-    } catch (err) {
-      console.error(`Error aggregating mobileappanswers_${acId}:`, err.message);
-    }
-  }
-
-  return results;
+  const resultsArrays = await Promise.all(aggregatePromises);
+  return resultsArrays.flat();
 }
 
 export default {

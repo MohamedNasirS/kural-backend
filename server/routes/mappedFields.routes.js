@@ -11,8 +11,12 @@ import {
   findSurveyResponseById,
   queryAllSurveyResponses
 } from "../utils/surveyResponseCollection.js";
+import { isAuthenticated } from "../middleware/auth.js";
 
 const router = express.Router();
+
+// Apply authentication to all routes
+router.use(isAuthenticated);
 
 // Survey Master Data Mappings
 

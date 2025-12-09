@@ -19,7 +19,8 @@ export const SurveyForms = () => {
     const loadSurveys = async () => {
       setIsLoading(true);
       try {
-        const data = await fetchSurveys({ role: 'L1' });
+        // L1 should see surveys from L1 and L2 roles
+        const data = await fetchSurveys({ role: 'L1,L2' });
         setForms(data);
       } catch (error) {
         console.error('Failed to load surveys', error);

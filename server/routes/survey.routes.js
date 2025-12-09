@@ -11,8 +11,13 @@ import {
   sanitizeCreatedBy,
   sanitizeCreatedByRole,
 } from "../utils/helpers.js";
+import { isAuthenticated, canAccessAC } from "../middleware/auth.js";
+import { writeRateLimiter } from "../middleware/rateLimit.js";
 
 const router = express.Router();
+
+// Apply authentication to all routes
+router.use(isAuthenticated);
 
 // Get all surveys
 router.get("/", async (req, res) => {
@@ -86,8 +91,8 @@ router.get("/:surveyId", async (req, res) => {
   }
 });
 
-// Create new survey
-router.post("/", async (req, res) => {
+// Create new survey (ISS-022 fix: rate limited)
+router.post("/", writeRateLimiter, async (req, res) => {
   try {
     await connectToDatabase();
 
@@ -175,8 +180,8 @@ router.post("/", async (req, res) => {
   }
 });
 
-// Update survey
-router.put("/:surveyId", async (req, res) => {
+// Update survey (ISS-022 fix: rate limited)
+router.put("/:surveyId", writeRateLimiter, async (req, res) => {
   try {
     await connectToDatabase();
 
@@ -236,8 +241,8 @@ router.put("/:surveyId", async (req, res) => {
   }
 });
 
-// Delete survey
-router.delete("/:surveyId", async (req, res) => {
+// Delete survey (ISS-022 fix: rate limited)
+router.delete("/:surveyId", writeRateLimiter, async (req, res) => {
   try {
     await connectToDatabase();
 

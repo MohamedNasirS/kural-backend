@@ -11,8 +11,12 @@ import {
   countAllSurveyResponses
 } from "../utils/surveyResponseCollection.js";
 import Survey from "../models/Survey.js";
+import { isAuthenticated, canAccessAC } from "../middleware/auth.js";
 
 const router = express.Router();
+
+// Apply authentication to all routes
+router.use(isAuthenticated);
 
 // Helper function to populate question text from survey form
 const populateQuestionText = async (answers, surveyId) => {
@@ -259,6 +263,14 @@ router.get("/:acId", async (req, res) => {
 
     if (isNaN(acId)) {
       return res.status(400).json({ message: "Invalid AC ID" });
+    }
+
+    // AC Isolation: Check if user can access this AC
+    if (!canAccessAC(req.user, acId)) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied. You do not have permission to view this AC's data."
+      });
     }
 
     const query = {};

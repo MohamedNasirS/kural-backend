@@ -66,6 +66,16 @@ const surveyResponseSchema = new mongoose.Schema({
   strict: false // Allow dynamic fields
 });
 
+// Add indexes for common query patterns
+surveyResponseSchema.index({ aci_id: 1 });
+surveyResponseSchema.index({ booth_id: 1 });
+surveyResponseSchema.index({ boothname: 1 });
+surveyResponseSchema.index({ formId: 1 });
+surveyResponseSchema.index({ createdAt: -1 });
+surveyResponseSchema.index({ aci_id: 1, createdAt: -1 }); // Combined filter + sort
+surveyResponseSchema.index({ respondentVoterId: 1 }, { sparse: true });
+surveyResponseSchema.index({ aci_id: 1, booth_id: 1 }); // Combined AC + booth filter
+
 // Cache for compiled models to avoid recompilation
 const modelCache = {};
 
@@ -143,21 +153,24 @@ export async function aggregateSurveyResponses(acId, pipeline) {
 
 /**
  * Query survey responses across ALL AC collections (for L0 cross-AC queries)
+ * Uses parallel queries for better performance
  * @param {Object} query - MongoDB query object
  * @param {Object} options - Query options (limit, skip, sort, select)
  * @returns {Promise<Array>} Combined results from all collections
  */
 export async function queryAllSurveyResponses(query = {}, options = {}) {
-  const results = [];
+  // Run queries in parallel for better performance
+  const queryPromises = ALL_AC_IDS.map(acId =>
+    querySurveyResponses(acId, query, options)
+      .then(responses => responses.map(r => ({ ...r, _acId: acId })))
+      .catch(err => {
+        console.error(`Error querying surveyresponses_${acId}:`, err.message);
+        return [];
+      })
+  );
 
-  for (const acId of ALL_AC_IDS) {
-    try {
-      const responses = await querySurveyResponses(acId, query, options);
-      results.push(...responses.map(r => ({ ...r, _acId: acId })));
-    } catch (err) {
-      console.error(`Error querying surveyresponses_${acId}:`, err.message);
-    }
-  }
+  const resultsArrays = await Promise.all(queryPromises);
+  let results = resultsArrays.flat();
 
   // Sort combined results if sort option provided
   if (options.sort && results.length > 0) {
@@ -181,22 +194,22 @@ export async function queryAllSurveyResponses(query = {}, options = {}) {
 
 /**
  * Count survey responses across ALL AC collections (for L0 cross-AC queries)
+ * Uses parallel queries for better performance
  * @param {Object} query - MongoDB query object
  * @returns {Promise<number>} Total count
  */
 export async function countAllSurveyResponses(query = {}) {
-  let total = 0;
+  // Run count queries in parallel for better performance
+  const countPromises = ALL_AC_IDS.map(acId =>
+    countSurveyResponses(acId, query)
+      .catch(err => {
+        console.error(`Error counting surveyresponses_${acId}:`, err.message);
+        return 0;
+      })
+  );
 
-  for (const acId of ALL_AC_IDS) {
-    try {
-      const count = await countSurveyResponses(acId, query);
-      total += count;
-    } catch (err) {
-      console.error(`Error counting surveyresponses_${acId}:`, err.message);
-    }
-  }
-
-  return total;
+  const counts = await Promise.all(countPromises);
+  return counts.reduce((sum, count) => sum + count, 0);
 }
 
 /**
@@ -246,24 +259,25 @@ export async function updateSurveyResponse(acId, responseId, update, options = {
 
 /**
  * Aggregate across ALL AC collections (for L0 cross-AC aggregations)
+ * Uses parallel queries for better performance
  * Note: Results are combined, not merged. Use with caution for complex aggregations.
  * @param {Array} pipeline - Aggregation pipeline
  * @returns {Promise<Array>} Combined aggregation results
  */
 export async function aggregateAllSurveyResponses(pipeline) {
-  const results = [];
+  // Run aggregations in parallel for better performance
+  const aggregatePromises = ALL_AC_IDS.map(acId => {
+    const SurveyResponseModel = getSurveyResponseModel(acId);
+    return SurveyResponseModel.aggregate(pipeline)
+      .then(results => results.map(r => ({ ...r, _acId: acId })))
+      .catch(err => {
+        console.error(`Error aggregating surveyresponses_${acId}:`, err.message);
+        return [];
+      });
+  });
 
-  for (const acId of ALL_AC_IDS) {
-    try {
-      const SurveyResponseModel = getSurveyResponseModel(acId);
-      const partialResults = await SurveyResponseModel.aggregate(pipeline);
-      results.push(...partialResults.map(r => ({ ...r, _acId: acId })));
-    } catch (err) {
-      console.error(`Error aggregating surveyresponses_${acId}:`, err.message);
-    }
-  }
-
-  return results;
+  const resultsArrays = await Promise.all(aggregatePromises);
+  return resultsArrays.flat();
 }
 
 export default {

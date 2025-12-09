@@ -136,5 +136,12 @@ userSchema.index(
   { name: "user_auth_lookup", partialFilterExpression: { isActive: true } },
 );
 
+// Add indexes for common query patterns
+userSchema.index({ role: 1 });
+userSchema.index({ assignedAC: 1 });
+userSchema.index({ role: 1, assignedAC: 1 });
+userSchema.index({ isActive: 1 });
+userSchema.index({ phone: 1 });
+
 export default mongoose.models.User || mongoose.model("User", userSchema);
 
