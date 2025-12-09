@@ -17,6 +17,7 @@ import {
   ALL_AC_IDS,
 } from "../utils/voterCollection.js";
 import { isAuthenticated, canAccessAC } from "../middleware/auth.js";
+import { getCache, setCache } from "../utils/cache.js";
 
 const router = express.Router();
 
@@ -27,21 +28,35 @@ router.use(isAuthenticated);
 const RESERVED_FIELDS = [];
 
 // Get existing fields from actual voter documents (for reference)
+// OPTIMIZED: Uses caching and samples from single AC collection
 router.get("/fields/existing", async (req, res) => {
   try {
     await connectToDatabase();
 
-    // Sample voter documents from all sharded collections to analyze existing fields
-    const totalVoters = await countAllVoters({});
-    console.log(`[Fields Existing] Total voters across all collections: ${totalVoters}`);
+    // Check cache first (30 minute TTL)
+    const cacheKey = 'global:voter:fields:existing';
+    const cached = getCache(cacheKey, 30 * 60 * 1000);
+    if (cached) {
+      return res.json(cached);
+    }
 
-    // Sample from collections that have data (voters_111 has most data)
-    const sampleVoters = await queryAllVoters({}, { limit: 100 });
-    console.log(`[Fields Existing] Sampled ${sampleVoters.length} voters from sharded collections`);
+    // Sample from voters_111 which has the most data (10k voters)
+    // This is much faster than querying all 21 AC collections
+    const primaryAcId = 111;
+    const VoterModel = getVoterModel(primaryAcId);
+
+    // Get total count from primary collection
+    const totalVoters = await VoterModel.countDocuments({});
+
+    // Sample 50 documents (sufficient for field discovery)
+    const sampleVoters = await VoterModel.find({})
+      .limit(50)
+      .lean();
 
     if (sampleVoters.length === 0) {
-      console.log('[Fields Existing] No voters found in collection');
-      return res.json({ fields: {}, totalVoters: 0 });
+      const response = { fields: {}, totalVoters: 0, samplesAnalyzed: 0 };
+      setCache(cacheKey, response, 30 * 60 * 1000);
+      return res.json(response);
     }
 
     // Analyze all fields present in voter documents
@@ -89,9 +104,8 @@ router.get("/fields/existing", async (req, res) => {
           fieldAnalysis[key].type = inferredType;
         }
 
-        // Collect sample values (up to 5 unique samples per field)
-        if (fieldAnalysis[key].samples.length < 5) {
-          // Format value for display
+        // Collect sample values (up to 3 unique samples per field - reduced from 5)
+        if (fieldAnalysis[key].samples.length < 3) {
           let displayValue = actualValue;
           if (actualValue instanceof Date) {
             displayValue = actualValue.toISOString().split('T')[0];
@@ -104,7 +118,6 @@ router.get("/fields/existing", async (req, res) => {
             displayValue = actualValue.substring(0, 50) + '...';
           }
 
-          // Only add unique samples
           if (!fieldAnalysis[key].samples.some(s => String(s.value) === String(displayValue))) {
             fieldAnalysis[key].samples.push({
               value: displayValue,
@@ -128,22 +141,23 @@ router.get("/fields/existing", async (req, res) => {
       visibilityMap[field.name] = field.visible !== undefined ? field.visible : true;
     });
 
-    // Add visibility information to each field (from metadata or from object structure)
+    // Add visibility information to each field
     Object.keys(sortedFields).forEach(key => {
-      // If field already has visibility from object format, use that; otherwise use metadata
       if (sortedFields[key].visible === undefined) {
         sortedFields[key].visible = visibilityMap[key] !== undefined ? visibilityMap[key] : true;
       }
     });
 
-    console.log(`[Fields Existing] Found ${Object.keys(sortedFields).length} unique fields`);
-    console.log(`[Fields Existing] Field names:`, Object.keys(sortedFields).slice(0, 10).join(', '), '...');
-
-    return res.json({
+    const response = {
       fields: sortedFields,
       totalVoters,
       samplesAnalyzed: sampleVoters.length
-    });
+    };
+
+    // Cache the result
+    setCache(cacheKey, response, 30 * 60 * 1000);
+
+    return res.json(response);
   } catch (error) {
     console.error("Error fetching existing fields from voters:", error);
     return res.status(500).json({ message: "Failed to fetch existing fields", error: error.message });

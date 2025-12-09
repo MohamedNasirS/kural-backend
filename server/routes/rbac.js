@@ -49,6 +49,7 @@ import {
   applyACFilter,
   canAccessAC,
 } from "../middleware/auth.js";
+import { getCache, setCache, TTL, cacheKeys } from "../utils/cache.js";
 
 const router = express.Router();
 
@@ -2134,32 +2135,42 @@ router.put("/booth-agents/:agentId/assign-booth", isAuthenticated, canAssignAgen
  * GET /api/rbac/dashboard/stats
  * Get dashboard statistics
  * Access: L0, L1, L2
+ * OPTIMIZED: Added caching for L0 users (5 minute TTL)
  */
 router.get("/dashboard/stats", isAuthenticated, validateACAccess, async (req, res) => {
   try {
     const assignedAC = req.user.role === "L0" ? null : resolveAssignedACFromUser(req.user);
+
+    // Check cache for L0 users (expensive cross-AC queries)
+    const cacheKey = assignedAC === null
+      ? 'L0:dashboard:stats'
+      : `ac:${assignedAC}:dashboard:stats`;
+
+    const cached = getCache(cacheKey, TTL.DASHBOARD_STATS);
+    if (cached) {
+      return res.json(cached);
+    }
+
     const boothQuery = assignedAC !== null ? { isActive: true, ac_id: assignedAC } : { isActive: true };
     const userQuery = assignedAC !== null ? { isActive: true, assignedAC } : { isActive: true };
     const agentRoleFilter = {
       $or: [{ role: "Booth Agent" }, { role: "BoothAgent" }],
     };
 
-    // Get counts
-    const totalBooths = await Booth.countDocuments(boothQuery);
-    const totalAgents = await User.countDocuments({
-      ...userQuery,
-      ...agentRoleFilter,
-    });
+    // Parallelize independent queries for better performance
+    const [totalBooths, totalAgents, boothsWithAgents] = await Promise.all([
+      Booth.countDocuments(boothQuery),
+      User.countDocuments({ ...userQuery, ...agentRoleFilter }),
+      Booth.find(boothQuery).select("assignedAgents").lean()
+    ]);
 
-    // Get assigned agents count
-    const boothsWithAgents = await Booth.find(boothQuery).select(
-      "assignedAgents"
-    );
     const assignedAgentIds = new Set();
     boothsWithAgents.forEach((booth) => {
-      booth.assignedAgents.forEach((agentId) => {
-        assignedAgentIds.add(agentId.toString());
-      });
+      if (booth.assignedAgents) {
+        booth.assignedAgents.forEach((agentId) => {
+          assignedAgentIds.add(agentId.toString());
+        });
+      }
     });
     const boothsActive = boothsWithAgents.filter(
       (booth) => Array.isArray(booth.assignedAgents) && booth.assignedAgents.length > 0,
@@ -2173,13 +2184,16 @@ router.get("/dashboard/stats", isAuthenticated, validateACAccess, async (req, re
       boothsActive,
     };
 
-    // L0 gets additional user counts
+    // L0 gets additional user counts - parallelize these too
     if (req.user.role === "L0") {
-      const totalACIMs = await User.countDocuments({ ...userQuery, role: "L1" });
-      const totalACIs = await User.countDocuments({ ...userQuery, role: "L2" });
+      const [totalACIMs, totalACIs, totalUsers] = await Promise.all([
+        User.countDocuments({ ...userQuery, role: "L1" }),
+        User.countDocuments({ ...userQuery, role: "L2" }),
+        User.countDocuments(userQuery)
+      ]);
       stats.totalACIMs = totalACIMs;
       stats.totalACIs = totalACIs;
-      stats.totalUsers = await User.countDocuments(userQuery);
+      stats.totalUsers = totalUsers;
     }
 
     const analytics = await buildDashboardAnalytics({
@@ -2188,13 +2202,18 @@ router.get("/dashboard/stats", isAuthenticated, validateACAccess, async (req, re
       boothsActive,
     });
 
-    res.json({
+    const response = {
       success: true,
       stats: {
         ...stats,
         ...analytics,
       },
-    });
+    };
+
+    // Cache the response
+    setCache(cacheKey, response, TTL.DASHBOARD_STATS);
+
+    res.json(response);
   } catch (error) {
     console.error("Error fetching dashboard stats:", error);
     res.status(500).json({
@@ -2209,14 +2228,10 @@ router.get("/dashboard/stats", isAuthenticated, validateACAccess, async (req, re
  * GET /api/rbac/dashboard/ac-overview
  * Batched AC performance stats to avoid hundreds of client requests
  * Access: L0 (all ACs), L1/L2 (their AC only)
+ * OPTIMIZED: Added caching for L0 users (5 minute TTL)
  */
 router.get("/dashboard/ac-overview", isAuthenticated, async (req, res) => {
   try {
-    const toNumber = (value) => {
-      const parsed = Number(value);
-      return Number.isFinite(parsed) ? parsed : null;
-    };
-
     const limitToAc =
       req.user.role === "L1" || req.user.role === "L2"
         ? resolveAssignedACFromUser(req.user)
@@ -2227,6 +2242,16 @@ router.get("/dashboard/ac-overview", isAuthenticated, async (req, res) => {
         success: false,
         message: "No AC assigned to your account.",
       });
+    }
+
+    // Check cache for L0 users (expensive cross-AC queries)
+    const cacheKey = limitToAc === null
+      ? 'L0:ac:overview'
+      : `ac:${limitToAc}:overview`;
+
+    const cached = getCache(cacheKey, TTL.DASHBOARD_STATS);
+    if (cached) {
+      return res.json(cached);
     }
 
     // Aggregation pipeline for voter stats
@@ -2249,15 +2274,7 @@ router.get("/dashboard/ac-overview", isAuthenticated, async (req, res) => {
       { $sort: { "_id.acId": 1 } },
     ];
 
-    let voterAggregation;
-    if (limitToAc !== null) {
-      // L1/L2: Query only the assigned AC collection
-      voterAggregation = await aggregateVoters(limitToAc, aggregationPipeline);
-    } else {
-      // L0: Query all AC collections
-      voterAggregation = await aggregateAllVoters(aggregationPipeline);
-    }
-
+    // Parallelize voter aggregation and user query
     const userMatch = {
       isActive: { $ne: false },
       role: { $in: ["L1", "L2", "Booth Agent", "BoothAgent"] },
@@ -2266,9 +2283,12 @@ router.get("/dashboard/ac-overview", isAuthenticated, async (req, res) => {
       userMatch.assignedAC = limitToAc;
     }
 
-    const users = await User.find(userMatch)
-      .select("role assignedAC")
-      .lean();
+    const [voterAggregation, users] = await Promise.all([
+      limitToAc !== null
+        ? aggregateVoters(limitToAc, aggregationPipeline)
+        : aggregateAllVoters(aggregationPipeline),
+      User.find(userMatch).select("role assignedAC").lean()
+    ]);
 
     const perAcUserCounts = new Map();
     const roleTotals = {
@@ -2364,12 +2384,17 @@ router.get("/dashboard/ac-overview", isAuthenticated, async (req, res) => {
       ),
     };
 
-    res.json({
+    const response = {
       success: true,
       totals,
       acPerformance,
       scope: limitToAc ?? "all",
-    });
+    };
+
+    // Cache the response
+    setCache(cacheKey, response, TTL.DASHBOARD_STATS);
+
+    res.json(response);
   } catch (error) {
     console.error("Error building AC overview stats:", error);
     res.status(500).json({

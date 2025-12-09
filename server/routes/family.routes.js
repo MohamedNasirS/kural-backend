@@ -2,19 +2,27 @@ import express from "express";
 import { connectToDatabase } from "../config/database.js";
 import { getVoterModel, aggregateVoters } from "../utils/voterCollection.js";
 import { isAuthenticated, canAccessAC } from "../middleware/auth.js";
+import { getCache, setCache, TTL, cacheKeys } from "../utils/cache.js";
 
 const router = express.Router();
+
+// Helper to escape regex special characters
+const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // Apply authentication to all routes
 router.use(isAuthenticated);
 
 // Get families for a specific AC (aggregated from voters by familyId)
+// OPTIMIZED: Uses $facet for DB-level pagination and search
 router.get("/:acId", async (req, res) => {
   try {
     await connectToDatabase();
 
     const acId = parseInt(req.params.acId);
     const { booth, search, page = 1, limit = 50 } = req.query;
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 50));
+    const skip = (pageNum - 1) * limitNum;
 
     if (isNaN(acId)) {
       return res.status(400).json({ message: "Invalid AC ID" });
@@ -34,85 +42,94 @@ router.get("/:acId", async (req, res) => {
     };
 
     if (booth && booth !== 'all') {
-      // booth can be:
-      // - A number like "1" (filter by boothno)
-      // - A booth ID like "BOOTH1-111" (filter by booth_id)
-      // - A booth number string like "BOOTH1" (filter by boothno string)
       const boothNum = parseInt(booth);
       if (!isNaN(boothNum) && String(boothNum) === booth) {
-        // Pure numeric value - filter by numeric boothno
         matchQuery.boothno = boothNum;
       } else if (booth.includes('-')) {
-        // Contains hyphen - likely a booth_id like "BOOTH1-111"
         matchQuery.booth_id = booth;
       } else {
-        // String like "BOOTH1" - filter by boothno string OR booth_id pattern
         matchQuery.$or = [
           { boothno: booth },
-          { booth_id: new RegExp(`^${booth}-`, 'i') }
+          { booth_id: new RegExp(`^${escapeRegex(booth)}-`, 'i') }
         ];
       }
     }
 
-    // Aggregate families by grouping voters by familyId (proper family grouping)
-    const familiesAggregation = await aggregateVoters(acId, [
-      { $match: matchQuery },
-      {
-        $group: {
-          _id: "$familyId",
-          family_head: { $first: "$familyHead" },
-          first_member_name: { $first: "$name" },
-          members: { $sum: 1 },
-          voters: {
-            $push: {
-              id: "$_id",
-              name: "$name",
-              voterID: "$voterID",
-              age: "$age",
-              gender: "$gender",
-              mobile: "$mobile",
-              relationToHead: "$relationToHead",
-              surveyed: "$surveyed"
-            }
-          },
-          address: { $first: "$address" },
-          booth: { $first: "$boothname" },
-          boothno: { $first: "$boothno" },
-          booth_id: { $first: "$booth_id" },
-          mobile: { $first: "$mobile" }
-        }
-      },
-      { $sort: { "boothno": 1, "_id": 1 } }
-    ]);
+    // Build aggregation pipeline with DB-level pagination
+    const groupStage = {
+      $group: {
+        _id: "$familyId",
+        family_head: { $first: "$familyHead" },
+        first_member_name: { $first: "$name" },
+        members: { $sum: 1 },
+        // Only push limited voter info for list view (not full details)
+        voters: {
+          $push: {
+            id: "$_id",
+            name: "$name",
+            voterID: "$voterID",
+            age: "$age",
+            gender: "$gender",
+            mobile: "$mobile",
+            relationToHead: "$relationToHead",
+            surveyed: "$surveyed"
+          }
+        },
+        address: { $first: "$address" },
+        booth: { $first: "$boothname" },
+        boothno: { $first: "$boothno" },
+        booth_id: { $first: "$booth_id" },
+        mobile: { $first: "$mobile" }
+      }
+    };
 
-    // Apply search filter
-    let filteredFamilies = familiesAggregation;
+    // Build search match stage (after grouping)
+    let searchMatch = null;
     if (search) {
-      const searchLower = search.toLowerCase();
-      filteredFamilies = familiesAggregation.filter(family => {
-        // Search in family head name
-        const headMatch = family.family_head?.toLowerCase().includes(searchLower);
-        // Search in first member name (english or tamil)
-        const firstMemberMatch =
-          family.first_member_name?.english?.toLowerCase().includes(searchLower) ||
-          family.first_member_name?.tamil?.toLowerCase().includes(searchLower);
-        // Search in address
-        const addressMatch = family.address?.toLowerCase().includes(searchLower);
-        // Search in familyId
-        const familyIdMatch = family._id?.toLowerCase().includes(searchLower);
-
-        return headMatch || firstMemberMatch || addressMatch || familyIdMatch;
-      });
+      const searchRegex = new RegExp(escapeRegex(search), 'i');
+      searchMatch = {
+        $match: {
+          $or: [
+            { family_head: searchRegex },
+            { "first_member_name.english": searchRegex },
+            { "first_member_name.tamil": searchRegex },
+            { address: searchRegex },
+            { _id: searchRegex }
+          ]
+        }
+      };
     }
 
-    // Pagination
-    const total = filteredFamilies.length;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    const paginatedFamilies = filteredFamilies.slice(skip, skip + parseInt(limit));
+    // Build pipeline stages
+    const basePipeline = [
+      { $match: matchQuery },
+      groupStage,
+      { $sort: { boothno: 1, _id: 1 } }
+    ];
+
+    // Add search filter if provided
+    if (searchMatch) {
+      basePipeline.push(searchMatch);
+    }
+
+    // Use $facet for parallel count and paginated results
+    const facetPipeline = [
+      ...basePipeline,
+      {
+        $facet: {
+          metadata: [{ $count: "total" }],
+          data: [{ $skip: skip }, { $limit: limitNum }]
+        }
+      }
+    ];
+
+    const [result] = await aggregateVoters(acId, facetPipeline);
+
+    const total = result?.metadata[0]?.total || 0;
+    const paginatedFamilies = result?.data || [];
 
     return res.json({
       families: paginatedFamilies.map((family) => {
-        // Get the family head name - prefer familyHead field, then first member's name
         const headName = family.family_head ||
                         family.first_member_name?.english ||
                         family.first_member_name?.tamil ||
@@ -121,7 +138,7 @@ router.get("/:acId", async (req, res) => {
                         'N/A';
 
         return {
-          id: family._id, // Use the actual familyId
+          id: family._id,
           family_head: headName,
           members: family.members,
           address: family.address || 'N/A',
@@ -137,10 +154,10 @@ router.get("/:acId", async (req, res) => {
         };
       }),
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: pageNum,
+        limit: limitNum,
         total: total,
-        pages: Math.ceil(total / parseInt(limit))
+        pages: Math.ceil(total / limitNum)
       }
     });
 
