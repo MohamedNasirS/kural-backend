@@ -8,8 +8,11 @@
  * - Structured JSON logging with Pino
  */
 
-const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 const logger = require('../utils/logger.cjs');
+
+// Use Node's built-in crypto.randomUUID() for UUID v4
+const uuidv4 = () => crypto.randomUUID();
 
 /**
  * Request logging middleware
