@@ -1,7 +1,7 @@
 /**
  * Node.js Cluster Manager - Safe Mode
  *
- * Production: CPU_CORES - 1 workers (leaves headroom for OS/system tasks)
+ * Production: 2 workers (fixed, to share droplet resources with mobile app backend)
  * Development: 1 worker (simpler debugging, hot reload compatible)
  *
  * Features:
@@ -24,12 +24,12 @@ const isProduction = process.env.NODE_ENV === 'production';
 const cpuCount = os.cpus().length;
 
 // Safe worker count calculation
-// Production: CPU_CORES - 1 (minimum 1, maximum based on available cores)
+// Production: Fixed 2 workers (to share droplet resources with mobile app backend)
 // Development: Always 1 worker for simpler debugging
 const WORKERS = process.env.CLUSTER_WORKERS
   ? parseInt(process.env.CLUSTER_WORKERS, 10)
   : isProduction
-    ? Math.max(1, cpuCount - 1)
+    ? 2
     : 1;
 
 // Restart configuration
