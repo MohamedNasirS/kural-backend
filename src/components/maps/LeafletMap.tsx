@@ -166,7 +166,17 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
     if (!mapInstanceRef.current) {
       mapInstanceRef.current = L.map(mapRef.current, {
         zoomControl: true,
+        scrollWheelZoom: false, // Disable scroll wheel zoom to prevent accidental zooming
+        doubleClickZoom: true,  // Allow double-click zoom
       }).setView([center.lat, center.lng], zoom);
+
+      // Enable scroll wheel zoom only when map is focused (clicked)
+      mapInstanceRef.current.on('focus', () => {
+        mapInstanceRef.current?.scrollWheelZoom.enable();
+      });
+      mapInstanceRef.current.on('blur', () => {
+        mapInstanceRef.current?.scrollWheelZoom.disable();
+      });
 
       // Initialize all tile layers
       initializeLayers(mapInstanceRef.current);
@@ -230,13 +240,19 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
       // Enhanced popup with better styling
       if (markerData.content) {
         marker.bindPopup(markerData.content, {
-          maxWidth: 280,
-          maxHeight: 350,
+          maxWidth: 380,
+          maxHeight: 450,
+          closeButton: true,
+          className: 'leaflet-popup-enhanced',
+          autoPan: true,
+          autoPanPadding: [20, 20],
+        });
+      } else {
+        marker.bindPopup(`<div style="padding: 12px; font-weight: 600; font-size: 14px;">${markerData.title || 'Location'}</div>`, {
+          maxWidth: 300,
           closeButton: true,
           className: 'leaflet-popup-enhanced',
         });
-      } else {
-        marker.bindPopup(`<div style="padding: 10px; font-weight: 600;">${markerData.title}</div>`);
       }
 
       // Handle marker click
@@ -301,34 +317,55 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
         }
         
         .leaflet-popup-enhanced {
-          border-radius: 8px;
+          border-radius: 12px;
         }
-        
+
         .leaflet-popup-enhanced .leaflet-popup-content-wrapper {
-          border-radius: 8px;
-          box-shadow: 0 10px 40px rgba(0, 0, 0, 0.16);
-          border: 1px solid rgba(0, 0, 0, 0.08);
+          border-radius: 12px;
+          box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2), 0 4px 12px rgba(0, 0, 0, 0.1);
+          border: none;
           padding: 0;
+          overflow: hidden;
         }
-        
+
         .leaflet-popup-enhanced .leaflet-popup-content {
           margin: 0;
           width: auto !important;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          line-height: 1.5;
         }
-        
-        .leaflet-popup-enhanced .leaflet-popup-tip {
-          background: white;
-          border: 1px solid rgba(0, 0, 0, 0.08);
+
+        .leaflet-popup-enhanced .leaflet-popup-tip-container {
+          display: none;
         }
-        
+
         .leaflet-popup-enhanced .leaflet-popup-close-button {
-          color: #6b7280;
+          color: white;
+          font-size: 18px;
+          font-weight: 600;
+          width: 28px;
+          height: 28px;
+          padding: 0;
+          top: 8px !important;
+          right: 8px !important;
+          background: rgba(0, 0, 0, 0.2);
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
           transition: all 0.2s ease;
+          z-index: 10;
         }
-        
+
         .leaflet-popup-enhanced .leaflet-popup-close-button:hover {
-          color: #1f2937;
+          background: rgba(0, 0, 0, 0.4);
+          color: white;
+        }
+
+        .leaflet-popup-enhanced .leaflet-popup-close-button span {
+          display: flex;
+          align-items: center;
+          justify-content: center;
         }
 
         .leaflet-control-button {

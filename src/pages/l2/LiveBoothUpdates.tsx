@@ -1,14 +1,14 @@
 import { DashboardLayout } from '@/components/DashboardLayout';
-import { Card } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
-import { Activity, Clock, Search, RefreshCw, AlertCircle, MapPin, User, Building2, List, Map as MapIcon, Users, FileText, Smartphone, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Activity, Clock, Search, RefreshCw, AlertCircle, MapPin, User, Building2, List, Map as MapIcon, Users, FileText, Smartphone, ToggleLeft, ToggleRight, LogIn, LogOut, CheckCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { CONSTITUENCIES } from '@/constants/constituencies';
 import { useBooths, getBoothLabel } from '@/hooks/use-booths';
 import { LeafletMap, type MapMarker, type MapLayerType } from '@/components/maps/LeafletMap';
@@ -33,6 +33,15 @@ interface LocationData {
   color: string;
 }
 
+// Grouped location for map display
+interface GroupedLocation {
+  key: string;
+  latitude: number;
+  longitude: number;
+  items: LocationData[];
+  boothname?: string;
+}
+
 // Loading skeleton for updates
 const UpdateSkeleton = () => (
   <div className="space-y-3">
@@ -50,12 +59,55 @@ const UpdateSkeleton = () => (
   </div>
 );
 
-// Data type config
+// Data type config with descriptive labels - colors match dashboard theme
 const DATA_TYPES = {
-  activities: { label: 'Agent Activities', icon: Users, color: '#22c55e', bgClass: 'bg-green-500' },
-  mobile: { label: 'Mobile Responses', icon: Smartphone, color: '#3b82f6', bgClass: 'bg-blue-500' },
-  surveys: { label: 'Survey Responses', icon: FileText, color: '#f59e0b', bgClass: 'bg-amber-500' },
+  activities: {
+    label: 'Agent Activities',
+    description: 'Login/Logout activities from booth agents',
+    icon: Users,
+    color: '#8b5cf6', // Violet - matches dashboard primary
+    bgClass: 'bg-violet-500'
+  },
+  mobile: {
+    label: 'Master Answers',
+    description: 'Responses from mobile app master data collection',
+    icon: Smartphone,
+    color: '#6366f1', // Indigo - matches Total Members card
+    bgClass: 'bg-indigo-500'
+  },
+  surveys: {
+    label: 'Survey Responses',
+    description: 'Survey submissions from booth agents',
+    icon: FileText,
+    color: '#10b981', // Emerald - matches Surveys Completed card
+    bgClass: 'bg-emerald-500'
+  },
 } as const;
+
+// Get activity-specific icon and label - colors match dashboard theme
+const getActivityDetails = (item: LocationData) => {
+  if (item.type === 'activity') {
+    const isLogin = item.subtitle?.toLowerCase().includes('login') || item.status === 'active';
+    const isLogout = item.subtitle?.toLowerCase().includes('logout') || item.status === 'logged_out';
+    return {
+      icon: isLogout ? LogOut : LogIn,
+      label: isLogout ? 'Agent Logout' : 'Agent Login',
+      statusColor: isLogin ? '#8b5cf6' : '#64748b', // Violet for login, slate for logout
+    };
+  }
+  if (item.type === 'mobile') {
+    return {
+      icon: Smartphone,
+      label: 'Master Answer',
+      statusColor: '#6366f1', // Indigo
+    };
+  }
+  return {
+    icon: FileText,
+    label: 'Survey Response',
+    statusColor: '#10b981', // Emerald
+  };
+};
 
 export const LiveBoothUpdates = () => {
   const { user } = useAuth();
@@ -73,6 +125,7 @@ export const LiveBoothUpdates = () => {
   const [mapLayer, setMapLayer] = useState<MapLayerType>('osm');
   const [counts, setCounts] = useState({ activities: 0, mobile: 0, surveys: 0, total: 0 });
   const [selectedMarker, setSelectedMarker] = useState<string | null>(null);
+  const [selectedLocationGroup, setSelectedLocationGroup] = useState<GroupedLocation | null>(null);
 
   // Data source toggles
   const [showActivities, setShowActivities] = useState(true);
@@ -175,30 +228,198 @@ export const LiveBoothUpdates = () => {
     return then.toLocaleDateString();
   };
 
-  // Convert to map markers
-  const mapMarkers: MapMarker[] = filteredData.map((item, index) => ({
-    id: item.id,
-    latitude: item.latitude,
-    longitude: item.longitude,
-    title: item.title,
-    label: String(index + 1),
-    color: item.color,
-    content: `
-      <div style="padding: 12px; font-family: system-ui, sans-serif; min-width: 200px;">
-        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-          <div style="width: 10px; height: 10px; border-radius: 50%; background: ${item.color};"></div>
-          <span style="font-weight: 600; font-size: 13px; text-transform: uppercase; color: #64748b;">
-            ${item.type === 'activity' ? 'Agent Activity' : item.type === 'mobile' ? 'Mobile Response' : 'Survey'}
-          </span>
+  // Group items by location (round to 4 decimal places for ~11m precision clustering)
+  const groupByLocation = useCallback((items: LocationData[]): GroupedLocation[] => {
+    const groups = new Map<string, GroupedLocation>();
+    items.forEach(item => {
+      // Round to ~11 meter precision for clustering (4 decimal places)
+      const key = `${item.latitude.toFixed(4)},${item.longitude.toFixed(4)}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          latitude: item.latitude,
+          longitude: item.longitude,
+          items: [],
+          boothname: item.boothname,
+        });
+      }
+      groups.get(key)!.items.push(item);
+    });
+    return Array.from(groups.values());
+  }, []);
+
+  // Group filtered data by location - memoized for performance
+  const locationGroups = useMemo(() => groupByLocation(filteredData), [filteredData, groupByLocation]);
+
+  // Calculate activity breakdown for a group
+  const getGroupBreakdown = (items: LocationData[]) => {
+    const activities = items.filter(i => i.type === 'activity');
+    const logins = activities.filter(i => i.subtitle?.toLowerCase().includes('login') || i.status === 'active').length;
+    const logouts = activities.filter(i => i.subtitle?.toLowerCase().includes('logout') || i.status === 'logged_out').length;
+    return {
+      logins,
+      logouts,
+      activities: activities.length,
+      mobile: items.filter(i => i.type === 'mobile').length,
+      surveys: items.filter(i => i.type === 'survey').length,
+    };
+  };
+
+  // Generate popup content for a single item - clean and simple design
+  const generateSingleItemPopup = (item: LocationData) => {
+    const details = getActivityDetails(item);
+    const title = item.title || 'Unknown';
+    const subtitle = item.subtitle || '';
+    const time = formatRelativeTime(item.timestamp);
+
+    return `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; width: 280px;">
+        <div style="background: ${details.statusColor}; color: white; padding: 12px 16px; border-radius: 8px 8px 0 0;">
+          <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.9; margin-bottom: 4px;">
+            ${details.label}
+          </div>
+          <div style="font-size: 15px; font-weight: 600;">${title}</div>
         </div>
-        <h4 style="font-weight: 700; margin: 0 0 8px 0; font-size: 15px; color: #1e293b;">${item.title}</h4>
-        <p style="margin: 4px 0; font-size: 13px; color: #475569;">${item.subtitle}</p>
-        ${item.boothname ? `<p style="margin: 4px 0; font-size: 12px; color: #64748b;"><strong>Booth:</strong> ${item.boothname}</p>` : ''}
-        ${item.status ? `<p style="margin: 4px 0; font-size: 12px; color: #64748b;"><strong>Status:</strong> ${item.status}</p>` : ''}
-        <p style="margin: 8px 0 0 0; font-size: 11px; color: #94a3b8;">${formatRelativeTime(item.timestamp)}</p>
+        <div style="padding: 12px 16px; background: white;">
+          ${subtitle ? `<p style="margin: 0 0 8px 0; font-size: 13px; color: #64748b;">${subtitle}</p>` : ''}
+          ${item.answerValue ? `<div style="margin: 8px 0; padding: 8px 12px; background: #f0f9ff; border-radius: 6px; border-left: 3px solid #3b82f6;">
+            <span style="font-size: 12px; color: #1e40af; font-weight: 500;">${item.answerValue}</span>
+          </div>` : ''}
+          ${item.boothname ? `<div style="display: flex; align-items: center; gap: 6px; margin: 6px 0; font-size: 12px; color: #475569;">
+            <span style="color: #94a3b8;">Booth:</span> <strong>${item.boothname}</strong>
+          </div>` : ''}
+          ${item.agent ? `<div style="display: flex; align-items: center; gap: 6px; margin: 6px 0; font-size: 12px; color: #475569;">
+            <span style="color: #94a3b8;">Agent:</span> ${item.agent}
+          </div>` : ''}
+          <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8;">
+            ${time}
+          </div>
+        </div>
       </div>
-    `,
-  }));
+    `;
+  };
+
+  // Generate popup content for multiple items at same location - clean design
+  const generateGroupPopup = (group: GroupedLocation) => {
+    const breakdown = getGroupBreakdown(group.items);
+    const totalCount = group.items.length;
+
+    // Sort items by timestamp (most recent first)
+    const sortedItems = [...group.items].sort((a, b) =>
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+
+    // Show max 5 items in popup, with "and X more" if there are more
+    const displayItems = sortedItems.slice(0, 5);
+    const remainingCount = totalCount - displayItems.length;
+
+    const itemsHtml = displayItems.map((item, idx) => {
+      const details = getActivityDetails(item);
+      const title = item.title || 'Unknown';
+      const subtitle = item.subtitle || '';
+      return `
+        <div style="padding: 10px 14px; ${idx < displayItems.length - 1 ? 'border-bottom: 1px solid #f1f5f9;' : ''}">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+            <div style="width: 8px; height: 8px; border-radius: 50%; background: ${details.statusColor}; flex-shrink: 0;"></div>
+            <span style="font-size: 11px; color: ${details.statusColor}; font-weight: 600; text-transform: uppercase;">
+              ${details.label}
+            </span>
+            <span style="font-size: 10px; color: #94a3b8; margin-left: auto;">${formatRelativeTime(item.timestamp)}</span>
+          </div>
+          <div style="font-size: 13px; font-weight: 500; color: #1e293b; margin-bottom: 2px;">${title}</div>
+          ${subtitle ? `<div style="font-size: 12px; color: #64748b;">${subtitle}</div>` : ''}
+          ${item.answerValue ? `<div style="margin-top: 4px; font-size: 11px; color: #3b82f6; font-weight: 500;">${item.answerValue}</div>` : ''}
+        </div>
+      `;
+    }).join('');
+
+    // Build summary badges
+    const badges = [];
+    if (breakdown.logins > 0) badges.push(`<span style="background: #dcfce7; color: #166534; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600;">Login ${breakdown.logins}</span>`);
+    if (breakdown.logouts > 0) badges.push(`<span style="background: #f3f4f6; color: #4b5563; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600;">Logout ${breakdown.logouts}</span>`);
+    if (breakdown.mobile > 0) badges.push(`<span style="background: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600;">Master ${breakdown.mobile}</span>`);
+    if (breakdown.surveys > 0) badges.push(`<span style="background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600;">Survey ${breakdown.surveys}</span>`);
+
+    return `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; width: 320px;">
+        <div style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); color: white; padding: 14px 16px; border-radius: 8px 8px 0 0;">
+          <div style="font-size: 16px; font-weight: 700; margin-bottom: 8px;">
+            ${totalCount} Activities
+          </div>
+          <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+            ${badges.join('')}
+          </div>
+        </div>
+        <div style="background: white; max-height: 250px; overflow-y: auto;">
+          ${itemsHtml}
+          ${remainingCount > 0 ? `<div style="padding: 10px 14px; text-align: center; font-size: 12px; color: #6366f1; font-weight: 500;">
+            + ${remainingCount} more activities
+          </div>` : ''}
+        </div>
+        ${group.boothname ? `<div style="padding: 10px 14px; background: #f8fafc; border-radius: 0 0 8px 8px; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0;">
+          Booth: <strong style="color: #1e293b;">${group.boothname}</strong>
+        </div>` : ''}
+      </div>
+    `;
+  };
+
+  // Handle marker click - show activities in the detail panel
+  const handleMarkerClick = useCallback((markerId: string) => {
+    const group = locationGroups.find(g =>
+      g.key === markerId.replace('group-', '') || g.items.some(i => i.id === markerId)
+    );
+    if (group) {
+      setSelectedLocationGroup(group);
+      setSelectedMarker(markerId);
+    }
+  }, [locationGroups]);
+
+  // Convert grouped data to map markers
+  const mapMarkers: MapMarker[] = locationGroups.map((group, index) => {
+    const hasMultiple = group.items.length > 1;
+    const firstItem = group.items[0];
+    const breakdown = getGroupBreakdown(group.items);
+
+    // Determine marker color based on dominant activity type
+    let markerColor = firstItem.color;
+    if (hasMultiple) {
+      // Use purple for mixed locations, otherwise use dominant type color
+      const types = new Set(group.items.map(i => i.type));
+      if (types.size > 1) {
+        markerColor = '#8b5cf6'; // Purple for mixed
+      } else if (breakdown.mobile > 0) {
+        markerColor = '#3b82f6'; // Blue for master answers
+      } else if (breakdown.surveys > 0) {
+        markerColor = '#f59e0b'; // Amber for surveys
+      } else {
+        markerColor = '#22c55e'; // Green for agent activities
+      }
+    }
+
+    const markerId = hasMultiple ? `group-${group.key}` : firstItem.id;
+
+    // Simple popup - just tells user to see details below
+    const simplePopup = `
+      <div style="font-family: -apple-system, sans-serif; padding: 12px; text-align: center; min-width: 180px;">
+        <div style="font-size: 14px; font-weight: 600; color: #1e293b; margin-bottom: 4px;">
+          ${hasMultiple ? `${group.items.length} Activities` : firstItem.title}
+        </div>
+        <div style="font-size: 12px; color: #64748b;">
+          ${group.boothname || 'Click to view details below'}
+        </div>
+      </div>
+    `;
+
+    return {
+      id: markerId,
+      latitude: group.latitude,
+      longitude: group.longitude,
+      title: hasMultiple ? `${group.items.length} activities` : firstItem.title,
+      label: hasMultiple ? String(group.items.length) : '',
+      color: markerColor,
+      content: simplePopup,
+    };
+  });
 
   // Get type icon component
   const getTypeIcon = (type: string) => {
@@ -292,7 +513,7 @@ export const LiveBoothUpdates = () => {
           <TabsList className="grid w-full max-w-md grid-cols-2">
             <TabsTrigger value="map" className="flex items-center gap-2">
               <MapIcon className="h-4 w-4" />
-              Map View ({filteredData.length})
+              Map View ({mapMarkers.length} locations)
             </TabsTrigger>
             <TabsTrigger value="list" className="flex items-center gap-2">
               <List className="h-4 w-4" />
@@ -303,7 +524,7 @@ export const LiveBoothUpdates = () => {
           {/* Map View */}
           <TabsContent value="map" className="mt-4 space-y-4">
             {/* Map Controls Card */}
-            <Card className="p-4 bg-gradient-to-r from-primary/5 to-primary/10 border-primary/20">
+            <Card className="p-4">
               <div className="space-y-4">
                 {/* Layer Toggles - Primary Controls */}
                 <div>
@@ -380,8 +601,13 @@ export const LiveBoothUpdates = () => {
               <div className="flex items-center justify-between flex-wrap gap-4">
                 <div className="flex items-center gap-2 text-sm">
                   <MapPin className="h-4 w-4 text-primary" />
-                  <span className="font-semibold">{filteredData.length}</span>
-                  <span className="text-muted-foreground">location{filteredData.length !== 1 ? 's' : ''} displayed</span>
+                  <span className="font-semibold">{mapMarkers.length}</span>
+                  <span className="text-muted-foreground">location{mapMarkers.length !== 1 ? 's' : ''}</span>
+                  {filteredData.length !== mapMarkers.length && (
+                    <span className="text-muted-foreground">
+                      ({filteredData.length} total activities)
+                    </span>
+                  )}
                 </div>
                 <div className="text-xs text-muted-foreground">
                   Last updated: {lastRefresh.toLocaleTimeString()}
@@ -398,7 +624,7 @@ export const LiveBoothUpdates = () => {
                     <p className="text-muted-foreground">Loading location data...</p>
                   </div>
                 </div>
-              ) : filteredData.length === 0 ? (
+              ) : mapMarkers.length === 0 ? (
                 <div className="h-[500px] flex items-center justify-center">
                   <div className="text-center">
                     <MapPin className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
@@ -417,13 +643,13 @@ export const LiveBoothUpdates = () => {
                   fitBounds
                   maxZoom={16}
                   layer={mapLayer}
-                  onMarkerClick={(marker) => setSelectedMarker(marker.id)}
+                  onMarkerClick={(marker) => handleMarkerClick(marker.id)}
                 />
               )}
             </Card>
 
             {/* Map Legend */}
-            {filteredData.length > 0 && (
+            {mapMarkers.length > 0 && (
               <Card className="p-4">
                 <h3 className="font-semibold mb-4 flex items-center gap-2">
                   <MapPin className="h-4 w-4 text-primary" />
@@ -453,10 +679,183 @@ export const LiveBoothUpdates = () => {
                 </div>
               </Card>
             )}
+
+            {/* Selected Location Activities Panel */}
+            {selectedLocationGroup && (
+              <Card className="p-0 overflow-hidden border-2 border-primary/30">
+                <div className="bg-gradient-primary text-white p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-bold text-lg flex items-center gap-2">
+                        <MapPin className="h-5 w-5" />
+                        {selectedLocationGroup.items.length} Activities at this Location
+                      </h3>
+                      {selectedLocationGroup.boothname && (
+                        <p className="text-sm opacity-90 mt-1">Booth: {selectedLocationGroup.boothname}</p>
+                      )}
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedLocationGroup(null);
+                        setSelectedMarker(null);
+                      }}
+                      className="text-white hover:bg-white/20"
+                    >
+                      Close
+                    </Button>
+                  </div>
+                  {/* Activity type badges */}
+                  <div className="flex gap-2 mt-3 flex-wrap">
+                    {(() => {
+                      const breakdown = getGroupBreakdown(selectedLocationGroup.items);
+                      return (
+                        <>
+                          {breakdown.logins > 0 && (
+                            <Badge className="bg-white text-green-600 border-0 font-medium">
+                              <LogIn className="h-3 w-3 mr-1" /> Login: {breakdown.logins}
+                            </Badge>
+                          )}
+                          {breakdown.logouts > 0 && (
+                            <Badge className="bg-white/90 text-gray-600 border-0 font-medium">
+                              <LogOut className="h-3 w-3 mr-1" /> Logout: {breakdown.logouts}
+                            </Badge>
+                          )}
+                          {breakdown.mobile > 0 && (
+                            <Badge className="bg-white text-blue-600 border-0 font-medium">
+                              <Smartphone className="h-3 w-3 mr-1" /> Master: {breakdown.mobile}
+                            </Badge>
+                          )}
+                          {breakdown.surveys > 0 && (
+                            <Badge className="bg-white text-amber-600 border-0 font-medium">
+                              <FileText className="h-3 w-3 mr-1" /> Survey: {breakdown.surveys}
+                            </Badge>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+                {/* Activities List */}
+                <div className="max-h-[400px] overflow-y-auto divide-y">
+                  {[...selectedLocationGroup.items]
+                    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+                    .map((item, idx) => {
+                      const details = getActivityDetails(item);
+                      const Icon = details.icon;
+                      return (
+                        <div key={item.id || idx} className="p-4 hover:bg-muted/50 transition-colors">
+                          <div className="flex items-start gap-3">
+                            <div
+                              className="p-2 rounded-lg flex-shrink-0"
+                              style={{ backgroundColor: `${details.statusColor}20` }}
+                            >
+                              <Icon className="h-4 w-4" style={{ color: details.statusColor }} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                <Badge
+                                  variant="outline"
+                                  className="text-xs"
+                                  style={{
+                                    borderColor: details.statusColor,
+                                    color: details.statusColor,
+                                  }}
+                                >
+                                  {details.label}
+                                </Badge>
+                                <span className="text-xs text-muted-foreground">
+                                  {formatRelativeTime(item.timestamp)}
+                                </span>
+                              </div>
+                              <h4 className="font-semibold text-sm">{item.title}</h4>
+                              <p className="text-sm text-muted-foreground">{item.subtitle}</p>
+                              {item.answerValue && (
+                                <div className="mt-2 p-2 bg-blue-50 rounded border border-blue-100">
+                                  <p className="text-xs text-blue-700 font-medium">Answer: {item.answerValue}</p>
+                                </div>
+                              )}
+                              {item.agent && (
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  <User className="h-3 w-3 inline mr-1" />
+                                  Agent: {item.agent}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+                {/* Footer with coordinates */}
+                <div className="p-3 bg-muted/50 border-t text-xs text-muted-foreground flex items-center justify-between">
+                  <span>
+                    Coordinates: {selectedLocationGroup.latitude.toFixed(6)}, {selectedLocationGroup.longitude.toFixed(6)}
+                  </span>
+                  <a
+                    href={`https://www.google.com/maps?q=${selectedLocationGroup.latitude},${selectedLocationGroup.longitude}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline flex items-center gap-1"
+                  >
+                    <MapPin className="h-3 w-3" /> Open in Google Maps
+                  </a>
+                </div>
+              </Card>
+            )}
           </TabsContent>
 
           {/* List View */}
-          <TabsContent value="list" className="mt-4">
+          <TabsContent value="list" className="mt-4 space-y-4">
+            {/* Summary Stats Cards - matching dashboard style */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <Card className="p-4 bg-violet-500 text-white rounded-xl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm opacity-90">Agent Activities</p>
+                    <p className="text-3xl font-bold">{counts.activities}</p>
+                  </div>
+                  <div className="p-2 bg-white/20 rounded-lg">
+                    <Users className="h-6 w-6" />
+                  </div>
+                </div>
+              </Card>
+              <Card className="p-4 bg-indigo-500 text-white rounded-xl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm opacity-90">Master Answers</p>
+                    <p className="text-3xl font-bold">{counts.mobile}</p>
+                  </div>
+                  <div className="p-2 bg-white/20 rounded-lg">
+                    <Smartphone className="h-6 w-6" />
+                  </div>
+                </div>
+              </Card>
+              <Card className="p-4 bg-emerald-500 text-white rounded-xl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm opacity-90">Surveys</p>
+                    <p className="text-3xl font-bold">{counts.surveys}</p>
+                  </div>
+                  <div className="p-2 bg-white/20 rounded-lg">
+                    <FileText className="h-6 w-6" />
+                  </div>
+                </div>
+              </Card>
+              <Card className="p-4 bg-gradient-primary text-white rounded-xl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm opacity-90">Locations</p>
+                    <p className="text-3xl font-bold">{locationGroups.length}</p>
+                  </div>
+                  <div className="p-2 bg-white/20 rounded-lg">
+                    <MapPin className="h-6 w-6" />
+                  </div>
+                </div>
+              </Card>
+            </div>
+
             {loading && locationData.length === 0 ? (
               <div className="space-y-3">
                 <Card className="p-8 text-center bg-blue-50/50 dark:bg-blue-950/20 border-blue-200/50 dark:border-blue-800/50">
@@ -467,54 +866,70 @@ export const LiveBoothUpdates = () => {
                 <UpdateSkeleton />
               </div>
             ) : filteredData.length > 0 ? (
-              <div className="space-y-2 max-h-[700px] overflow-y-auto">
+              <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
                 {filteredData.map((item) => {
-                  const Icon = getTypeIcon(item.type);
-                  const config = DATA_TYPES[item.type as keyof typeof DATA_TYPES];
+                  const details = getActivityDetails(item);
+                  const Icon = details.icon;
                   const isSelected = selectedMarker === item.id;
                   return (
-                    <Card 
-                      key={item.id} 
+                    <Card
+                      key={item.id}
                       className={cn(
                         "p-4 transition-all duration-200 cursor-pointer border-l-4",
-                        isSelected 
-                          ? "shadow-lg bg-accent/50 border-l-primary" 
-                          : "hover:shadow-md border-l-transparent hover:bg-muted/50"
+                        isSelected
+                          ? "shadow-lg bg-accent/50"
+                          : "hover:shadow-md hover:bg-muted/50"
                       )}
+                      style={{ borderLeftColor: isSelected ? details.statusColor : 'transparent' }}
                       onClick={() => setSelectedMarker(isSelected ? null : item.id)}
                     >
                       <div className="flex items-start gap-4">
                         <div
                           className="p-2.5 rounded-lg flex-shrink-0 flex items-center justify-center"
-                          style={{ backgroundColor: `${item.color}20` }}
+                          style={{ backgroundColor: `${details.statusColor}20` }}
                         >
-                          <Icon className="h-5 w-5" style={{ color: item.color }} />
+                          <Icon className="h-5 w-5" style={{ color: details.statusColor }} />
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-2 flex-wrap">
                             <Badge
                               variant="outline"
                               className="text-xs font-semibold"
-                              style={{ 
-                                borderColor: item.color, 
-                                color: item.color,
-                                backgroundColor: `${item.color}10`
+                              style={{
+                                borderColor: details.statusColor,
+                                color: details.statusColor,
+                                backgroundColor: `${details.statusColor}10`
                               }}
                             >
-                              {config?.label || item.type}
+                              {details.label}
                             </Badge>
                             <span className="text-xs text-muted-foreground flex items-center gap-1 font-medium">
                               <Clock className="h-3 w-3" />
                               {formatRelativeTime(item.timestamp)}
                             </span>
                             {item.status && (
-                              <Badge variant="secondary" className="text-xs">
+                              <Badge
+                                variant="secondary"
+                                className={cn(
+                                  "text-xs",
+                                  item.status === 'active' && "bg-green-100 text-green-700",
+                                  item.status === 'logged_out' && "bg-gray-100 text-gray-600"
+                                )}
+                              >
                                 {item.status}
                               </Badge>
                             )}
                           </div>
                           <h4 className="font-semibold text-sm truncate mb-1">{item.title}</h4>
                           <p className="text-sm text-muted-foreground truncate mb-2">{item.subtitle}</p>
+
+                          {/* Answer value for Master Answers */}
+                          {item.answerValue && (
+                            <div className="mb-2 p-2 bg-blue-50 rounded-md border border-blue-100">
+                              <p className="text-xs text-blue-600 font-medium">Answer: {item.answerValue}</p>
+                            </div>
+                          )}
+
                           <div className="grid grid-cols-2 gap-2 text-xs mb-3">
                             {item.boothname && (
                               <div className="flex items-center gap-1.5 text-muted-foreground">
@@ -534,16 +949,10 @@ export const LiveBoothUpdates = () => {
                                 <span className="truncate">{item.respondent}</span>
                               </div>
                             )}
-                            {item.answerValue && (
-                              <div className="flex items-center gap-1.5 text-muted-foreground">
-                                <Activity className="h-3.5 w-3.5 flex-shrink-0" />
-                                <span className="truncate">{item.answerValue}</span>
-                              </div>
-                            )}
                           </div>
                           <div className="flex items-center justify-between pt-2 border-t border-muted/50">
                             <div className="text-xs text-muted-foreground">
-                              <span className="font-medium">{item.latitude.toFixed(4)}</span>, 
+                              <span className="font-medium">{item.latitude.toFixed(4)}</span>,
                               <span className="font-medium ml-1">{item.longitude.toFixed(4)}</span>
                             </div>
                             <a
@@ -554,7 +963,7 @@ export const LiveBoothUpdates = () => {
                               onClick={(e) => e.stopPropagation()}
                             >
                               <MapPin className="h-3 w-3" />
-                              View
+                              View in Maps
                             </a>
                           </div>
                         </div>

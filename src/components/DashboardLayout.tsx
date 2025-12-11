@@ -159,7 +159,7 @@ const AppSidebar = () => {
               <h1 className="text-xl font-bold text-primary truncate">
                 {dashboardTitles[user?.role as keyof typeof dashboardTitles] || 'Dashboard'}
               </h1>
-              <p className="text-xs text-muted-foreground mt-1 truncate">Management System</p>
+              <p className="text-xs text-foreground/70 mt-1 truncate">Management System</p>
             </div>
           )}
           {isCollapsed && (
@@ -199,13 +199,13 @@ const AppSidebar = () => {
           <div className={`p-3 bg-accent rounded-lg sidebar-user-info ${isCollapsed ? 'sidebar-collapsed' : ''}`}>
             {!isCollapsed ? (
               <>
-                <p className="text-sm font-medium truncate">{user?.name}</p>
-                <p className="text-xs text-muted-foreground truncate">{roleLabels[user?.role || 'L0']}</p>
+                <p className="text-sm font-semibold text-accent-foreground truncate">{user?.name}</p>
+                <p className="text-xs text-accent-foreground/80 truncate">{roleLabels[user?.role || 'L0']}</p>
                 {user?.aciName && (
-                  <p className="text-xs text-muted-foreground mt-1 truncate">{user.aciName}</p>
+                  <p className="text-xs text-accent-foreground/80 mt-1 truncate">{user.aciName}</p>
                 )}
                 {user?.assignedAC && (
-                  <p className="text-xs text-muted-foreground truncate">
+                  <p className="text-xs text-accent-foreground/80 truncate">
                     AC {user.assignedAC}
                   </p>
                 )}
@@ -213,8 +213,8 @@ const AppSidebar = () => {
             ) : (
               // Show compact user info when sidebar is collapsed
               <div className="flex flex-col items-center justify-center w-full">
-                <UserCircle className="h-5 w-5 mb-1 sidebar-icon flex-shrink-0" />
-                <span className="text-xs text-muted-foreground text-center truncate w-full">{user?.name?.charAt(0)}</span>
+                <UserCircle className="h-5 w-5 mb-1 sidebar-icon text-accent-foreground flex-shrink-0" />
+                <span className="text-xs text-accent-foreground/80 text-center truncate w-full">{user?.name?.charAt(0)}</span>
               </div>
             )}
           </div>
