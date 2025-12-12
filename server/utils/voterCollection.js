@@ -69,6 +69,24 @@ voterSchema.index({ mobile: 1 }, { sparse: true });
 voterSchema.index({ boothno: 1, 'name.english': 1 }); // Sort index for voter listing
 voterSchema.index({ familyId: 1, relationToHead: 1 }, { sparse: true }); // Family details
 
+// REPORT OPTIMIZATION INDEXES
+// Booth performance reports - grouping by boothname
+voterSchema.index({ boothname: 1 });
+// Demographics - age distribution queries
+voterSchema.index({ age: 1 });
+// Demographics - gender distribution queries
+voterSchema.index({ gender: 1 });
+// Booth performance - verified voters count
+voterSchema.index({ verified: 1 });
+// Compound: booth + gender for booth-filtered gender reports
+voterSchema.index({ boothname: 1, gender: 1 });
+// Compound: booth + age for booth-filtered age reports
+voterSchema.index({ boothname: 1, age: 1 });
+// Compound: booth + familyId for unique family counts per booth
+voterSchema.index({ boothname: 1, familyId: 1 });
+// Compound: booth + surveyed for booth-filtered survey status
+voterSchema.index({ boothname: 1, surveyed: 1 });
+
 // Cache for compiled models to avoid recompilation
 const modelCache = {};
 
