@@ -832,7 +832,6 @@ router.get("/:acId", async (req, res) => {
     const VoterModel = getVoterModel(acId);
 
     const voters = await VoterModel.find(query)
-      .select("name voterID familyId family_id booth_id boothname boothno mobile status age gender verified surveyed")
       .skip(skip)
       .limit(parseInt(limit))
       .sort({ boothno: 1, "name.english": 1 })
@@ -843,9 +842,11 @@ router.get("/:acId", async (req, res) => {
     const response = {
       voters: voters.map((voter) => {
         let voterName = "N/A";
+        let voterNameTamil = null;
         if (voter.name) {
           if (typeof voter.name === 'object' && voter.name !== null) {
             voterName = voter.name.english || voter.name.tamil || voter.name.value || "N/A";
+            voterNameTamil = voter.name.tamil || null;
           } else if (typeof voter.name === 'string') {
             voterName = voter.name;
           }
@@ -854,16 +855,39 @@ router.get("/:acId", async (req, res) => {
         return {
           id: voter._id,
           name: voterName,
+          nameTamil: voterNameTamil,
           voterId: voter.voterID || "N/A",
           familyId: voter.familyId || voter.family_id || "N/A",
           booth: voter.boothname || `Booth ${voter.boothno || "N/A"}`,
           boothNo: voter.boothno,
-          phone: voter.mobile ? `+91 ${voter.mobile}` : "N/A",
+          boothId: voter.booth_id,
+          phone: voter.mobile ? String(voter.mobile) : "N/A",
           status: voter.status || "Not Contacted",
           age: voter.age,
           gender: voter.gender,
           verified: voter.verified || false,
           surveyed: voter.surveyed ?? false,
+          // Additional fields
+          address: voter.address || null,
+          doorNumber: voter.doornumber || voter.Door_No || null,
+          fatherName: voter.fathername || null,
+          guardian: voter.guardian || null,
+          dob: voter.DOB || null,
+          email: voter.emailid || null,
+          aadhar: voter.aadhar || null,
+          pan: voter.pan || voter.PAN || null,
+          religion: voter.religion || null,
+          caste: voter.caste || null,
+          subcaste: voter.subcaste || null,
+          bloodGroup: voter.bloodgroup || null,
+          annualIncome: voter.annual_income || null,
+          aciId: voter.aci_id || null,
+          aciName: voter.aci_name || null,
+          boothAgentId: voter.booth_agent_id || null,
+          verifiedAt: voter.verifiedAt || null,
+          surveyedAt: voter.surveyedAt || null,
+          createdAt: voter.createdAt || null,
+          updatedAt: voter.updatedAt || null,
         };
       }),
       pagination: {
