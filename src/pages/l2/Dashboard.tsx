@@ -28,8 +28,8 @@ interface DashboardStats {
 export const L2Dashboard = () => {
   const { user } = useAuth();
   const fallbackAcIdentifier = "119";
+  // Use assignedAC (numeric ID) for API calls, not aciName (string name)
   const acIdentifier =
-    (user?.aciName && user.aciName.trim()) ||
     (user?.assignedAC !== undefined && user?.assignedAC !== null
       ? String(user.assignedAC)
       : fallbackAcIdentifier);
