@@ -1487,6 +1487,15 @@ router.get("/booths", isAuthenticated, canManageBooths, validateACAccess, async 
     // Determine the target AC for voter data aggregation
     const targetAC = ac ? parseInt(ac) : req.user.assignedAC;
 
+    // OPTIMIZATION: Cache booth list for AC (only when no search)
+    if (targetAC && !search) {
+      const cacheKey = `ac:${targetAC}:booths:page${pageNum}:limit${limitNum}`;
+      const cached = getCache(cacheKey, TTL.BOOTH_LIST);
+      if (cached) {
+        return res.json(cached);
+      }
+    }
+
     let booths = [];
 
     // Always aggregate booths from voter collections when AC is specified
@@ -1591,7 +1600,7 @@ router.get("/booths", isAuthenticated, canManageBooths, validateACAccess, async 
     const endIndex = startIndex + limitNum;
     const paginatedBooths = booths.slice(startIndex, endIndex);
 
-    res.json({
+    const response = {
       success: true,
       count: paginatedBooths.length,
       total: totalCount,
@@ -1604,7 +1613,15 @@ router.get("/booths", isAuthenticated, canManageBooths, validateACAccess, async 
         hasNextPage: pageNum < totalPages,
         hasPrevPage: pageNum > 1
       }
-    });
+    };
+
+    // OPTIMIZATION: Cache the response (only when no search)
+    if (targetAC && !search) {
+      const cacheKey = `ac:${targetAC}:booths:page${pageNum}:limit${limitNum}`;
+      setCache(cacheKey, response, TTL.BOOTH_LIST);
+    }
+
+    res.json(response);
   } catch (error) {
     console.error("Error fetching booths:", error);
     res.status(500).json({

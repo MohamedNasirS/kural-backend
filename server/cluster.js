@@ -25,7 +25,8 @@ const cpuCount = os.cpus().length;
 
 // Safe worker count calculation
 // Production: Fixed 2 workers (to share droplet resources with mobile app backend)
-// Development: Always 1 worker for simpler debugging
+// Development: 1 worker by default, or CLUSTER_WORKERS for load testing
+// For 1000 VU load testing, set CLUSTER_WORKERS=4 to use multiple cores
 const WORKERS = process.env.CLUSTER_WORKERS
   ? parseInt(process.env.CLUSTER_WORKERS, 10)
   : isProduction

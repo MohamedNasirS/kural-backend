@@ -199,8 +199,8 @@ app.use(notFoundHandler);
 // Global error handler (must be last)
 app.use(errorHandler);
 
-// Start server
-app.listen(PORT, () => {
+// Start server with keep-alive optimization for high concurrency
+const server = app.listen(PORT, () => {
   logger.info(
     {
       port: PORT,
@@ -211,6 +211,11 @@ app.listen(PORT, () => {
     `Server listening on port ${PORT}`
   );
 });
+
+// OPTIMIZATION: Configure HTTP keep-alive for better connection reuse under high load
+// Note: These settings can cause issues on Windows, so we only apply a subset
+server.keepAliveTimeout = 65000; // Slightly higher than typical load balancer timeout (60s)
+server.headersTimeout = 66000;   // Must be greater than keepAliveTimeout
 
 // Log successful startup
 logger.info({ pid: process.pid }, 'Server initialization complete');

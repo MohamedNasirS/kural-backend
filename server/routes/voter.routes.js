@@ -17,7 +17,7 @@ import {
   ALL_AC_IDS,
 } from "../utils/voterCollection.js";
 import { isAuthenticated, canAccessAC } from "../middleware/auth.js";
-import { getCache, setCache } from "../utils/cache.js";
+import { getCache, setCache, TTL } from "../utils/cache.js";
 
 const router = express.Router();
 
@@ -763,6 +763,17 @@ router.get("/:acId", async (req, res) => {
 
     const { booth, search, status, page = 1, limit = 50 } = req.query;
 
+    // OPTIMIZATION: Cache simple paginated queries (no filters)
+    const isSimpleQuery = !search && (!status || status === 'all') && (!booth || booth === 'all');
+    const cacheKey = isSimpleQuery ? `ac:${acId}:voters:page${page}:limit${limit}` : null;
+
+    if (cacheKey) {
+      const cached = getCache(cacheKey, TTL.SHORT); // 1 minute cache for voter lists
+      if (cached) {
+        return res.json(cached);
+      }
+    }
+
     const queryClauses = [];
 
     if (booth && booth !== "all") {
@@ -829,7 +840,7 @@ router.get("/:acId", async (req, res) => {
 
     const totalVoters = await VoterModel.countDocuments(query);
 
-    return res.json({
+    const response = {
       voters: voters.map((voter) => {
         let voterName = "N/A";
         if (voter.name) {
@@ -861,7 +872,14 @@ router.get("/:acId", async (req, res) => {
         total: totalVoters,
         pages: Math.ceil(totalVoters / parseInt(limit)),
       },
-    });
+    };
+
+    // OPTIMIZATION: Cache the response for simple queries
+    if (cacheKey) {
+      setCache(cacheKey, response, TTL.SHORT);
+    }
+
+    return res.json(response);
   } catch (error) {
     console.error("Error fetching voters:", error);
     return res.status(500).json({ message: "Failed to fetch voters" });

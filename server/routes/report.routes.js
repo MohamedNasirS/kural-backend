@@ -4,6 +4,7 @@ import { connectToDatabase } from "../config/database.js";
 import { getVoterModel } from "../utils/voterCollection.js";
 import { aggregateSurveyResponses } from "../utils/surveyResponseCollection.js";
 import { isAuthenticated, canAccessAC } from "../middleware/auth.js";
+import { getCache, setCache, TTL } from "../utils/cache.js";
 
 const router = express.Router();
 
@@ -28,6 +29,15 @@ router.get("/:acId/booth-performance", async (req, res) => {
         success: false,
         message: "Access denied. You do not have permission to view this AC's data."
       });
+    }
+
+    // OPTIMIZATION: Cache booth performance reports (only when no booth filter)
+    const cacheKey = booth && booth !== 'all'
+      ? `ac:${acId}:report:booth-performance:${booth}`
+      : `ac:${acId}:report:booth-performance`;
+    const cached = getCache(cacheKey, TTL.SURVEY_FORMS);
+    if (cached) {
+      return res.json(cached);
     }
 
     const matchQuery = {};
@@ -102,7 +112,7 @@ router.get("/:acId/booth-performance", async (req, res) => {
 
     const familyMap = new Map(familiesByBooth.map(f => [f._id, f.total_families]));
 
-    return res.json({
+    const response = {
       reports: boothPerformance.map(booth => ({
         // Booth identification fields
         booth: booth._id.boothname || `Booth ${booth._id.boothno}`,
@@ -122,7 +132,12 @@ router.get("/:acId/booth-performance", async (req, res) => {
           ? Math.round(((surveyMap.get(booth._id.boothname) || surveyMap.get(booth._id.booth_id) || 0) / booth.total_voters) * 100)
           : 0
       }))
-    });
+    };
+
+    // OPTIMIZATION: Cache the response
+    setCache(cacheKey, response, TTL.SURVEY_FORMS);
+
+    return res.json(response);
 
   } catch (error) {
     console.error("Error fetching booth performance:", error);
@@ -148,6 +163,15 @@ router.get("/:acId/demographics", async (req, res) => {
         success: false,
         message: "Access denied. You do not have permission to view this AC's data."
       });
+    }
+
+    // OPTIMIZATION: Cache demographics reports
+    const cacheKey = booth && booth !== 'all'
+      ? `ac:${acId}:report:demographics:${booth}`
+      : `ac:${acId}:report:demographics`;
+    const cached = getCache(cacheKey, TTL.SURVEY_FORMS);
+    if (cached) {
+      return res.json(cached);
     }
 
     const matchQuery = { age: { $exists: true, $ne: null } };
@@ -230,11 +254,16 @@ router.get("/:acId/demographics", async (req, res) => {
       notSurveyed: surveyedStatus.find(s => s._id === false)?.count || 0
     };
 
-    return res.json({
+    const response = {
       ageDistribution: formattedAgeData,
       genderDistribution: genderData,
       surveyStatus: surveyData
-    });
+    };
+
+    // OPTIMIZATION: Cache the response
+    setCache(cacheKey, response, TTL.SURVEY_FORMS);
+
+    return res.json(response);
 
   } catch (error) {
     console.error("Error fetching demographics:", error);

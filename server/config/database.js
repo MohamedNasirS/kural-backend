@@ -11,19 +11,19 @@ const dbLogger = logger.child({ component: 'MongoDB' });
 
 let indexFixAttempted = false;
 
-// Optimized MongoDB connection options for high-scale
+// Optimized MongoDB connection options for high-scale (1000+ concurrent users)
 const MONGO_OPTIONS = {
-  // Connection pool settings - increase for high concurrency
-  maxPoolSize: 100,              // Max connections in pool (default: 100)
-  minPoolSize: 10,               // Keep minimum connections ready
+  // Connection pool settings - increased for 1000 VU support
+  maxPoolSize: 200,              // Max connections in pool (increased from 100)
+  minPoolSize: 20,               // Keep minimum connections ready (increased from 10)
 
-  // Timeout settings
-  serverSelectionTimeoutMS: 5000, // How long to try selecting a server
-  socketTimeoutMS: 45000,        // How long socket can be inactive
+  // Timeout settings - optimized for high load
+  serverSelectionTimeoutMS: 10000, // Increased for high load scenarios
+  socketTimeoutMS: 60000,         // Increased socket timeout
 
   // Connection behavior
-  maxIdleTimeMS: 30000,          // Close idle connections after 30s
-  waitQueueTimeoutMS: 10000,     // How long to wait for connection from pool
+  maxIdleTimeMS: 60000,          // Keep connections longer (60s)
+  waitQueueTimeoutMS: 15000,     // Increased wait time for busy periods
 
   // Read/Write concerns
   retryWrites: true,             // Retry failed writes
@@ -31,6 +31,9 @@ const MONGO_OPTIONS = {
 
   // Compression for network efficiency
   compressors: ['zlib'],
+
+  // Connection optimization
+  maxConnecting: 10,             // Max concurrent connection attempts
 };
 
 export async function connectToDatabase() {
