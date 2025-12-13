@@ -18,6 +18,7 @@ import {
 } from "../utils/voterCollection.js";
 import { isAuthenticated, canAccessAC } from "../middleware/auth.js";
 import { getCache, setCache, TTL } from "../utils/cache.js";
+import { getPrecomputedStats } from "../utils/precomputedStats.js";
 
 const router = express.Router();
 
@@ -763,12 +764,12 @@ router.get("/:acId", async (req, res) => {
 
     const { booth, search, status, page = 1, limit = 50 } = req.query;
 
-    // OPTIMIZATION: Cache simple paginated queries (no filters)
+    // OPTIMIZATION: Cache simple paginated queries (no filters) - increased TTL for better performance
     const isSimpleQuery = !search && (!status || status === 'all') && (!booth || booth === 'all');
     const cacheKey = isSimpleQuery ? `ac:${acId}:voters:page${page}:limit${limit}` : null;
 
     if (cacheKey) {
-      const cached = getCache(cacheKey, TTL.SHORT); // 1 minute cache for voter lists
+      const cached = getCache(cacheKey, TTL.MEDIUM); // 5 minute cache for voter lists (was 1 min)
       if (cached) {
         return res.json(cached);
       }
@@ -837,7 +838,26 @@ router.get("/:acId", async (req, res) => {
       .sort({ boothno: 1, "name.english": 1 })
       .lean();
 
-    const totalVoters = await VoterModel.countDocuments(query);
+    // OPTIMIZATION: Use precomputed stats for total count on simple queries (avoids full collection scan)
+    let totalVoters;
+    if (isSimpleQuery) {
+      // Try precomputed stats first (fast - single document read)
+      const precomputed = await getPrecomputedStats(acId, 10 * 60 * 1000); // 10 min max age
+      if (precomputed && precomputed.totalMembers) {
+        totalVoters = precomputed.totalMembers;
+      } else {
+        // Fallback to count with separate caching
+        const countCacheKey = `ac:${acId}:voters:total`;
+        totalVoters = getCache(countCacheKey, TTL.MEDIUM);
+        if (!totalVoters) {
+          totalVoters = await VoterModel.countDocuments({});
+          setCache(countCacheKey, totalVoters, TTL.MEDIUM);
+        }
+      }
+    } else {
+      // Filtered queries need actual count
+      totalVoters = await VoterModel.countDocuments(query);
+    }
 
     const response = {
       voters: voters.map((voter) => {
@@ -898,9 +918,9 @@ router.get("/:acId", async (req, res) => {
       },
     };
 
-    // OPTIMIZATION: Cache the response for simple queries
+    // OPTIMIZATION: Cache the response for simple queries (5 min TTL)
     if (cacheKey) {
-      setCache(cacheKey, response, TTL.SHORT);
+      setCache(cacheKey, response, TTL.MEDIUM);
     }
 
     return res.json(response);

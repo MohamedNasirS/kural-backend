@@ -22,158 +22,140 @@ import {
 import { isAuthenticated, canAccessAC } from "../middleware/auth.js";
 import { getCache, setCache, cacheKeys, TTL } from "../utils/cache.js";
 import { AC_NAMES, normalizeLocation } from "../utils/universalAdapter.js";
+import { getPrecomputedStats, computeStatsForAC, savePrecomputedStats } from "../utils/precomputedStats.js";
 
 const router = express.Router();
 
 // Apply authentication to all routes
 router.use(isAuthenticated);
 
-// Dashboard Statistics API
+// Dashboard Statistics API - OPTIMIZED with pre-computed stats
+// This version reads from pre-computed stats collection instead of running heavy aggregations
+// Pre-computed stats are refreshed by background job every 5 minutes
 router.get("/stats/:acId", async (req, res) => {
   try {
     await connectToDatabase();
 
     const rawIdentifier = req.params.acId ?? req.query.aciName ?? req.query.acName;
-    const acQuery = buildAcQuery(rawIdentifier);
 
-    // Try to get from cache first (for numeric AC IDs)
+    // Parse AC ID
     const numericAcId = Number(rawIdentifier);
-    if (Number.isFinite(numericAcId)) {
-      const cacheKey = cacheKeys.dashboardStats(numericAcId);
-      const cachedStats = getCache(cacheKey, TTL.DASHBOARD_STATS);
-      if (cachedStats) {
-        // Verify user has access before returning cached data
-        if (canAccessAC(req.user, numericAcId)) {
-          return res.json(cachedStats);
-        }
-      }
+    if (!Number.isFinite(numericAcId)) {
+      return res.status(400).json({ message: "Invalid AC identifier - must be numeric" });
     }
 
-    if (!acQuery) {
-      return res.status(400).json({ message: "Invalid AC identifier" });
-    }
+    const acId = numericAcId;
 
-    const identifierString =
-      typeof rawIdentifier === "string" ? rawIdentifier.trim() : "";
-    const numericFromIdentifier = Number(
-      identifierString || (typeof rawIdentifier === "number" ? rawIdentifier : NaN),
-    );
-    const hasNumericIdentifier = Number.isFinite(numericFromIdentifier);
-
-    // Use the AC-specific voter collection - we need a numeric AC ID
-    let acId;
-    if (hasNumericIdentifier) {
-      acId = numericFromIdentifier;
-
-      // AC Isolation: Check if user can access this AC
-      if (!canAccessAC(req.user, acId)) {
-        return res.status(403).json({
-          success: false,
-          message: "Access denied. You do not have permission to view this AC's data."
-        });
-      }
-    } else {
-      // For name-based lookup, we need to search across collections to find the AC ID
-      const voterResult = await findOneVoter({
-        $or: [
-          { aci_name: new RegExp(`^${identifierString}$`, 'i') },
-          { ac_name: new RegExp(`^${identifierString}$`, 'i') }
-        ]
+    // AC Isolation: Check if user can access this AC
+    if (!canAccessAC(req.user, acId)) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied. You do not have permission to view this AC's data."
       });
-      if (voterResult && voterResult.voter) {
-        acId = voterResult.voter.aci_id || voterResult.voter.aci_num;
-      }
-      if (!acId) {
-        return res.status(400).json({ message: `AC not found: ${identifierString}` });
-      }
     }
+
+    // OPTIMIZATION: Try to get pre-computed stats first (fast path)
+    // This avoids running heavy aggregations on every request
+    const precomputed = await getPrecomputedStats(acId, 10 * 60 * 1000); // 10 min max age
+
+    if (precomputed && !precomputed.isStale) {
+      // Return pre-computed stats (fast - single document read)
+      const responseData = {
+        acIdentifier: precomputed.acName || String(acId),
+        acId: acId,
+        acName: precomputed.acName || AC_NAMES[acId] || null,
+        acNumber: acId,
+        totalFamilies: precomputed.totalFamilies,
+        totalMembers: precomputed.totalMembers,
+        surveysCompleted: precomputed.surveysCompleted,
+        totalBooths: precomputed.totalBooths,
+        boothStats: precomputed.boothStats || [],
+        _source: 'precomputed',
+        _computedAt: precomputed.computedAt
+      };
+      return res.json(responseData);
+    }
+
+    // FALLBACK: Compute stats if pre-computed not available or stale
+    // This path should rarely be hit once background job is running
+    console.log(`[Dashboard] Computing stats for AC ${acId} (precomputed ${precomputed ? 'stale' : 'missing'})`);
+
     const VoterModel = getVoterModel(acId);
 
+    // Get AC metadata
     const acMeta = await VoterModel.findOne({}, {
       aci_name: 1,
       ac_name: 1,
       aci_num: 1,
       aci_id: 1,
-    })
-      .lean()
-      .exec();
+    }).lean().exec();
 
-    // Use AC_NAMES from universal adapter as fallback for consistent naming
-    const acName =
-      acMeta?.aci_name ??
-      acMeta?.ac_name ??
-      AC_NAMES[acId] ??
-      (identifierString && !hasNumericIdentifier ? identifierString : null);
-    const acNumber =
-      acMeta?.aci_num ??
-      acMeta?.aci_id ??
-      (hasNumericIdentifier ? numericFromIdentifier : null);
+    const acName = acMeta?.aci_name ?? acMeta?.ac_name ?? AC_NAMES[acId] ?? null;
 
-    // Get total members (voters) for this AC - use sharded collection
-    const totalMembers = await countVoters(acId, {});
-
-    // Get unique families by counting distinct familyId values
-    const familiesAggregation = await aggregateVoters(acId, [
-      { $match: {} },
-      {
-        $group: {
-          _id: "$familyId",
+    // Run aggregations (this is the slow path)
+    const [totalMembers, surveysCompleted, familiesAggregation, boothsAggregation, boothStats] = await Promise.all([
+      countVoters(acId, {}),
+      countVoters(acId, { surveyed: true }),
+      aggregateVoters(acId, [
+        { $match: { familyId: { $exists: true, $ne: null } } },
+        { $group: { _id: "$familyId" } },
+        { $count: "total" }
+      ]),
+      aggregateVoters(acId, [
+        { $match: { booth_id: { $exists: true, $ne: null } } },
+        { $group: { _id: "$booth_id" } },
+        { $count: "total" }
+      ]),
+      aggregateVoters(acId, [
+        { $match: {} },
+        {
+          $group: {
+            _id: "$boothname",
+            boothno: { $first: "$boothno" },
+            booth_id: { $first: "$booth_id" },
+            voters: { $sum: 1 }
+          }
         },
-      },
-      { $count: "total" },
+        { $sort: { boothno: 1 } }
+      ])
     ]);
-    const totalFamilies = familiesAggregation.length > 0 ? familiesAggregation[0].total : 0;
 
-    // Surveys Completed: Count all members who have surveyed: true
-    const surveysCompleted = await countVoters(acId, { surveyed: true });
-
-    // Get unique booths for this AC - group by booth_id for accuracy
-    const boothsAggregation = await aggregateVoters(acId, [
-      { $match: {} },
-      { $group: { _id: "$booth_id" } },
-      { $count: "total" },
-    ]);
-    const totalBooths = boothsAggregation.length > 0 ? boothsAggregation[0].total : 0;
-
-    // Get booth-wise data - group by booth_id only to avoid duplicates
-    // Removed $limit to return ALL booths for the AC
-    const boothStats = await aggregateVoters(acId, [
-      { $match: {} },
-      {
-        $group: {
-          _id: "$boothname",
-          boothno: { $first: "$boothno" },
-          booth_id: { $first: "$booth_id" },
-          voters: { $sum: 1 },
-        },
-      },
-      { $sort: { boothno: 1 } },
-    ]);
+    const totalFamilies = familiesAggregation[0]?.total || 0;
+    const totalBooths = boothsAggregation[0]?.total || 0;
 
     const responseData = {
-      acIdentifier:
-        (acName ?? (hasNumericIdentifier ? String(numericFromIdentifier) : identifierString)) ||
-        null,
-      acId: hasNumericIdentifier ? numericFromIdentifier : acNumber ?? null,
-      acName: acName ?? null,
-      acNumber: acNumber ?? null,
-      totalFamilies,      // Total Families
-      totalMembers,       // Total Members (voters)
-      surveysCompleted,   // Families with all members surveyed
-      totalBooths,        // Total Booths
+      acIdentifier: acName || String(acId),
+      acId: acId,
+      acName: acName,
+      acNumber: acId,
+      totalFamilies,
+      totalMembers,
+      surveysCompleted,
+      totalBooths,
       boothStats: boothStats.map((booth) => ({
         boothNo: booth.boothno,
-        boothName: booth._id,  // _id contains boothname from the $group stage
+        boothName: booth._id,
         boothId: booth.booth_id,
         voters: booth.voters,
       })),
+      _source: 'realtime'
     };
 
-    // Cache the response for future requests (5 minute TTL)
-    if (acId && Number.isFinite(acId)) {
-      const cacheKey = cacheKeys.dashboardStats(acId);
-      setCache(cacheKey, responseData, TTL.DASHBOARD_STATS);
-    }
+    // Save to pre-computed stats collection for next request (async, don't wait)
+    savePrecomputedStats({
+      acId,
+      acName,
+      totalMembers,
+      totalFamilies,
+      totalBooths,
+      surveysCompleted,
+      boothStats: responseData.boothStats,
+      computedAt: new Date()
+    }).catch(err => console.error(`[Dashboard] Failed to save precomputed stats: ${err.message}`));
+
+    // Also cache in memory for immediate subsequent requests
+    const cacheKey = cacheKeys.dashboardStats(acId);
+    setCache(cacheKey, responseData, TTL.DASHBOARD_STATS);
 
     return res.json(responseData);
   } catch (error) {

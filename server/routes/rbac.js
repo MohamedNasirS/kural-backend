@@ -50,6 +50,7 @@ import {
   canAccessAC,
 } from "../middleware/auth.js";
 import { getCache, setCache, TTL, cacheKeys } from "../utils/cache.js";
+import { getPrecomputedStats, getAllPrecomputedStats } from "../utils/precomputedStats.js";
 
 const router = express.Router();
 
@@ -180,9 +181,17 @@ const aggregateCountsByMonth = async (model, baseMatch, buckets, dateField = "cr
 };
 
 // Aggregate voter counts using AC-specific collections
+// OPTIMIZATION: Skip heavy cross-AC aggregation for L0 users to prevent 100% CPU
 const aggregateVoterCountsByMonth = async (assignedAC, buckets, dateField = "createdAt") => {
   if (buckets.length === 0) {
     return [];
+  }
+
+  // OPTIMIZATION: For L0 users (all ACs), skip this heavy aggregation
+  // Monthly voter trends are not critical - main stats are precomputed
+  if (assignedAC === null) {
+    console.log('[Dashboard Analytics] Skipping heavy voter aggregation for L0 user');
+    return buckets.map(() => 0); // Return zeros - this data is non-critical
   }
 
   const matchStage = {
@@ -207,18 +216,13 @@ const aggregateVoterCountsByMonth = async (assignedAC, buckets, dateField = "cre
 
   let results = [];
   try {
-    if (assignedAC !== null) {
-      // Query specific AC collection
-      results = await aggregateVoters(assignedAC, pipeline);
-    } else {
-      // Query all AC collections
-      results = await aggregateAllVoters(pipeline);
-    }
+    // Only query single AC collection (L1/L2 users)
+    results = await aggregateVoters(assignedAC, pipeline);
   } catch (error) {
     console.error("Error aggregating voter counts:", error);
   }
 
-  // Merge results from all collections (for L0)
+  // Merge results
   const lookup = new Map();
   results.forEach((item) => {
     const key = `${item._id.year}-${item._id.month}`;
@@ -287,15 +291,16 @@ const buildDashboardAnalytics = async ({ assignedAC, totalBooths, boothsActive }
 
   let surveyResponses = [];
   try {
-    // Use AC-specific collection if assignedAC is set, otherwise query all AC collections
+    // Use AC-specific collection if assignedAC is set, otherwise skip for L0
+    // OPTIMIZATION: Skip heavy cross-AC survey response query for L0 users
     if (assignedAC !== null) {
       surveyResponses = await querySurveyResponses(assignedAC, surveyResponseDateFilter, {
         select: { createdAt: 1, submittedAt: 1, updatedAt: 1, status: 1 }
       });
     } else {
-      surveyResponses = await queryAllSurveyResponses(surveyResponseDateFilter, {
-        select: { createdAt: 1, submittedAt: 1, updatedAt: 1, status: 1 }
-      });
+      // L0 user: Skip heavy queryAllSurveyResponses to prevent CPU spike
+      console.log('[Dashboard Analytics] Skipping heavy survey response query for L0 user');
+      surveyResponses = []; // Return empty - weekly distribution will show zeros
     }
   } catch (error) {
     if (!isNamespaceMissingError(error)) {
@@ -1517,21 +1522,40 @@ router.get("/booths", isAuthenticated, canManageBooths, validateACAccess, async 
     // Always aggregate booths from voter collections when AC is specified
     if (targetAC) {
       try {
-        // Aggregate booth data from voter_{AC_ID} collection
-        const voterBooths = await aggregateVoters(targetAC, [
-          { $match: {} },
-          {
-            $group: {
-              _id: "$booth_id",
-              boothno: { $first: "$boothno" },
-              boothname: { $first: "$boothname" },
-              aci_id: { $first: "$aci_id" },
-              aci_name: { $first: "$aci_name" },
-              totalVoters: { $sum: 1 }
-            }
-          },
-          { $sort: { boothno: 1 } }
-        ]);
+        // OPTIMIZATION: Try to use precomputed stats first (fast path)
+        // This avoids running heavy aggregations on 3-5 lakh documents
+        let voterBooths = null;
+
+        const precomputed = await getPrecomputedStats(targetAC, 60 * 60 * 1000); // 1 hour max age for booth list
+        if (precomputed && precomputed.boothStats && precomputed.boothStats.length > 0) {
+          // Use precomputed booth stats (fast - single document read)
+          voterBooths = precomputed.boothStats.map(b => ({
+            _id: b.boothId,
+            boothno: b.boothNo,
+            boothname: b.boothName,
+            aci_id: targetAC,
+            aci_name: precomputed.acName,
+            totalVoters: b.voters
+          }));
+          console.log(`[RBAC Booths] Using precomputed stats for AC ${targetAC} (${voterBooths.length} booths)`);
+        } else {
+          // FALLBACK: Aggregate from voter collection (slow path - should rarely happen)
+          console.log(`[RBAC Booths] Precomputed stats not available for AC ${targetAC}, using aggregation`);
+          voterBooths = await aggregateVoters(targetAC, [
+            { $match: {} },
+            {
+              $group: {
+                _id: "$booth_id",
+                boothno: { $first: "$boothno" },
+                boothname: { $first: "$boothname" },
+                aci_id: { $first: "$aci_id" },
+                aci_name: { $first: "$aci_name" },
+                totalVoters: { $sum: 1 }
+              }
+            },
+            { $sort: { boothno: 1 } }
+          ]);
+        }
 
         // Get booth agents for this AC from users collection
         const boothAgentMap = {};
@@ -2346,40 +2370,7 @@ router.get("/dashboard/ac-overview", isAuthenticated, async (req, res) => {
       return res.json(cached);
     }
 
-    // Aggregation pipeline for voter stats including families and booths
-    const aggregationPipeline = [
-      {
-        $group: {
-          _id: { acId: "$aci_id", acName: "$aci_name" },
-          totalMembers: { $sum: 1 },
-          surveyedMembers: {
-            $sum: {
-              $cond: [
-                { $eq: ["$surveyed", true] },
-                1,
-                0,
-              ],
-            },
-          },
-          // Count unique families (using familyId - camelCase field)
-          uniqueFamilies: { $addToSet: "$familyId" },
-          // Count unique booths
-          uniqueBooths: { $addToSet: "$booth_id" },
-        },
-      },
-      {
-        $project: {
-          _id: 1,
-          totalMembers: 1,
-          surveyedMembers: 1,
-          families: { $size: "$uniqueFamilies" },
-          booths: { $size: "$uniqueBooths" },
-        },
-      },
-      { $sort: { "_id.acId": 1 } },
-    ];
-
-    // Parallelize voter aggregation and user query
+    // User query is always needed (small collection, fast)
     const userMatch = {
       isActive: { $ne: false },
       role: { $in: ["L1", "L2", "Booth Agent", "BoothAgent"] },
@@ -2388,12 +2379,68 @@ router.get("/dashboard/ac-overview", isAuthenticated, async (req, res) => {
       userMatch.assignedAC = limitToAc;
     }
 
-    const [voterAggregation, users] = await Promise.all([
-      limitToAc !== null
-        ? aggregateVoters(limitToAc, aggregationPipeline)
-        : aggregateAllVoters(aggregationPipeline),
-      User.find(userMatch).select("role assignedAC").lean()
-    ]);
+    let voterAggregation;
+
+    if (limitToAc === null) {
+      // L0 user: Use precomputed stats (FAST - no heavy aggregation)
+      const [allPrecomputed, users] = await Promise.all([
+        getAllPrecomputedStats(),
+        User.find(userMatch).select("role assignedAC").lean()
+      ]);
+
+      // Transform precomputed stats to match expected format
+      voterAggregation = allPrecomputed.map(stat => ({
+        _id: { acId: stat.acId, acName: stat.acName },
+        totalMembers: stat.totalMembers || 0,
+        surveyedMembers: stat.surveysCompleted || 0,
+        families: stat.totalFamilies || 0,
+        booths: stat.totalBooths || 0,
+      }));
+
+      // Process users outside the parallel block
+      var usersData = users;
+    } else {
+      // L1/L2 user: Run aggregation on single AC (acceptable)
+      const aggregationPipeline = [
+        {
+          $group: {
+            _id: { acId: "$aci_id", acName: "$aci_name" },
+            totalMembers: { $sum: 1 },
+            surveyedMembers: {
+              $sum: {
+                $cond: [
+                  { $eq: ["$surveyed", true] },
+                  1,
+                  0,
+                ],
+              },
+            },
+            uniqueFamilies: { $addToSet: "$familyId" },
+            uniqueBooths: { $addToSet: "$booth_id" },
+          },
+        },
+        {
+          $project: {
+            _id: 1,
+            totalMembers: 1,
+            surveyedMembers: 1,
+            families: { $size: "$uniqueFamilies" },
+            booths: { $size: "$uniqueBooths" },
+          },
+        },
+        { $sort: { "_id.acId": 1 } },
+      ];
+
+      const [aggregationResult, users] = await Promise.all([
+        aggregateVoters(limitToAc, aggregationPipeline),
+        User.find(userMatch).select("role assignedAC").lean()
+      ]);
+
+      voterAggregation = aggregationResult;
+      var usersData = users;
+    }
+
+    const users = usersData;
 
     const perAcUserCounts = new Map();
     const roleTotals = {

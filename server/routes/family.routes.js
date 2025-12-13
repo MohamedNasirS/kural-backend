@@ -3,6 +3,7 @@ import { connectToDatabase } from "../config/database.js";
 import { getVoterModel, aggregateVoters } from "../utils/voterCollection.js";
 import { isAuthenticated, canAccessAC } from "../middleware/auth.js";
 import { getCache, setCache, TTL, cacheKeys } from "../utils/cache.js";
+import { getPrecomputedStats } from "../utils/precomputedStats.js";
 
 const router = express.Router();
 

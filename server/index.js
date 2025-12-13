@@ -53,6 +53,10 @@ import {
 // Import route registrar
 import { registerRoutes } from "./routes/index.js";
 
+// Import pre-computed stats for background job
+import { startStatsComputeJob } from "./utils/precomputedStats.js";
+import { connectToDatabase } from "./config/database.js";
+
 logger.info({ pid: process.pid }, 'Starting server initialization');
 
 const app = express();
@@ -219,3 +223,25 @@ server.headersTimeout = 66000;   // Must be greater than keepAliveTimeout
 
 // Log successful startup
 logger.info({ pid: process.pid }, 'Server initialization complete');
+
+// Start background job to pre-compute dashboard stats every 5 minutes
+// This dramatically reduces MongoDB CPU load by avoiding heavy aggregations on each request
+// Only start in primary worker (or non-cluster mode) to avoid duplicate computation
+const isClusterWorker = process.env.NODE_CLUSTER_ID !== undefined;
+const isPrimaryWorker = !isClusterWorker || process.env.NODE_CLUSTER_ID === '1';
+
+if (isPrimaryWorker) {
+  // Delay stats computation to allow server to fully initialize
+  setTimeout(async () => {
+    try {
+      // Ensure database connection is established before starting stats job
+      await connectToDatabase();
+      logger.info({ pid: process.pid }, 'Starting pre-computed stats background job');
+      startStatsComputeJob(5 * 60 * 1000); // Every 5 minutes
+    } catch (err) {
+      logger.error({ error: err.message }, 'Failed to start stats background job');
+    }
+  }, 10000); // Wait 10 seconds after startup
+} else {
+  logger.info({ pid: process.pid }, 'Skipping stats job (not primary worker)');
+}

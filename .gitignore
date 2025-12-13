@@ -174,3 +174,6 @@ project_audit_report_v2.md
 backend_final_report.md
 docs/backend_final_report.md
 docs/backend_logging_validation_report.md
+k6/
+scripts/
+excel/
