@@ -6,13 +6,14 @@
  * - Social Media Sentiment breakdown
  * - Competitor mentions table
  *
- * Data is fetched from the analytics API (localhost:8000)
- * filtered by the MLA's assigned AC as location_id
+ * Data is fetched from the production analytics API (kural.digital)
+ * Currently shows state-wide aggregated data (All Constituencies)
  */
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import {
   Select,
   SelectContent,
@@ -37,17 +38,17 @@ import {
   Tooltip,
 } from 'recharts';
 
-// Social Media Analytics interfaces
+// Social Media Analytics interfaces (production API format)
 interface ShareOfVoiceData {
   success: boolean;
   data: {
-    share_of_voice: Array<{
+    items: Array<{
       competitor_id: number;
       competitor_name: string;
       mention_count: number;
-      share_percent: number;
-      avg_sentiment: number;
+      percentage: number;
     }>;
+    total_mentions: number;
   };
 }
 
@@ -121,7 +122,7 @@ export default function MLASocialMedia() {
     fetchSocialData();
   }, [acId, socialTimeRange]);
 
-  const hasData = shareOfVoice?.data?.share_of_voice?.length || socialSentiment?.data;
+  const hasData = shareOfVoice?.data?.items?.length || socialSentiment?.data;
 
   if (loading) {
     return <div className="text-center py-8">Loading social media analytics...</div>;
@@ -133,7 +134,10 @@ export default function MLASocialMedia() {
       <Card>
         <CardHeader className="pb-3">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-            <CardTitle className="text-lg">Social Media Analytics</CardTitle>
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-lg">Social Media Analytics</CardTitle>
+              <Badge variant="secondary" className="text-xs">All Constituencies</Badge>
+            </div>
             <Select value={socialTimeRange} onValueChange={setSocialTimeRange}>
               <SelectTrigger className="w-[120px]">
                 <SelectValue />
@@ -146,7 +150,7 @@ export default function MLASocialMedia() {
             </Select>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
-            Track competitor mentions and sentiment across social media platforms for AC {acId}
+            Track competitor mentions and sentiment across social media platforms (state-wide aggregated data)
           </p>
         </CardHeader>
       </Card>
@@ -158,7 +162,7 @@ export default function MLASocialMedia() {
               <span className="text-yellow-600 text-sm">{error}</span>
             </div>
             <p className="text-xs text-yellow-500 mt-1">
-              The analytics API should be running at localhost:8000. Please contact the administrator.
+              Please contact the administrator if this issue persists.
             </p>
           </CardContent>
         </Card>
@@ -169,7 +173,7 @@ export default function MLASocialMedia() {
           {/* Charts Grid */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Share of Voice Chart */}
-            {shareOfVoice?.data?.share_of_voice?.length > 0 && (
+            {shareOfVoice?.data?.items?.length > 0 && (
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Share of Voice</CardTitle>
@@ -181,10 +185,10 @@ export default function MLASocialMedia() {
                   <ResponsiveContainer width="100%" height={250}>
                     <PieChart>
                       <Pie
-                        data={shareOfVoice.data.share_of_voice.map((item, idx) => ({
+                        data={shareOfVoice.data.items.map((item, idx) => ({
                           name: item.competitor_name,
                           value: item.mention_count,
-                          percent: item.share_percent,
+                          percent: item.percentage,
                           color: SHARE_OF_VOICE_COLORS[idx % SHARE_OF_VOICE_COLORS.length],
                         }))}
                         cx="50%"
@@ -195,7 +199,7 @@ export default function MLASocialMedia() {
                         label={false}
                         labelLine={false}
                       >
-                        {shareOfVoice.data.share_of_voice.map((_, idx) => (
+                        {shareOfVoice.data.items.map((_, idx) => (
                           <Cell key={`cell-${idx}`} fill={SHARE_OF_VOICE_COLORS[idx % SHARE_OF_VOICE_COLORS.length]} />
                         ))}
                       </Pie>
@@ -281,7 +285,7 @@ export default function MLASocialMedia() {
           </div>
 
           {/* Competitor Mentions Table */}
-          {shareOfVoice?.data?.share_of_voice?.length > 0 && (
+          {shareOfVoice?.data?.items?.length > 0 && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Competitor Mentions Details</CardTitle>
@@ -293,11 +297,10 @@ export default function MLASocialMedia() {
                       <TableHead>Competitor</TableHead>
                       <TableHead className="text-right">Mentions</TableHead>
                       <TableHead className="text-right">Share %</TableHead>
-                      <TableHead className="text-right">Avg Sentiment</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {shareOfVoice.data.share_of_voice.map((item, idx) => (
+                    {shareOfVoice.data.items.map((item, idx) => (
                       <TableRow key={item.competitor_id}>
                         <TableCell className="font-medium">
                           <div className="flex items-center gap-2">
@@ -309,20 +312,7 @@ export default function MLASocialMedia() {
                           </div>
                         </TableCell>
                         <TableCell className="text-right">{item.mention_count.toLocaleString()}</TableCell>
-                        <TableCell className="text-right">{item.share_percent}%</TableCell>
-                        <TableCell className="text-right">
-                          <span
-                            className={`px-2 py-1 rounded text-xs ${
-                              item.avg_sentiment > 0
-                                ? 'bg-green-100 text-green-800'
-                                : item.avg_sentiment < 0
-                                ? 'bg-red-100 text-red-800'
-                                : 'bg-gray-100 text-gray-800'
-                            }`}
-                          >
-                            {item.avg_sentiment > 0 ? '+' : ''}{item.avg_sentiment.toFixed(2)}
-                          </span>
-                        </TableCell>
+                        <TableCell className="text-right">{item.percentage}%</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

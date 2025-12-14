@@ -91,17 +91,17 @@ interface HistoricalTrends {
   leadingSummary: string;
 }
 
-// Social Media Analytics interfaces
+// Social Media Analytics interfaces (production API format)
 interface ShareOfVoiceData {
   success: boolean;
   data: {
-    share_of_voice: Array<{
+    items: Array<{
       competitor_id: number;
       competitor_name: string;
       mention_count: number;
-      share_percent: number;
-      avg_sentiment: number;
+      percentage: number;
     }>;
+    total_mentions: number;
   };
 }
 
@@ -558,7 +558,7 @@ export default function MLADashboard() {
       )}
 
       {/* Social Media Analytics Section */}
-      {(shareOfVoice?.data?.share_of_voice?.length || socialSentiment?.data) && (
+      {(shareOfVoice?.data?.items?.length || socialSentiment?.data) && (
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -583,16 +583,16 @@ export default function MLADashboard() {
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Share of Voice Chart */}
-              {shareOfVoice?.data?.share_of_voice?.length > 0 && (
+              {shareOfVoice?.data?.items?.length > 0 && (
                 <div>
                   <h4 className="font-medium mb-2 text-sm">Share of Voice</h4>
                   <ResponsiveContainer width="100%" height={200}>
                     <PieChart>
                       <Pie
-                        data={shareOfVoice.data.share_of_voice.map((item, idx) => ({
+                        data={shareOfVoice.data.items.map((item, idx) => ({
                           name: item.competitor_name,
                           value: item.mention_count,
-                          percent: item.share_percent,
+                          percent: item.percentage,
                           sentiment: item.avg_sentiment,
                           color: SHARE_OF_VOICE_COLORS[idx % SHARE_OF_VOICE_COLORS.length],
                         }))}
@@ -604,7 +604,7 @@ export default function MLADashboard() {
                         label={false}
                         labelLine={false}
                       >
-                        {shareOfVoice.data.share_of_voice.map((_, idx) => (
+                        {shareOfVoice.data.items.map((_, idx) => (
                           <Cell key={`cell-${idx}`} fill={SHARE_OF_VOICE_COLORS[idx % SHARE_OF_VOICE_COLORS.length]} />
                         ))}
                       </Pie>
@@ -678,7 +678,7 @@ export default function MLADashboard() {
             </div>
 
             {/* Share of Voice Table */}
-            {shareOfVoice?.data?.share_of_voice?.length > 0 && (
+            {shareOfVoice?.data?.items?.length > 0 && (
               <div className="mt-4">
                 <h4 className="font-medium mb-2 text-sm">Competitor Mentions</h4>
                 <div className="overflow-x-auto">
@@ -692,7 +692,7 @@ export default function MLADashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {shareOfVoice.data.share_of_voice.map((item, idx) => (
+                      {shareOfVoice.data.items.map((item, idx) => (
                         <tr key={item.competitor_id} className="border-b">
                           <td className="py-2 px-2">
                             <div className="flex items-center gap-2">
@@ -704,7 +704,7 @@ export default function MLADashboard() {
                             </div>
                           </td>
                           <td className="text-right py-2 px-2">{item.mention_count.toLocaleString()}</td>
-                          <td className="text-right py-2 px-2">{item.share_percent.toFixed(1)}%</td>
+                          <td className="text-right py-2 px-2">{item.percentage.toFixed(1)}%</td>
                           <td className="text-right py-2 px-2">
                             <span
                               className={`px-2 py-0.5 rounded text-xs ${

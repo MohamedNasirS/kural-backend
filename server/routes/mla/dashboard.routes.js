@@ -812,13 +812,43 @@ router.get('/:acId/competitor-analysis', async (req, res) => {
 
 /**
  * Analytics API Proxy Configuration
- * Proxies requests to the external analytics service at localhost:8000
+ * Proxies requests to the external analytics service at kural.digital
  */
-const ANALYTICS_API_BASE = process.env.ANALYTICS_API_URL || 'http://localhost:8000/api/v1';
+const ANALYTICS_API_BASE = process.env.ANALYTICS_API_URL || 'https://kural.digital/api/v1';
 const ANALYTICS_CREDENTIALS = {
   email: process.env.ANALYTICS_API_EMAIL || 'admin@kuralai.com',
   password: process.env.ANALYTICS_API_PASSWORD || 'kuraladmin@123',
 };
+
+// Mapping from AC IDs to Analytics API location IDs
+const AC_TO_LOCATION_ID = {
+  101: 26,  // Dharapuram
+  102: 28,  // Kangayam
+  108: 32,  // Udhagamandalam
+  109: 27,  // Gudalur
+  110: 34,  // Coonoor
+  111: 41,  // Mettuppalayam
+  112: 31,  // Avanashi
+  113: 33,  // Tiruppur North
+  114: 37,  // Tiruppur South
+  115: 40,  // Palladam
+  116: 39,  // Sulur
+  117: 36,  // Kavundampalayam
+  118: 44,  // Coimbatore North
+  121: 43,  // Singanallur
+  122: 35,  // Kinathukadavu
+  123: 30,  // Pollachi
+  124: 42,  // Valparai
+  125: 29,  // Udumalaipettai
+  126: 38,  // Madathukulam
+};
+
+// All Constituencies location ID (aggregated data)
+const ALL_CONSTITUENCIES_LOCATION_ID = 45;
+
+// Helper to get location_id from acId
+// Currently using All Constituencies (45) as individual AC data is not available
+const getLocationId = (acId) => ALL_CONSTITUENCIES_LOCATION_ID;
 
 // Cache for analytics JWT token
 let analyticsToken = null;
@@ -842,10 +872,15 @@ const getAnalyticsToken = async () => {
       throw new Error('Failed to authenticate with analytics API');
     }
 
-    const data = await response.json();
-    analyticsToken = data.access_token || data.token;
-    // Set expiry to 1 hour from now (adjust based on actual token expiry)
-    tokenExpiry = Date.now() + 3600000;
+    const responseData = await response.json();
+    // Token is nested in responseData.data.access_token
+    analyticsToken = responseData.data?.access_token || responseData.access_token || responseData.token;
+    if (!analyticsToken) {
+      throw new Error('No token received from analytics API');
+    }
+    // Set expiry based on expires_in or default to 1 hour
+    const expiresIn = responseData.data?.expires_in || 3600;
+    tokenExpiry = Date.now() + (expiresIn * 1000);
     return analyticsToken;
   } catch (error) {
     console.error('Analytics API auth error:', error);
@@ -864,10 +899,11 @@ router.get('/:acId/social-media/share-of-voice', async (req, res) => {
 
     const token = await getAnalyticsToken();
 
-    // Build query params
+    // Build query params - map acId to analytics API location_id
+    const locationId = getLocationId(acId);
     const params = new URLSearchParams();
     params.append('time_range', time_range);
-    params.append('location_id', acId.toString());
+    params.append('location_id', locationId.toString());
     if (start_date) params.append('start_date', start_date);
     if (end_date) params.append('end_date', end_date);
 
@@ -913,9 +949,11 @@ router.get('/:acId/social-media/sentiment-breakdown', async (req, res) => {
 
     const token = await getAnalyticsToken();
 
+    // Map acId to analytics API location_id
+    const locationId = getLocationId(acId);
     const params = new URLSearchParams();
     params.append('time_range', time_range);
-    params.append('location_id', acId.toString());
+    params.append('location_id', locationId.toString());
 
     const response = await fetch(
       `${ANALYTICS_API_BASE}/dashboard/sentiment-breakdown?${params.toString()}`,
