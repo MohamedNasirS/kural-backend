@@ -309,26 +309,38 @@ export default function MLADashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Booth Sentiment Donut */}
         <Card>
-          <CardHeader>
+          <CardHeader className="pb-2">
             <CardTitle className="text-base">Booth Sentiment Distribution</CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={250}>
+            <ResponsiveContainer width="100%" height={220}>
               <PieChart>
                 <Pie
                   data={sentimentChartData}
                   cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={100}
+                  cy="40%"
+                  innerRadius={45}
+                  outerRadius={70}
                   dataKey="value"
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                  label={false}
+                  labelLine={false}
                 >
                   {sentimentChartData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
                 </Pie>
-                <Tooltip />
+                <Tooltip formatter={(value: number) => value.toLocaleString()} />
+                <Legend
+                  layout="horizontal"
+                  verticalAlign="bottom"
+                  align="center"
+                  wrapperStyle={{ fontSize: '12px', paddingTop: '5px' }}
+                  formatter={(value, entry: any) => {
+                    const total = sentimentChartData.reduce((sum, item) => sum + item.value, 0);
+                    const percent = total > 0 ? Math.round((entry.payload.value / total) * 100) : 0;
+                    return <span style={{ color: entry.color }}>{value} {percent}%</span>;
+                  }}
+                />
               </PieChart>
             </ResponsiveContainer>
           </CardContent>
@@ -336,26 +348,38 @@ export default function MLADashboard() {
 
         {/* Gender Distribution Donut */}
         <Card>
-          <CardHeader>
+          <CardHeader className="pb-2">
             <CardTitle className="text-base">Gender Distribution</CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={250}>
+            <ResponsiveContainer width="100%" height={220}>
               <PieChart>
                 <Pie
                   data={genderChartData}
                   cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={100}
+                  cy="40%"
+                  innerRadius={45}
+                  outerRadius={70}
                   dataKey="value"
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                  label={false}
+                  labelLine={false}
                 >
                   {genderChartData.map((_, index) => (
                     <Cell key={`cell-${index}`} fill={GENDER_COLORS[index % GENDER_COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip />
+                <Tooltip formatter={(value: number) => value.toLocaleString()} />
+                <Legend
+                  layout="horizontal"
+                  verticalAlign="bottom"
+                  align="center"
+                  wrapperStyle={{ fontSize: '12px', paddingTop: '5px' }}
+                  formatter={(value, entry: any) => {
+                    const total = genderChartData.reduce((sum, item) => sum + item.value, 0);
+                    const percent = total > 0 ? Math.round((entry.payload.value / total) * 100) : 0;
+                    return <span style={{ color: GENDER_COLORS[genderChartData.findIndex(d => d.name === value)] }}>{value}: {percent}%</span>;
+                  }}
+                />
               </PieChart>
             </ResponsiveContainer>
           </CardContent>
@@ -363,16 +387,16 @@ export default function MLADashboard() {
 
         {/* Booth Size Distribution */}
         <Card>
-          <CardHeader>
+          <CardHeader className="pb-2">
             <CardTitle className="text-base">Booth Size Distribution</CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={boothSizeData?.boothSizeDistribution || []}>
-                <XAxis dataKey="range" tick={{ fontSize: 10 }} />
-                <YAxis />
-                <Tooltip />
-                <Bar dataKey="count" fill="#8884d8" />
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={boothSizeData?.boothSizeDistribution || []} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                <XAxis dataKey="range" tick={{ fontSize: 10 }} interval={0} />
+                <YAxis tick={{ fontSize: 10 }} />
+                <Tooltip formatter={(value: number) => [value.toLocaleString(), 'Booths']} />
+                <Bar dataKey="count" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -380,16 +404,16 @@ export default function MLADashboard() {
 
         {/* Victory Margin Distribution */}
         <Card>
-          <CardHeader>
+          <CardHeader className="pb-2">
             <CardTitle className="text-base">Victory Margin Distribution</CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={marginData?.marginDistribution || []} layout="vertical">
-                <XAxis type="number" />
-                <YAxis dataKey="range" type="category" tick={{ fontSize: 10 }} width={100} />
-                <Tooltip />
-                <Bar dataKey="count" fill={(entry: any) => (entry.type === 'won' ? '#22c55e' : '#ef4444')}>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={marginData?.marginDistribution || []} layout="vertical" margin={{ top: 5, right: 20, left: 5, bottom: 5 }}>
+                <XAxis type="number" tick={{ fontSize: 10 }} />
+                <YAxis dataKey="range" type="category" tick={{ fontSize: 9 }} width={80} />
+                <Tooltip formatter={(value: number) => [value.toLocaleString(), 'Booths']} />
+                <Bar dataKey="count" radius={[0, 4, 4, 0]}>
                   {marginData?.marginDistribution.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.type === 'won' ? '#22c55e' : '#ef4444'} />
                   ))}
@@ -403,26 +427,29 @@ export default function MLADashboard() {
       {/* Historical Trends Chart - Full Width */}
       {historicalChartData.length > 0 && (
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <span>Historical Vote Share Trends (2009-2021)</span>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <span className="text-base">Historical Vote Share Trends (2009-2021)</span>
               {historicalData?.leadingSummary && (
-                <span className="text-sm font-normal text-gray-500">{historicalData.leadingSummary}</span>
+                <span className="text-xs sm:text-sm font-normal text-gray-500">{historicalData.leadingSummary}</span>
               )}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={historicalChartData}>
-                <CartesianGrid strokeDasharray="3 3" />
+            <ResponsiveContainer width="100%" height={280}>
+              <LineChart data={historicalChartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis
                   dataKey="year"
-                  tick={{ fontSize: 12 }}
+                  tick={{ fontSize: 11 }}
+                  tickLine={false}
                 />
                 <YAxis
                   domain={[0, 100]}
-                  tick={{ fontSize: 12 }}
-                  label={{ value: 'Vote Share %', angle: -90, position: 'insideLeft' }}
+                  tick={{ fontSize: 10 }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={35}
                 />
                 <Tooltip
                   formatter={(value: number, name: string) => [`${value.toFixed(1)}%`, name]}
@@ -430,30 +457,34 @@ export default function MLADashboard() {
                     const item = historicalChartData.find((d) => d.year === label);
                     return `${label} (${item?.type || 'Election'})`;
                   }}
+                  contentStyle={{ fontSize: '12px', borderRadius: '8px' }}
                 />
-                <Legend />
+                <Legend
+                  wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }}
+                  iconType="circle"
+                />
                 <Line
                   type="monotone"
                   dataKey="AIADMK"
                   stroke="#10b981"
-                  strokeWidth={3}
-                  dot={{ fill: '#10b981', strokeWidth: 2, r: 5 }}
-                  activeDot={{ r: 8 }}
+                  strokeWidth={2}
+                  dot={{ fill: '#10b981', strokeWidth: 2, r: 4 }}
+                  activeDot={{ r: 6 }}
                 />
                 <Line
                   type="monotone"
                   dataKey="DMK"
                   stroke="#ef4444"
-                  strokeWidth={3}
-                  dot={{ fill: '#ef4444', strokeWidth: 2, r: 5 }}
-                  activeDot={{ r: 8 }}
+                  strokeWidth={2}
+                  dot={{ fill: '#ef4444', strokeWidth: 2, r: 4 }}
+                  activeDot={{ r: 6 }}
                 />
                 <Line
                   type="monotone"
                   dataKey="Others"
                   stroke="#8b5cf6"
                   strokeWidth={2}
-                  dot={{ fill: '#8b5cf6', strokeWidth: 2, r: 4 }}
+                  dot={{ fill: '#8b5cf6', strokeWidth: 2, r: 3 }}
                   strokeDasharray="5 5"
                 />
               </LineChart>
@@ -464,10 +495,10 @@ export default function MLADashboard() {
 
       {/* Priority Targets */}
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <span>Priority Targets (Flippable Booths)</span>
-            <span className="text-sm font-normal text-gray-500">
+        <CardHeader className="pb-2">
+          <CardTitle className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <span className="text-base">Priority Targets (Flippable Booths)</span>
+            <span className="text-xs sm:text-sm font-normal text-gray-500">
               Total gap: {overview.flippableBooths.totalGapToFlip} votes across {overview.flippableBooths.count} booths
             </span>
           </CardTitle>
@@ -476,36 +507,36 @@ export default function MLADashboard() {
           {priorityTargets.length === 0 ? (
             <div className="text-gray-500 text-center py-4">No flippable booths found</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+            <div className="overflow-x-auto -mx-2 sm:mx-0">
+              <table className="w-full text-xs sm:text-sm min-w-[400px]">
                 <thead>
-                  <tr className="border-b">
-                    <th className="text-left py-2">Booth</th>
-                    <th className="text-right py-2">Our Vote %</th>
-                    <th className="text-right py-2">Margin</th>
-                    <th className="text-right py-2">Gap to Flip</th>
-                    <th className="text-right py-2">Voters</th>
+                  <tr className="border-b bg-gray-50">
+                    <th className="text-left py-2 px-2 font-medium">Booth</th>
+                    <th className="text-right py-2 px-2 font-medium">Our Vote %</th>
+                    <th className="text-right py-2 px-2 font-medium">Margin</th>
+                    <th className="text-right py-2 px-2 font-medium">Gap to Flip</th>
+                    <th className="text-right py-2 px-2 font-medium">Voters</th>
                   </tr>
                 </thead>
                 <tbody>
                   {priorityTargets.map((target) => (
                     <tr
                       key={target.boothNo}
-                      className="border-b hover:bg-gray-50 cursor-pointer"
+                      className="border-b hover:bg-gray-50 cursor-pointer transition-colors"
                       onClick={() => navigate(`/mla/booth/${target.boothNo}`)}
                     >
-                      <td className="py-2">
+                      <td className="py-2 px-2">
                         <div className="font-medium">#{target.boothNo}</div>
-                        <div className="text-gray-500 text-xs">{target.boothName}</div>
+                        <div className="text-gray-500 text-xs truncate max-w-[120px]">{target.boothName}</div>
                       </td>
-                      <td className="text-right py-2">{target.ourVoteSharePercent}%</td>
-                      <td className="text-right py-2 text-red-600">
+                      <td className="text-right py-2 px-2">{target.ourVoteSharePercent}%</td>
+                      <td className="text-right py-2 px-2 text-red-600">
                         -{target.margin.votes} ({target.margin.percent}%)
                       </td>
-                      <td className="text-right py-2 text-orange-600 font-semibold">
+                      <td className="text-right py-2 px-2 text-orange-600 font-semibold whitespace-nowrap">
                         {target.gapToFlip} votes
                       </td>
-                      <td className="text-right py-2">{target.totalVoters.toLocaleString()}</td>
+                      <td className="text-right py-2 px-2">{target.totalVoters.toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>

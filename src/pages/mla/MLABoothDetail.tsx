@@ -63,13 +63,6 @@ interface BoothDetail {
     others: { count: number; percentage: number };
   };
   ageDistribution: Array<{ range: string; count: number; percentage: number }>;
-  electionHistory: Array<{
-    year: number;
-    type: string;
-    result: string;
-    ourVoteSharePercent: number;
-    margin: { votes: number; percent: number };
-  }>;
   allPartyResults: Array<{
     party: string;
     candidate: string;
@@ -222,32 +215,47 @@ export default function MLABoothDetail() {
             {/* Gender Distribution - Pie Chart */}
             <div>
               <h4 className="font-medium mb-2 text-center">Gender Distribution</h4>
-              <ResponsiveContainer width="100%" height={250}>
+              <ResponsiveContainer width="100%" height={200}>
                 <PieChart>
                   <Pie
                     data={[
-                      { name: 'Male', value: detail.voterStats.male.count, color: '#3b82f6' },
-                      { name: 'Female', value: detail.voterStats.female.count, color: '#ec4899' },
-                      { name: 'Others', value: detail.voterStats.others.count, color: '#8b5cf6' },
-                    ]}
+                      { name: 'Male', value: detail.voterStats.male.count, fill: '#3b82f6' },
+                      { name: 'Female', value: detail.voterStats.female.count, fill: '#ec4899' },
+                      { name: 'Others', value: detail.voterStats.others.count, fill: '#8b5cf6' },
+                    ].filter(d => d.value > 0)}
                     cx="50%"
-                    cy="50%"
-                    innerRadius={40}
-                    outerRadius={70}
+                    cy="45%"
+                    outerRadius={55}
                     dataKey="value"
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    label={false}
                     labelLine={false}
                   >
-                    <Cell fill="#3b82f6" />
-                    <Cell fill="#ec4899" />
-                    <Cell fill="#8b5cf6" />
+                    {[
+                      { name: 'Male', value: detail.voterStats.male.count, fill: '#3b82f6' },
+                      { name: 'Female', value: detail.voterStats.female.count, fill: '#ec4899' },
+                      { name: 'Others', value: detail.voterStats.others.count, fill: '#8b5cf6' },
+                    ].filter(d => d.value > 0).map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.fill} />
+                    ))}
                   </Pie>
-                  <Tooltip formatter={(value: number) => value.toLocaleString()} />
+                  <Tooltip
+                    formatter={(value: number, name: string) => [
+                      `${value.toLocaleString()} (${detail.voterStats.total > 0 ? Math.round((value / detail.voterStats.total) * 100) : 0}%)`,
+                      name
+                    ]}
+                  />
                   <Legend
                     layout="horizontal"
                     verticalAlign="bottom"
                     align="center"
                     wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }}
+                    formatter={(value, entry: any) => {
+                      const item = entry.payload;
+                      const percent = detail.voterStats.total > 0
+                        ? Math.round((item.value / detail.voterStats.total) * 100)
+                        : 0;
+                      return <span style={{ color: '#333' }}>{value}: {percent}%</span>;
+                    }}
                   />
                 </PieChart>
               </ResponsiveContainer>
@@ -269,66 +277,6 @@ export default function MLABoothDetail() {
                 </BarChart>
               </ResponsiveContainer>
             </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Historical Performance */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Historical Performance</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Election</TableHead>
-                <TableHead>Result</TableHead>
-                <TableHead>Our Vote %</TableHead>
-                <TableHead>Margin (votes)</TableHead>
-                <TableHead>Margin %</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(detail.electionHistory || []).length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center text-gray-500">
-                    No historical data available
-                  </TableCell>
-                </TableRow>
-              ) : (
-                (detail.electionHistory || []).map((election) => (
-                  <TableRow key={`${election.year}-${election.type}`}>
-                    <TableCell>
-                      {election.year} {election.type}
-                    </TableCell>
-                    <TableCell>
-                      {election.result === 'won' ? '🟢 Won' : '🔴 Lost'}
-                    </TableCell>
-                    <TableCell>{election.ourVoteSharePercent}%</TableCell>
-                    <TableCell
-                      className={
-                        election.result === 'won' ? 'text-green-600' : 'text-red-600'
-                      }
-                    >
-                      {election.margin.votes > 0 ? '+' : ''}
-                      {election.margin.votes}
-                    </TableCell>
-                    <TableCell
-                      className={
-                        election.result === 'won' ? 'text-green-600' : 'text-red-600'
-                      }
-                    >
-                      {election.margin.percent > 0 ? '+' : ''}
-                      {election.margin.percent}%
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-          <div className="mt-4 h-48 flex items-center justify-center text-gray-400">
-            TODO: Implement Historical Performance Chart
           </div>
         </CardContent>
       </Card>
