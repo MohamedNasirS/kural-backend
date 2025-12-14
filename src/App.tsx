@@ -80,6 +80,15 @@ const BoothAgentManagementNew = lazy(() => import("@/pages/shared/BoothAgentMana
 const BoothAgentRegistration = lazy(() => import("@/pages/shared/BoothAgentRegistration"));
 const FormPreview = lazy(() => import("@/pages/shared/FormPreview").then(m => ({ default: m.FormPreview })));
 
+// Lazy load MLA pages
+const MLALayout = lazy(() => import("@/pages/mla/MLALayout"));
+const MLADashboard = lazy(() => import("@/pages/mla/MLADashboard"));
+const MLABoothList = lazy(() => import("@/pages/mla/MLABoothList"));
+const MLABoothDetail = lazy(() => import("@/pages/mla/MLABoothDetail"));
+const MLAPriorityTargets = lazy(() => import("@/pages/mla/MLAPriorityTargets"));
+const MLAHistoricalTrends = lazy(() => import("@/pages/mla/MLAHistoricalTrends"));
+const MLACompetitorAnalysis = lazy(() => import("@/pages/mla/MLACompetitorAnalysis"));
+
 const queryClient = new QueryClient();
 
 const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode; allowedRoles: string[] }) => {
@@ -121,6 +130,8 @@ const RoleBasedRedirect = () => {
       return <Navigate to="/l2/dashboard" replace />;
     case 'L9':
       return <Navigate to="/l9/war-room" replace />;
+    case 'MLA':
+      return <Navigate to="/mla/dashboard" replace />;
     default:
       return <Navigate to="/login" replace />;
   }
@@ -209,6 +220,17 @@ const AppRoutes = () => {
       <Route path="/l9/election-day" element={<ProtectedRoute allowedRoles={['L9']}><LazyRoute pageName="Election Day Ops"><ElectionDayOps /></LazyRoute></ProtectedRoute>} />
       <Route path="/l9/surveys" element={<ProtectedRoute allowedRoles={['L9']}><LazyRoute pageName="Survey Intelligence"><SurveyIntelligence /></LazyRoute></ProtectedRoute>} />
       <Route path="/l9/success" element={<ProtectedRoute allowedRoles={['L9']}><LazyRoute pageName="Success Metrics"><SuccessMetrics /></LazyRoute></ProtectedRoute>} />
+
+      {/* MLA Dashboard Routes */}
+      <Route path="/mla" element={<ProtectedRoute allowedRoles={['MLA']}><LazyRoute pageName="MLA Dashboard"><MLALayout /></LazyRoute></ProtectedRoute>}>
+        <Route index element={<Navigate to="/mla/dashboard" replace />} />
+        <Route path="dashboard" element={<MLADashboard />} />
+        <Route path="booths" element={<MLABoothList />} />
+        <Route path="booth/:boothNo" element={<MLABoothDetail />} />
+        <Route path="priority-targets" element={<MLAPriorityTargets />} />
+        <Route path="trends" element={<MLAHistoricalTrends />} />
+        <Route path="competitors" element={<MLACompetitorAnalysis />} />
+      </Route>
 
       <Route path="*" element={<NotFound />} />
     </Routes>

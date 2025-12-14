@@ -49,7 +49,7 @@ import {
   applyACFilter,
   canAccessAC,
 } from "../middleware/auth.js";
-import { getCache, setCache, TTL, cacheKeys } from "../utils/cache.js";
+import { getCache, setCache, invalidateCache, TTL, cacheKeys } from "../utils/cache.js";
 import { getPrecomputedStats, getAllPrecomputedStats } from "../utils/precomputedStats.js";
 
 const router = express.Router();
@@ -641,7 +641,7 @@ router.post("/users", isAuthenticated, async (req, res) => {
     }
 
     // Validate role
-    const validRoles = ["L0", "L1", "L2", "Booth Agent", "BoothAgent"];
+    const validRoles = ["L0", "L1", "L2", "MLA", "Booth Agent", "BoothAgent"];
     if (!validRoles.includes(role)) {
       return res.status(400).json({
         success: false,
@@ -649,8 +649,8 @@ router.post("/users", isAuthenticated, async (req, res) => {
       });
     }
 
-    // For L2, assignedAC is required
-    if ((role === "L2") && !assignedAC && !aci_id) {
+    // For L2 and MLA, assignedAC is required
+    if ((role === "L2" || role === "MLA") && !assignedAC && !aci_id) {
       return res.status(400).json({
         success: false,
         message: `assignedAC is required for role ${role}`,
@@ -856,6 +856,10 @@ router.post("/users", isAuthenticated, async (req, res) => {
       .select("-password -passwordHash")
       .populate("createdBy", "name role")
       .populate("assignedBoothId", "boothName boothCode booth_id");
+
+    // Invalidate user caches to ensure fresh data on next fetch
+    invalidateCache('users:');
+    invalidateCache('booth-agents:');
 
     res.status(201).json({
       success: true,
@@ -1159,6 +1163,11 @@ router.post("/users/booth-agent", isAuthenticated, async (req, res) => {
       .populate("createdBy", "name role")
       .populate("assignedBoothId", "boothName boothCode booth_id");
 
+    // Invalidate caches to ensure fresh data on next fetch
+    invalidateCache('users:');
+    invalidateCache('booth-agents:');
+    invalidateCache('booths');
+
     res.status(201).json({
       success: true,
       message: "Booth agent created successfully",
@@ -1379,6 +1388,10 @@ router.put("/users/:userId", isAuthenticated, async (req, res) => {
       .populate("createdBy", "name role")
       .populate("assignedBoothId", "boothName boothCode");
 
+    // Invalidate caches to ensure fresh data on next fetch
+    invalidateCache('users:');
+    invalidateCache('booth-agents:');
+
     res.json({
       success: true,
       message: "User updated successfully",
@@ -1464,6 +1477,11 @@ router.delete("/users/:userId", isAuthenticated, async (req, res) => {
 
     // Permanently delete the user from the database
     await User.findByIdAndDelete(userId);
+
+    // Invalidate caches to ensure fresh data on next fetch
+    invalidateCache('users:');
+    invalidateCache('booth-agents:');
+    invalidateCache('booths');
 
     res.json({
       success: true,
@@ -1743,6 +1761,9 @@ router.post("/booths", isAuthenticated, canManageBooths, validateACAccess, async
     // Populate references before returning
     await newBooth.populate("createdBy", "name role");
 
+    // Invalidate booth caches to ensure fresh data on next fetch
+    invalidateCache('booths');
+
     res.status(201).json({
       success: true,
       message: "Booth created successfully",
@@ -1812,6 +1833,9 @@ router.put("/booths/:boothId", isAuthenticated, canManageBooths, validateACAcces
       { path: "createdBy", select: "name role" },
     ]);
 
+    // Invalidate booth caches to ensure fresh data on next fetch
+    invalidateCache('booths');
+
     res.json({
       success: true,
       message: "Booth updated successfully",
@@ -1855,6 +1879,9 @@ router.delete("/booths/:boothId", isAuthenticated, canManageBooths, validateACAc
     // Soft delete
     booth.isActive = false;
     await booth.save();
+
+    // Invalidate booth caches to ensure fresh data on next fetch
+    invalidateCache('booths');
 
     res.json({
       success: true,
@@ -2081,6 +2108,13 @@ router.post("/booth-agents/:boothId/assign", isAuthenticated, canAssignAgents, v
       booth.assignedAgents.push(agentId);
     }
 
+    // BUGFIX: Also update agent's assignedBoothId to keep in sync
+    if (agent.assignedBoothId && agent.assignedBoothId.toString() !== boothId) {
+      await Booth.findByIdAndUpdate(agent.assignedBoothId, { $pull: { assignedAgents: agentId } });
+    }
+    agent.assignedBoothId = booth._id;
+    await agent.save();
+
     // Set as primary if requested
     if (isPrimary) {
       booth.primaryAgent = agentId;
@@ -2088,9 +2122,14 @@ router.post("/booth-agents/:boothId/assign", isAuthenticated, canAssignAgents, v
 
     await booth.save();
     await booth.populate([
-      { path: "assignedAgents", select: "name phone role" },
-      { path: "primaryAgent", select: "name phone role" },
+      { path: "assignedAgents", select: "name phone role isActive", match: { isActive: true } },
+      { path: "primaryAgent", select: "name phone role isActive", match: { isActive: true } },
     ]);
+
+    // Invalidate caches to ensure fresh data on next fetch
+    invalidateCache('booth-agents:');
+    invalidateCache('booths');
+    invalidateCache('users:');
 
     res.json({
       success: true,
@@ -2143,11 +2182,23 @@ router.delete("/booth-agents/:boothId/unassign/:agentId", isAuthenticated, canAs
       booth.primaryAgent = null;
     }
 
+    // BUGFIX: Also clear agent's assignedBoothId
+    const agent = await User.findById(agentId);
+    if (agent && agent.assignedBoothId && agent.assignedBoothId.toString() === boothId) {
+      agent.assignedBoothId = null;
+      await agent.save();
+    }
+
     await booth.save();
     await booth.populate([
-      { path: "assignedAgents", select: "name phone role" },
-      { path: "primaryAgent", select: "name phone role" },
+      { path: "assignedAgents", select: "name phone role isActive", match: { isActive: true } },
+      { path: "primaryAgent", select: "name phone role isActive", match: { isActive: true } },
     ]);
+
+    // Invalidate caches to ensure fresh data on next fetch
+    invalidateCache('booth-agents:');
+    invalidateCache('booths');
+    invalidateCache('users:');
 
     res.json({
       success: true,
@@ -2217,9 +2268,20 @@ router.put("/booth-agents/:agentId/assign-booth", isAuthenticated, canAssignAgen
         });
       }
 
+      // BUGFIX: Sync Booth assignedAgents array
+      const oldBoothId = agent.assignedBoothId;
+      if (oldBoothId && oldBoothId.toString() !== boothId.toString()) {
+        await Booth.findByIdAndUpdate(oldBoothId, { $pull: { assignedAgents: agentId } });
+      }
+      await Booth.findByIdAndUpdate(boothId, { $addToSet: { assignedAgents: agentId } });
+
       agent.assignedBoothId = boothId;
     } else {
-      // Unassign booth
+      // Unassign booth - also remove from booth assignedAgents
+      const oldBoothId = agent.assignedBoothId;
+      if (oldBoothId) {
+        await Booth.findByIdAndUpdate(oldBoothId, { $pull: { assignedAgents: agentId } });
+      }
       agent.assignedBoothId = null;
     }
 
@@ -2228,6 +2290,11 @@ router.put("/booth-agents/:agentId/assign-booth", isAuthenticated, canAssignAgen
     const agentResponse = await User.findById(agent._id)
       .select("-password -passwordHash")
       .populate("assignedBoothId", "boothName boothCode ac_id ac_name");
+
+    // Invalidate caches to ensure fresh data on next fetch
+    invalidateCache('booth-agents:');
+    invalidateCache('booths');
+    invalidateCache('users:');
 
     res.json({
       success: true,
@@ -2604,9 +2671,18 @@ router.get("/booths/:boothId/agents", isAuthenticated, async (req, res) => {
   try {
     const { boothId } = req.params;
 
+    // BUGFIX: Filter out inactive/deleted users when populating
     const booth = await Booth.findById(boothId)
-      .populate("assignedAgents", "name phone email booth_agent_id booth_id status")
-      .populate("primaryAgent", "name phone email booth_agent_id");
+      .populate({
+        path: "assignedAgents",
+        select: "name phone email booth_agent_id booth_id status isActive",
+        match: { isActive: true }
+      })
+      .populate({
+        path: "primaryAgent",
+        select: "name phone email booth_agent_id isActive",
+        match: { isActive: true }
+      });
 
     if (!booth) {
       return res.status(404).json({
@@ -2631,7 +2707,7 @@ router.get("/booths/:boothId/agents", isAuthenticated, async (req, res) => {
         boothCode: booth.boothCode,
         booth_id: booth.booth_id,
       },
-      agents: booth.assignedAgents,
+      agents: (booth.assignedAgents || []).filter(a => a !== null),
       primaryAgent: booth.primaryAgent,
     });
   } catch (error) {

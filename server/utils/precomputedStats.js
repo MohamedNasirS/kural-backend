@@ -216,8 +216,27 @@ export async function getPrecomputedStats(acId, maxAgeMs = 10 * 60 * 1000) {
 }
 
 /**
+ * Compute and save stats for a single AC (used by staggered job)
+ */
+async function computeAndSaveSingleAC(acId) {
+  try {
+    const stats = await computeStatsForAC(acId);
+    if (stats) {
+      await savePrecomputedStats(stats);
+      console.log(`[PrecomputedStats] AC ${acId}: ${stats.totalMembers} voters, ${stats.computeDurationMs}ms`);
+      return { acId, status: 'success', voters: stats.totalMembers };
+    }
+    return { acId, status: 'skipped' };
+  } catch (error) {
+    console.error(`[PrecomputedStats] AC ${acId} failed:`, error.message);
+    return { acId, status: 'failed', error: error.message };
+  }
+}
+
+/**
  * Compute and save stats for all ACs
  * Run this as a background job every 5-10 minutes
+ * OPTIMIZED: Stagger computation with longer delays to prevent CPU spikes
  */
 export async function computeAllStats() {
   console.log('[PrecomputedStats] Starting stats computation for all ACs...');
@@ -230,40 +249,26 @@ export async function computeAllStats() {
     details: []
   };
 
-  // Process ACs sequentially to avoid overwhelming MongoDB
+  // Process ACs sequentially with 15-second delay between each
+  // This spreads 17 ACs over ~4.5 minutes instead of all at once
+  const DELAY_BETWEEN_ACS = 15000; // 15 seconds
+
   for (const acId of ALL_AC_IDS) {
-    try {
-      const stats = await computeStatsForAC(acId);
+    const result = await computeAndSaveSingleAC(acId);
+    results.details.push(result);
 
-      if (stats) {
-        await savePrecomputedStats(stats);
-        results.success++;
-        results.details.push({
-          acId,
-          status: 'success',
-          voters: stats.totalMembers,
-          durationMs: stats.computeDurationMs
-        });
-        console.log(`[PrecomputedStats] AC ${acId}: ${stats.totalMembers} voters, ${stats.computeDurationMs}ms`);
-      } else {
-        results.skipped++;
-      }
-    } catch (error) {
-      results.failed++;
-      results.details.push({
-        acId,
-        status: 'failed',
-        error: error.message
-      });
-      console.error(`[PrecomputedStats] AC ${acId} failed:`, error.message);
+    if (result.status === 'success') results.success++;
+    else if (result.status === 'failed') results.failed++;
+    else results.skipped++;
+
+    // Wait before processing next AC to avoid CPU spike
+    if (ALL_AC_IDS.indexOf(acId) < ALL_AC_IDS.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_ACS));
     }
-
-    // Small delay between ACs to prevent CPU spike
-    await new Promise(resolve => setTimeout(resolve, 100));
   }
 
   const totalDuration = Date.now() - startTime;
-  console.log(`[PrecomputedStats] Completed: ${results.success} success, ${results.failed} failed, ${results.skipped} skipped in ${totalDuration}ms`);
+  console.log(`[PrecomputedStats] Completed: ${results.success} success, ${results.failed} failed, ${results.skipped} skipped in ${Math.round(totalDuration/1000)}s`);
 
   return {
     ...results,
@@ -273,31 +278,48 @@ export async function computeAllStats() {
 
 /**
  * Start background job to compute stats periodically
- * @param {number} intervalMs - Interval in milliseconds (default: 5 minutes)
+ * @param {number} intervalMs - Interval in milliseconds (default: 10 minutes)
+ * OPTIMIZED: Default increased to 10 minutes since computation takes ~4.5 minutes
  */
 let statsInterval = null;
+let isComputationRunning = false;
 
-export function startStatsComputeJob(intervalMs = 5 * 60 * 1000) {
+export function startStatsComputeJob(intervalMs = 10 * 60 * 1000) {
   if (statsInterval) {
     console.log('[PrecomputedStats] Job already running');
     return;
   }
 
   console.log(`[PrecomputedStats] Starting background job (interval: ${intervalMs / 1000}s)`);
+  console.log('[PrecomputedStats] Computation is staggered: 15s delay between each AC');
 
-  // Run immediately on startup
-  computeAllStats().catch(err => {
-    console.error('[PrecomputedStats] Initial computation failed:', err.message);
-  });
+  // Run immediately on startup (after 30s delay to let server stabilize)
+  setTimeout(() => {
+    runComputationIfNotBusy();
+  }, 30000);
 
   // Then run periodically
   statsInterval = setInterval(() => {
-    computeAllStats().catch(err => {
-      console.error('[PrecomputedStats] Periodic computation failed:', err.message);
-    });
+    runComputationIfNotBusy();
   }, intervalMs);
 
   return statsInterval;
+}
+
+async function runComputationIfNotBusy() {
+  if (isComputationRunning) {
+    console.log('[PrecomputedStats] Skipping - previous computation still running');
+    return;
+  }
+
+  isComputationRunning = true;
+  try {
+    await computeAllStats();
+  } catch (err) {
+    console.error('[PrecomputedStats] Computation failed:', err.message);
+  } finally {
+    isComputationRunning = false;
+  }
 }
 
 export function stopStatsComputeJob() {

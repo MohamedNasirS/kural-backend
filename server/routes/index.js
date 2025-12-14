@@ -10,6 +10,13 @@ import mobileAppRoutes from "./mobileApp.routes.js";
 import mappedFieldsRoutes from "./mappedFields.routes.js";
 import healthRoutes from "./health.routes.js";
 import rbacRoutes from "./rbac.js";
+import mlaDashboardRoutes from "./mla/index.js";
+
+// Import MLA models to register them with Mongoose
+import "../models/ElectionResult.js";
+import "../models/ACElectionSummary.js";
+import "../models/PredictedTurnout.js";
+import "../models/PartyConfig.js";
 
 export {
   authRoutes,
@@ -24,6 +31,7 @@ export {
   mappedFieldsRoutes,
   healthRoutes,
   rbacRoutes,
+  mlaDashboardRoutes,
 };
 
 export function registerRoutes(app) {
@@ -86,6 +94,8 @@ export function registerRoutes(app) {
   // RBAC routes
   app.use("/api/rbac", rbacRoutes);
 
+  // MLA Dashboard routes
+  app.use("/api/mla-dashboard", mlaDashboardRoutes);
 
   console.log("✓ All routes registered");
 }

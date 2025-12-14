@@ -24,6 +24,7 @@ export const roleMap = new Map([
   ["War Room", "L9"],
   ["Command", "L9"],
   ["L9", "L9"],
+  ["MLA", "MLA"],
 ]);
 
 /**

@@ -60,6 +60,7 @@ const roleLabels = {
   L1: 'ACIM Dashboard',
   L2: 'ACI Dashboard',
   L9: 'War Room Command',
+  MLA: 'MLA War Room',
 };
 
 const dashboardTitles = {
@@ -67,6 +68,7 @@ const dashboardTitles = {
   L1: 'ACIM Dashboard',
   L2: 'ACI Dashboard',
   L9: 'War Room Command',
+  MLA: 'MLA War Room',
 };
 
 const AppSidebar = () => {
@@ -169,6 +171,14 @@ const AppSidebar = () => {
           { icon: Vote, label: 'Election Day Ops', path: '/l9/election-day' },
           { icon: FileText, label: 'Survey Intelligence', path: '/l9/surveys' },
           { icon: Award, label: 'Success Metrics', path: '/l9/success' },
+        ];
+      case 'MLA':
+        return [
+          { icon: LayoutDashboard, label: 'AC Overview', path: '/mla/dashboard' },
+          { icon: MapPin, label: 'All Booths', path: '/mla/booths' },
+          { icon: Target, label: 'Priority Targets', path: '/mla/priority-targets' },
+          { icon: TrendingUp, label: 'Historical Trends', path: '/mla/trends' },
+          { icon: BarChart3, label: 'Competitor Analysis', path: '/mla/competitors' },
         ];
       default:
         return [];

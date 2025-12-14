@@ -114,8 +114,9 @@ const UserManagement: React.FC = () => {
   });
 
   useEffect(() => {
-    // For L2 and BoothAgent tabs, require AC selection before fetching
-    const requiresACSelection = activeTab === "L2" || activeTab === "BoothAgent";
+    // For BoothAgent tab, require AC selection before fetching (too many agents otherwise)
+    // L2 (ACI) and MLA tabs can show all users without AC filter
+    const requiresACSelection = activeTab === "BoothAgent";
     if (requiresACSelection && acFilter === "all") {
       setUsers([]);
       setLoading(false);
@@ -177,6 +178,7 @@ const UserManagement: React.FC = () => {
         "L0": "L0",
         "L1": "L1",
         "L2": "L2",
+        "MLA": "MLA",
         "BoothAgent": "BoothAgent"
       };
 
@@ -188,8 +190,8 @@ const UserManagement: React.FC = () => {
         params.append("status", statusFilter);
       }
 
-      // Add AC filter for BoothAgent and L2 tabs
-      if ((activeTab === "BoothAgent" || activeTab === "L2") && acFilter !== "all") {
+      // Add AC filter for BoothAgent, L2, and MLA tabs
+      if ((activeTab === "BoothAgent" || activeTab === "L2" || activeTab === "MLA") && acFilter !== "all") {
         params.append("ac", acFilter);
       }
 
@@ -338,9 +340,10 @@ const UserManagement: React.FC = () => {
 
   const resetForm = () => {
     // Set default role based on active tab
-    const defaultRole = activeTab === "L0" ? "L0" : 
-                       activeTab === "L1" ? "L1" : 
-                       activeTab === "L2" ? "L2" : 
+    const defaultRole = activeTab === "L0" ? "L0" :
+                       activeTab === "L1" ? "L1" :
+                       activeTab === "L2" ? "L2" :
+                       activeTab === "MLA" ? "MLA" :
                        "BoothAgent";
     
     setFormData({
@@ -369,9 +372,10 @@ const UserManagement: React.FC = () => {
       "L0": "L0",
       "L1": "L1",
       "L2": "L2",
+      "MLA": "MLA",
       "BoothAgent": "BoothAgent"
     };
-    const matchesRole = !activeTab || !roleMap[activeTab] || user.role === roleMap[activeTab] || 
+    const matchesRole = !activeTab || !roleMap[activeTab] || user.role === roleMap[activeTab] ||
       (roleMap[activeTab] === "BoothAgent" && (user.role === "Booth Agent" || user.role === "BoothAgent"));
     
     return matchesSearch && matchesRole;
@@ -382,6 +386,7 @@ const UserManagement: React.FC = () => {
       L0: { label: "System Admin", variant: "default" },
       L1: { label: "ACIM", variant: "default" },
       L2: { label: "ACI", variant: "secondary" },
+      MLA: { label: "MLA", variant: "destructive" },
       BoothAgent: { label: "Booth Agent", variant: "outline" },
       "Booth Agent": { label: "Booth Agent", variant: "outline" },
     };
@@ -391,8 +396,8 @@ const UserManagement: React.FC = () => {
   };
 
   const renderUsersTable = () => {
-    // Show Assigned AC column for L2 (ACI) and Booth Agents, hide for L0 (System Admin) and L1 (ACIM)
-    const showAssignedAC = activeTab === "L2" || activeTab === "BoothAgent";
+    // Show Assigned AC column for L2 (ACI), MLA, and Booth Agents, hide for L0 (System Admin) and L1 (ACIM)
+    const showAssignedAC = activeTab === "L2" || activeTab === "MLA" || activeTab === "BoothAgent";
     // Show Booth Number column only for Booth Agents
     const showBoothNumber = activeTab === "BoothAgent";
 
@@ -575,8 +580,8 @@ const UserManagement: React.FC = () => {
                           ...prev,
                           role: value,
                           // Clear AC assignment when switching to L1 or L0
-                          assignedAC: (value === "L2" || value === "BoothAgent") ? prev.assignedAC : "",
-                          aci_name: (value === "L2" || value === "BoothAgent") ? prev.aci_name : "",
+                          assignedAC: (value === "L2" || value === "MLA" || value === "BoothAgent") ? prev.assignedAC : "",
+                          aci_name: (value === "L2" || value === "MLA" || value === "BoothAgent") ? prev.aci_name : "",
                         }))
                       }
                     >
@@ -590,13 +595,15 @@ const UserManagement: React.FC = () => {
                             <SelectItem value="L0">System Admin</SelectItem>
                             <SelectItem value="L1">ACIM</SelectItem>
                             <SelectItem value="L2">ACI</SelectItem>
+                            <SelectItem value="MLA">MLA</SelectItem>
                             <SelectItem value="BoothAgent">Booth Agent</SelectItem>
                           </>
                         )}
-                        {/* L1 (ACIM) can only create L2 and BoothAgent */}
+                        {/* L1 (ACIM) can only create L2, MLA and BoothAgent */}
                         {currentUser?.role === "L1" && (
                           <>
                             <SelectItem value="L2">ACI</SelectItem>
+                            <SelectItem value="MLA">MLA</SelectItem>
                             <SelectItem value="BoothAgent">Booth Agent</SelectItem>
                           </>
                         )}
@@ -629,10 +636,10 @@ const UserManagement: React.FC = () => {
                   </div>
                 </div>
 
-                {/* AC Assignment - Only for L2 (ACI) and BoothAgent, NOT for L1 (ACIM) */}
-                {(formData.role === "L2" || formData.role === "BoothAgent") && (
+                {/* AC Assignment - Only for L2 (ACI), MLA and BoothAgent, NOT for L1 (ACIM) */}
+                {(formData.role === "L2" || formData.role === "MLA" || formData.role === "BoothAgent") && (
                   <div className="space-y-2">
-                    <Label htmlFor="assignedAC">Assigned AC {formData.role === "L2" ? "*" : ""}</Label>
+                    <Label htmlFor="assignedAC">Assigned AC {(formData.role === "L2" || formData.role === "MLA") ? "*" : ""}</Label>
                     <Select
                       value={formData.assignedAC}
                       onValueChange={(value) => {
@@ -771,10 +778,11 @@ const UserManagement: React.FC = () => {
         </CardHeader>
         <CardContent>
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="L0">System Admin</TabsTrigger>
               <TabsTrigger value="L1">ACIM</TabsTrigger>
               <TabsTrigger value="L2">ACI</TabsTrigger>
+              <TabsTrigger value="MLA">MLA</TabsTrigger>
               <TabsTrigger value="BoothAgent">Booth Agents</TabsTrigger>
             </TabsList>
             
@@ -813,7 +821,35 @@ const UserManagement: React.FC = () => {
               </div>
               {renderUsersTable()}
             </TabsContent>
-            
+
+            <TabsContent value="MLA" className="mt-4">
+              {/* Constituency Filter for MLA users */}
+              <div className="flex items-center gap-4 mb-4">
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm font-medium whitespace-nowrap">Filter by Constituency:</Label>
+                  <Select
+                    value={acFilter}
+                    onValueChange={(value) => {
+                      setAcFilter(value);
+                    }}
+                  >
+                    <SelectTrigger className="w-[280px]">
+                      <SelectValue placeholder="All Constituencies" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Constituencies</SelectItem>
+                      {CONSTITUENCIES.map((ac) => (
+                        <SelectItem key={ac.number} value={ac.number.toString()}>
+                          AC {ac.number} - {ac.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              {renderUsersTable()}
+            </TabsContent>
+
             <TabsContent value="BoothAgent" className="mt-4">
               {/* Constituency Filter for Booth Agents */}
               <div className="flex items-center gap-4 mb-4">
