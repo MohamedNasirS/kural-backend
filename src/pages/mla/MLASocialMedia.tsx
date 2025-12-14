@@ -1,0 +1,348 @@
+/**
+ * MLA Social Media Analytics Page
+ *
+ * Shows:
+ * - Share of Voice chart (competitor mentions)
+ * - Social Media Sentiment breakdown
+ * - Competitor mentions table
+ *
+ * Data is fetched from the analytics API (localhost:8000)
+ * filtered by the MLA's assigned AC as location_id
+ */
+
+import { useEffect, useState } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  Legend,
+  Tooltip,
+} from 'recharts';
+
+// Social Media Analytics interfaces
+interface ShareOfVoiceData {
+  success: boolean;
+  data: {
+    share_of_voice: Array<{
+      competitor_id: number;
+      competitor_name: string;
+      mention_count: number;
+      share_percent: number;
+      avg_sentiment: number;
+    }>;
+  };
+}
+
+interface SentimentBreakdownData {
+  success: boolean;
+  data: {
+    positive: number;
+    neutral: number;
+    negative: number;
+    total: number;
+  };
+}
+
+const SOCIAL_SENTIMENT_COLORS = {
+  positive: '#22c55e',
+  neutral: '#6b7280',
+  negative: '#ef4444',
+};
+
+const SHARE_OF_VOICE_COLORS = ['#3b82f6', '#ef4444', '#f59e0b', '#10b981', '#8b5cf6', '#f97316'];
+
+export default function MLASocialMedia() {
+  const { user } = useAuth();
+  const acId = user?.assignedAC;
+
+  const [shareOfVoice, setShareOfVoice] = useState<ShareOfVoiceData | null>(null);
+  const [socialSentiment, setSocialSentiment] = useState<SentimentBreakdownData | null>(null);
+  const [socialTimeRange, setSocialTimeRange] = useState<string>('30d');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchSocialData = async () => {
+      if (!acId) return;
+
+      setLoading(true);
+      setError(null);
+
+      try {
+        const [sovRes, sentimentRes] = await Promise.all([
+          fetch(`/api/mla-dashboard/${acId}/social-media/share-of-voice?time_range=${socialTimeRange}`),
+          fetch(`/api/mla-dashboard/${acId}/social-media/sentiment-breakdown?time_range=${socialTimeRange}`),
+        ]);
+
+        if (sovRes.ok) {
+          const sovData = await sovRes.json();
+          setShareOfVoice(sovData);
+        } else {
+          setShareOfVoice(null);
+        }
+
+        if (sentimentRes.ok) {
+          const sentimentData = await sentimentRes.json();
+          setSocialSentiment(sentimentData);
+        } else {
+          setSocialSentiment(null);
+        }
+
+        // Check if we got any data
+        if (!sovRes.ok && !sentimentRes.ok) {
+          setError('Analytics API is not available. Social media data cannot be fetched.');
+        }
+      } catch (err: any) {
+        console.error('Error fetching social media data:', err);
+        setError('Failed to connect to analytics API. Please ensure it is running.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchSocialData();
+  }, [acId, socialTimeRange]);
+
+  const hasData = shareOfVoice?.data?.share_of_voice?.length || socialSentiment?.data;
+
+  if (loading) {
+    return <div className="text-center py-8">Loading social media analytics...</div>;
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header with time range selector */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+            <CardTitle className="text-lg">Social Media Analytics</CardTitle>
+            <Select value={socialTimeRange} onValueChange={setSocialTimeRange}>
+              <SelectTrigger className="w-[120px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="7d">Last 7 days</SelectItem>
+                <SelectItem value="30d">Last 30 days</SelectItem>
+                <SelectItem value="90d">Last 90 days</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <p className="text-sm text-muted-foreground mt-1">
+            Track competitor mentions and sentiment across social media platforms for AC {acId}
+          </p>
+        </CardHeader>
+      </Card>
+
+      {error && (
+        <Card className="border-yellow-200 bg-yellow-50">
+          <CardContent className="py-4">
+            <div className="flex items-center gap-2">
+              <span className="text-yellow-600 text-sm">{error}</span>
+            </div>
+            <p className="text-xs text-yellow-500 mt-1">
+              The analytics API should be running at localhost:8000. Please contact the administrator.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {hasData ? (
+        <>
+          {/* Charts Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Share of Voice Chart */}
+            {shareOfVoice?.data?.share_of_voice?.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Share of Voice</CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Distribution of mentions by competitor/party
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={250}>
+                    <PieChart>
+                      <Pie
+                        data={shareOfVoice.data.share_of_voice.map((item, idx) => ({
+                          name: item.competitor_name,
+                          value: item.mention_count,
+                          percent: item.share_percent,
+                          color: SHARE_OF_VOICE_COLORS[idx % SHARE_OF_VOICE_COLORS.length],
+                        }))}
+                        cx="50%"
+                        cy="45%"
+                        innerRadius={50}
+                        outerRadius={80}
+                        dataKey="value"
+                        label={false}
+                        labelLine={false}
+                      >
+                        {shareOfVoice.data.share_of_voice.map((_, idx) => (
+                          <Cell key={`cell-${idx}`} fill={SHARE_OF_VOICE_COLORS[idx % SHARE_OF_VOICE_COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(value: number, name: string, props: any) => [
+                          `${value.toLocaleString()} mentions (${props.payload.percent}%)`,
+                          name,
+                        ]}
+                      />
+                      <Legend
+                        layout="horizontal"
+                        verticalAlign="bottom"
+                        align="center"
+                        wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Social Media Sentiment Chart */}
+            {socialSentiment?.data && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Social Media Sentiment</CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Overall sentiment of social media mentions
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={250}>
+                    <PieChart>
+                      <Pie
+                        data={[
+                          { name: 'Positive', value: socialSentiment.data.positive, color: SOCIAL_SENTIMENT_COLORS.positive },
+                          { name: 'Neutral', value: socialSentiment.data.neutral, color: SOCIAL_SENTIMENT_COLORS.neutral },
+                          { name: 'Negative', value: socialSentiment.data.negative, color: SOCIAL_SENTIMENT_COLORS.negative },
+                        ].filter(d => d.value > 0)}
+                        cx="50%"
+                        cy="45%"
+                        innerRadius={50}
+                        outerRadius={80}
+                        dataKey="value"
+                        label={false}
+                        labelLine={false}
+                      >
+                        {[
+                          { name: 'Positive', value: socialSentiment.data.positive, color: SOCIAL_SENTIMENT_COLORS.positive },
+                          { name: 'Neutral', value: socialSentiment.data.neutral, color: SOCIAL_SENTIMENT_COLORS.neutral },
+                          { name: 'Negative', value: socialSentiment.data.negative, color: SOCIAL_SENTIMENT_COLORS.negative },
+                        ].filter(d => d.value > 0).map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(value: number, name: string) => {
+                          const total = socialSentiment.data.total;
+                          const percent = total > 0 ? Math.round((value / total) * 100) : 0;
+                          return [`${value.toLocaleString()} (${percent}%)`, name];
+                        }}
+                      />
+                      <Legend
+                        layout="horizontal"
+                        verticalAlign="bottom"
+                        align="center"
+                        wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }}
+                        formatter={(value, entry: any) => {
+                          const total = socialSentiment.data.total;
+                          const itemValue = entry.payload.value;
+                          const percent = total > 0 ? Math.round((itemValue / total) * 100) : 0;
+                          return <span style={{ color: entry.payload.color }}>{value}: {percent}%</span>;
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="text-center text-sm text-muted-foreground mt-2">
+                    Total mentions: {socialSentiment.data.total.toLocaleString()}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          {/* Competitor Mentions Table */}
+          {shareOfVoice?.data?.share_of_voice?.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Competitor Mentions Details</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Competitor</TableHead>
+                      <TableHead className="text-right">Mentions</TableHead>
+                      <TableHead className="text-right">Share %</TableHead>
+                      <TableHead className="text-right">Avg Sentiment</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {shareOfVoice.data.share_of_voice.map((item, idx) => (
+                      <TableRow key={item.competitor_id}>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="w-3 h-3 rounded-full"
+                              style={{ backgroundColor: SHARE_OF_VOICE_COLORS[idx % SHARE_OF_VOICE_COLORS.length] }}
+                            />
+                            {item.competitor_name}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">{item.mention_count.toLocaleString()}</TableCell>
+                        <TableCell className="text-right">{item.share_percent}%</TableCell>
+                        <TableCell className="text-right">
+                          <span
+                            className={`px-2 py-1 rounded text-xs ${
+                              item.avg_sentiment > 0
+                                ? 'bg-green-100 text-green-800'
+                                : item.avg_sentiment < 0
+                                ? 'bg-red-100 text-red-800'
+                                : 'bg-gray-100 text-gray-800'
+                            }`}
+                          >
+                            {item.avg_sentiment > 0 ? '+' : ''}{item.avg_sentiment.toFixed(2)}
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+        </>
+      ) : (
+        !error && (
+          <Card>
+            <CardContent className="py-8 text-center">
+              <p className="text-muted-foreground">No social media data available for this time period.</p>
+              <p className="text-sm text-muted-foreground mt-2">
+                Try selecting a different time range or check back later.
+              </p>
+            </CardContent>
+          </Card>
+        )
+      )}
+    </div>
+  );
+}

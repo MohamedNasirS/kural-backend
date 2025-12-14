@@ -88,6 +88,7 @@ const MLABoothDetail = lazy(() => import("@/pages/mla/MLABoothDetail"));
 const MLAPriorityTargets = lazy(() => import("@/pages/mla/MLAPriorityTargets"));
 const MLAHistoricalTrends = lazy(() => import("@/pages/mla/MLAHistoricalTrends"));
 const MLACompetitorAnalysis = lazy(() => import("@/pages/mla/MLACompetitorAnalysis"));
+const MLASocialMedia = lazy(() => import("@/pages/mla/MLASocialMedia"));
 
 const queryClient = new QueryClient();
 
@@ -230,6 +231,7 @@ const AppRoutes = () => {
         <Route path="priority-targets" element={<MLAPriorityTargets />} />
         <Route path="trends" element={<MLAHistoricalTrends />} />
         <Route path="competitors" element={<MLACompetitorAnalysis />} />
+        <Route path="social-media" element={<MLASocialMedia />} />
       </Route>
 
       <Route path="*" element={<NotFound />} />

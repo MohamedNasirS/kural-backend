@@ -810,4 +810,142 @@ router.get('/:acId/competitor-analysis', async (req, res) => {
   }
 });
 
+/**
+ * Analytics API Proxy Configuration
+ * Proxies requests to the external analytics service at localhost:8000
+ */
+const ANALYTICS_API_BASE = process.env.ANALYTICS_API_URL || 'http://localhost:8000/api/v1';
+const ANALYTICS_CREDENTIALS = {
+  email: process.env.ANALYTICS_API_EMAIL || 'admin@kuralai.com',
+  password: process.env.ANALYTICS_API_PASSWORD || 'kuraladmin@123',
+};
+
+// Cache for analytics JWT token
+let analyticsToken = null;
+let tokenExpiry = null;
+
+// Helper to get analytics API token
+const getAnalyticsToken = async () => {
+  // Return cached token if still valid (with 5 min buffer)
+  if (analyticsToken && tokenExpiry && Date.now() < tokenExpiry - 300000) {
+    return analyticsToken;
+  }
+
+  try {
+    const response = await fetch(`${ANALYTICS_API_BASE}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(ANALYTICS_CREDENTIALS),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to authenticate with analytics API');
+    }
+
+    const data = await response.json();
+    analyticsToken = data.access_token || data.token;
+    // Set expiry to 1 hour from now (adjust based on actual token expiry)
+    tokenExpiry = Date.now() + 3600000;
+    return analyticsToken;
+  } catch (error) {
+    console.error('Analytics API auth error:', error);
+    throw error;
+  }
+};
+
+/**
+ * GET /api/mla-dashboard/:acId/social-media/share-of-voice
+ * Proxy to analytics API - Get mention share percentage per competitor
+ */
+router.get('/:acId/social-media/share-of-voice', async (req, res) => {
+  try {
+    const acId = Number(req.params.acId);
+    const { time_range = '30d', start_date, end_date } = req.query;
+
+    const token = await getAnalyticsToken();
+
+    // Build query params
+    const params = new URLSearchParams();
+    params.append('time_range', time_range);
+    params.append('location_id', acId.toString());
+    if (start_date) params.append('start_date', start_date);
+    if (end_date) params.append('end_date', end_date);
+
+    const response = await fetch(
+      `${ANALYTICS_API_BASE}/analytics/share-of-voice?${params.toString()}`,
+      {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      return res.status(response.status).json({
+        success: false,
+        message: error.message || 'Failed to fetch share of voice data',
+      });
+    }
+
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Error in share of voice proxy:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch social media analytics',
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/mla-dashboard/:acId/social-media/sentiment-breakdown
+ * Proxy to analytics API - Get sentiment distribution
+ */
+router.get('/:acId/social-media/sentiment-breakdown', async (req, res) => {
+  try {
+    const acId = Number(req.params.acId);
+    const { time_range = '30d' } = req.query;
+
+    const token = await getAnalyticsToken();
+
+    const params = new URLSearchParams();
+    params.append('time_range', time_range);
+    params.append('location_id', acId.toString());
+
+    const response = await fetch(
+      `${ANALYTICS_API_BASE}/dashboard/sentiment-breakdown?${params.toString()}`,
+      {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      return res.status(response.status).json({
+        success: false,
+        message: error.message || 'Failed to fetch sentiment data',
+      });
+    }
+
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Error in sentiment breakdown proxy:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch social media analytics',
+      error: error.message,
+    });
+  }
+});
+
 export default router;

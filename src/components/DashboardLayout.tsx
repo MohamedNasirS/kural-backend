@@ -179,6 +179,7 @@ const AppSidebar = () => {
           { icon: Target, label: 'Priority Targets', path: '/mla/priority-targets' },
           { icon: TrendingUp, label: 'Historical Trends', path: '/mla/trends' },
           { icon: BarChart3, label: 'Competitor Analysis', path: '/mla/competitors' },
+          { icon: Share2, label: 'Social Media', path: '/mla/social-media' },
         ];
       default:
         return [];
