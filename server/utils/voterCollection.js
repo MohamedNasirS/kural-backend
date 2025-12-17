@@ -388,6 +388,93 @@ export async function aggregateAllVoters(pipeline, options = {}) {
   return resultsArrays.flat();
 }
 
+/**
+ * Batch fetch voters by IDs across all AC collections
+ * OPTIMIZATION: Replaces N+1 query pattern with single batch fetch
+ * @param {Array} voterIds - Array of voter ObjectIds or ID strings
+ * @returns {Promise<Map>} Map of voterId -> voter document
+ */
+export async function batchFetchVotersByIds(voterIds) {
+  if (!voterIds || voterIds.length === 0) {
+    return new Map();
+  }
+
+  // Filter valid ObjectIds
+  const validIds = voterIds
+    .filter(id => id && mongoose.Types.ObjectId.isValid(id))
+    .map(id => new mongoose.Types.ObjectId(id));
+
+  if (validIds.length === 0) {
+    return new Map();
+  }
+
+  // Query all AC collections in parallel
+  const fetchPromises = ALL_AC_IDS.map(async (acId) => {
+    try {
+      const VoterModel = getVoterModel(acId);
+      const voters = await VoterModel.find({ _id: { $in: validIds } }).lean();
+      return voters.map(voter => ({ ...voter, _acId: acId }));
+    } catch (err) {
+      console.error(`Error batch fetching from voters_${acId}:`, err.message);
+      return [];
+    }
+  });
+
+  const resultsArrays = await Promise.all(fetchPromises);
+  const allVoters = resultsArrays.flat();
+
+  // Build map for O(1) lookups
+  const voterMap = new Map();
+  allVoters.forEach(voter => {
+    voterMap.set(voter._id.toString(), voter);
+  });
+
+  return voterMap;
+}
+
+/**
+ * Batch fetch voters by voterIDs (not ObjectIds) across all AC collections
+ * @param {Array} voterIDValues - Array of voterID strings (e.g., "ABC1234567")
+ * @returns {Promise<Map>} Map of voterID -> voter document
+ */
+export async function batchFetchVotersByVoterID(voterIDValues) {
+  if (!voterIDValues || voterIDValues.length === 0) {
+    return new Map();
+  }
+
+  // Filter valid voter IDs
+  const validIds = voterIDValues.filter(id => id && typeof id === 'string' && id.trim());
+
+  if (validIds.length === 0) {
+    return new Map();
+  }
+
+  // Query all AC collections in parallel
+  const fetchPromises = ALL_AC_IDS.map(async (acId) => {
+    try {
+      const VoterModel = getVoterModel(acId);
+      const voters = await VoterModel.find({ voterID: { $in: validIds } }).lean();
+      return voters.map(voter => ({ ...voter, _acId: acId }));
+    } catch (err) {
+      console.error(`Error batch fetching by voterID from voters_${acId}:`, err.message);
+      return [];
+    }
+  });
+
+  const resultsArrays = await Promise.all(fetchPromises);
+  const allVoters = resultsArrays.flat();
+
+  // Build map for O(1) lookups by voterID
+  const voterMap = new Map();
+  allVoters.forEach(voter => {
+    if (voter.voterID) {
+      voterMap.set(voter.voterID, voter);
+    }
+  });
+
+  return voterMap;
+}
+
 export default {
   getVoterModel,
   getAllACIds,
@@ -401,5 +488,7 @@ export default {
   countAllVoters,
   findOneVoter,
   aggregateAllVoters,
+  batchFetchVotersByIds,
+  batchFetchVotersByVoterID,
   ALL_AC_IDS
 };

@@ -29,14 +29,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import {
-  PieChart,
-  Pie,
-  Cell,
-  ResponsiveContainer,
-  Legend,
-  Tooltip,
-} from 'recharts';
+import { BeautifulDonutChart } from '@/components/charts';
 
 // Social Media Analytics interfaces (production API format)
 interface ShareOfVoiceData {
@@ -182,41 +175,16 @@ export default function MLASocialMedia() {
                   </p>
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={250}>
-                    <PieChart>
-                      <Pie
-                        data={shareOfVoice.data.items.map((item, idx) => ({
-                          name: item.competitor_name,
-                          value: item.mention_count,
-                          percent: item.percentage,
-                          color: SHARE_OF_VOICE_COLORS[idx % SHARE_OF_VOICE_COLORS.length],
-                        }))}
-                        cx="50%"
-                        cy="45%"
-                        innerRadius={50}
-                        outerRadius={80}
-                        dataKey="value"
-                        label={false}
-                        labelLine={false}
-                      >
-                        {shareOfVoice.data.items.map((_, idx) => (
-                          <Cell key={`cell-${idx}`} fill={SHARE_OF_VOICE_COLORS[idx % SHARE_OF_VOICE_COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        formatter={(value: number, name: string, props: any) => [
-                          `${value.toLocaleString()} mentions (${props.payload.percent}%)`,
-                          name,
-                        ]}
-                      />
-                      <Legend
-                        layout="horizontal"
-                        verticalAlign="bottom"
-                        align="center"
-                        wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
+                  <BeautifulDonutChart
+                    data={shareOfVoice.data.items.map((item, idx) => ({
+                      name: item.competitor_name,
+                      value: item.mention_count,
+                      color: SHARE_OF_VOICE_COLORS[idx % SHARE_OF_VOICE_COLORS.length],
+                    }))}
+                    height={280}
+                    valueLabel="Mentions"
+                    showMoreThreshold={6}
+                  />
                 </CardContent>
               </Card>
             )}
@@ -231,54 +199,17 @@ export default function MLASocialMedia() {
                   </p>
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={250}>
-                    <PieChart>
-                      <Pie
-                        data={[
-                          { name: 'Positive', value: socialSentiment.data.positive, color: SOCIAL_SENTIMENT_COLORS.positive },
-                          { name: 'Neutral', value: socialSentiment.data.neutral, color: SOCIAL_SENTIMENT_COLORS.neutral },
-                          { name: 'Negative', value: socialSentiment.data.negative, color: SOCIAL_SENTIMENT_COLORS.negative },
-                        ].filter(d => d.value > 0)}
-                        cx="50%"
-                        cy="45%"
-                        innerRadius={50}
-                        outerRadius={80}
-                        dataKey="value"
-                        label={false}
-                        labelLine={false}
-                      >
-                        {[
-                          { name: 'Positive', value: socialSentiment.data.positive, color: SOCIAL_SENTIMENT_COLORS.positive },
-                          { name: 'Neutral', value: socialSentiment.data.neutral, color: SOCIAL_SENTIMENT_COLORS.neutral },
-                          { name: 'Negative', value: socialSentiment.data.negative, color: SOCIAL_SENTIMENT_COLORS.negative },
-                        ].filter(d => d.value > 0).map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        formatter={(value: number, name: string) => {
-                          const total = socialSentiment.data.total;
-                          const percent = total > 0 ? Math.round((value / total) * 100) : 0;
-                          return [`${value.toLocaleString()} (${percent}%)`, name];
-                        }}
-                      />
-                      <Legend
-                        layout="horizontal"
-                        verticalAlign="bottom"
-                        align="center"
-                        wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }}
-                        formatter={(value, entry: any) => {
-                          const total = socialSentiment.data.total;
-                          const itemValue = entry.payload.value;
-                          const percent = total > 0 ? Math.round((itemValue / total) * 100) : 0;
-                          return <span style={{ color: entry.payload.color }}>{value}: {percent}%</span>;
-                        }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div className="text-center text-sm text-muted-foreground mt-2">
-                    Total mentions: {socialSentiment.data.total.toLocaleString()}
-                  </div>
+                  <BeautifulDonutChart
+                    data={[
+                      { name: 'Positive', value: socialSentiment.data.positive, color: SOCIAL_SENTIMENT_COLORS.positive },
+                      { name: 'Neutral', value: socialSentiment.data.neutral, color: SOCIAL_SENTIMENT_COLORS.neutral },
+                      { name: 'Negative', value: socialSentiment.data.negative, color: SOCIAL_SENTIMENT_COLORS.negative },
+                    ].filter(d => d.value > 0)}
+                    height={280}
+                    valueLabel="Mentions"
+                    subtitle={`Total mentions: ${socialSentiment.data.total.toLocaleString()}`}
+                    showMoreThreshold={3}
+                  />
                 </CardContent>
               </Card>
             )}

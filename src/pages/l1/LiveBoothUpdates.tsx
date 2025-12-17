@@ -112,8 +112,8 @@ const getActivityDetails = (item: LocationData) => {
 export const LiveBoothUpdates = () => {
   const { user } = useAuth();
 
-  // L1 (ACIM) can select any AC
-  const [selectedAC, setSelectedAC] = useState<number>(CONSTITUENCIES[0]?.number || 111);
+  // L1 (ACIM) can select any AC - default empty until user selects
+  const [selectedAC, setSelectedAC] = useState<number | null>(null);
   const acName = CONSTITUENCIES.find(c => c.number === selectedAC)?.name || 'Unknown';
 
   const [locationData, setLocationData] = useState<LocationData[]>([]);
@@ -147,6 +147,14 @@ export const LiveBoothUpdates = () => {
   }, [selectedAC, fetchBooths]);
 
   const fetchLocationData = useCallback(async () => {
+    // Don't fetch if no AC is selected
+    if (!selectedAC) {
+      setLoading(false);
+      setError(null);
+      setLocationData([]);
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
@@ -387,7 +395,7 @@ export const LiveBoothUpdates = () => {
             {/* AC Selector and Filters */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               {/* AC Dropdown - L1 can select any AC */}
-              <Select value={String(selectedAC)} onValueChange={handleACChange}>
+              <Select value={selectedAC ? String(selectedAC) : ''} onValueChange={handleACChange}>
                 <SelectTrigger className="w-full">
                   <MapPin className="h-4 w-4 mr-2 text-muted-foreground" />
                   <SelectValue placeholder="Select AC" />
@@ -427,14 +435,27 @@ export const LiveBoothUpdates = () => {
             {/* Current AC indicator */}
             <div className="flex items-center gap-4">
               <p className="text-sm text-muted-foreground">
-                Viewing: <span className="font-medium text-foreground">AC {selectedAC} - {acName}</span>
+                Viewing: <span className="font-medium text-foreground">
+                  {selectedAC ? `AC ${selectedAC} - ${acName}` : 'No AC selected'}
+                </span>
               </p>
             </div>
           </div>
         </Card>
 
-        {/* Error Display */}
-        {error && (
+        {/* Select AC Prompt - Show when no AC is selected */}
+        {!selectedAC && !loading && (
+          <Card className="p-6 border-primary/20 bg-primary/5">
+            <div className="flex flex-col items-center gap-3 text-center">
+              <MapPin className="h-10 w-10 text-primary" />
+              <h3 className="text-lg font-semibold">Select an Assembly Constituency</h3>
+              <p className="text-muted-foreground">Please select an AC from the dropdown above to view live booth updates and location data.</p>
+            </div>
+          </Card>
+        )}
+
+        {/* Error Display - Only show when AC is selected but error occurred */}
+        {error && selectedAC && (
           <Card className="p-4 border-destructive bg-destructive/10">
             <div className="flex items-center gap-3">
               <AlertCircle className="h-5 w-5 text-destructive" />

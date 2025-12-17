@@ -10,126 +10,158 @@
 
 @layer base {
   :root {
-    /* Light Mode Colors (fallback) */
-    --background: 240 10% 98%;
-    --foreground: 240 10% 10%;
+    /* Light Mode Colors - Indigo Theme (STYLE_COOKBOOK) */
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
 
     --card: 0 0% 100%;
-    --card-foreground: 240 10% 10%;
+    --card-foreground: 222.2 84% 4.9%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 10%;
+    --popover-foreground: 222.2 84% 4.9%;
 
-    /* Primary: Soft Purple */
-    --primary: 250 100% 69%;
+    /* Primary: Indigo (#4f46e5 = 239 84% 67%) */
+    --primary: 239 84% 67%;
     --primary-foreground: 0 0% 100%;
-    --primary-hover: 250 100% 65%;
-    --primary-glow: 250 100% 75%;
+    --primary-hover: 239 84% 60%;
+    --primary-glow: 239 84% 75%;
 
-    /* Secondary: Teal */
-    --secondary: 171 100% 41%;
-    --secondary-foreground: 0 0% 100%;
+    /* Secondary: Gray */
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
 
-    /* Accent: Coral */
-    --accent: 0 100% 71%;
-    --accent-foreground: 0 0% 100%;
+    /* Accent: Indigo Light (#eef2ff) */
+    --accent: 226 100% 97%;
+    --accent-foreground: 239 84% 67%;
 
-    --muted: 240 5% 96%;
-    --muted-foreground: 240 4% 46%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
 
-    --success: 142 76% 36%;
+    /* Success: Green (#10b981) */
+    --success: 160 84% 39%;
     --success-foreground: 0 0% 100%;
 
+    /* Warning: Amber (#f59e0b) */
     --warning: 38 92% 50%;
     --warning-foreground: 0 0% 100%;
 
+    /* Destructive: Red (#ef4444) */
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 240 6% 90%;
-    --input: 240 6% 90%;
-    --ring: 250 100% 69%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 239 84% 67%;
 
-    --radius: 1rem;
-    
+    --radius: 0.5rem;
+
     /* Professional Shadows */
-    --shadow-sm: 0 1px 3px 0 hsl(240 10% 10% / 0.1);
-    --shadow-md: 0 4px 6px -1px hsl(240 10% 10% / 0.1);
-    --shadow-lg: 0 10px 15px -3px hsl(240 10% 10% / 0.1);
-    --shadow-xl: 0 20px 25px -5px hsl(240 10% 10% / 0.1);
-    
-    /* Clean Gradients */
-    --gradient-primary: linear-gradient(135deg, hsl(250 100% 69%), hsl(250 95% 65%));
-    --gradient-success: linear-gradient(135deg, hsl(171 100% 41%), hsl(171 90% 38%));
-    --gradient-warning: linear-gradient(135deg, hsl(0 100% 71%), hsl(0 95% 68%));
+    --shadow-sm: 0 1px 3px 0 hsl(222 84% 5% / 0.1);
+    --shadow-md: 0 4px 6px -1px hsl(222 84% 5% / 0.1);
+    --shadow-lg: 0 10px 15px -3px hsl(222 84% 5% / 0.1);
+    --shadow-xl: 0 20px 25px -5px hsl(222 84% 5% / 0.1);
 
-    /* Sidebar */
-    --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 240 5.9% 10%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 240 4.8% 95.9%;
-    --sidebar-accent-foreground: 240 5.9% 10%;
-    --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 250 100% 69%;
+    /* Clean Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(239 84% 67%), hsl(239 84% 60%));
+    --gradient-success: linear-gradient(135deg, hsl(160 84% 39%), hsl(160 84% 35%));
+    --gradient-warning: linear-gradient(135deg, hsl(38 92% 50%), hsl(38 92% 45%));
+
+    /* Chart Colors (STYLE_COOKBOOK 15-color palette) */
+    --chart-1: 239 84% 67%;   /* Indigo #4f46e5 */
+    --chart-2: 160 84% 39%;   /* Emerald #10b981 */
+    --chart-3: 38 92% 50%;    /* Amber #f59e0b */
+    --chart-4: 0 84% 60%;     /* Red #ef4444 */
+    --chart-5: 263 70% 50%;   /* Violet #8b5cf6 */
+    --chart-6: 187 92% 41%;   /* Cyan #06b6d4 */
+    --chart-7: 25 95% 53%;    /* Orange #f97316 */
+    --chart-8: 82 85% 40%;    /* Lime #84cc16 */
+    --chart-9: 330 81% 60%;   /* Pink #ec4899 */
+    --chart-10: 168 76% 42%;  /* Teal #14b8a6 */
+    --chart-others: 217 19% 64%; /* Gray #9ca3af */
+
+    /* Sidebar - Dark Navy Theme (matches reference) */
+    --sidebar-background: 222 47% 11%;
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-primary: 239 84% 67%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 217 33% 17%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 217 33% 17%;
+    --sidebar-ring: 239 84% 67%;
   }
 
-  /* Dark Mode - Prioritized */
+  /* Dark Mode - Indigo Theme */
   .dark {
-    --background: 240 10% 8%;
-    --foreground: 240 5% 96%;
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
 
-    --card: 240 10% 12%;
-    --card-foreground: 240 5% 96%;
+    --card: 222.2 84% 8%;
+    --card-foreground: 210 40% 98%;
 
-    --popover: 240 10% 12%;
-    --popover-foreground: 240 5% 96%;
+    --popover: 222.2 84% 8%;
+    --popover-foreground: 210 40% 98%;
 
-    /* Primary: Soft Purple (slightly brighter for dark mode) */
-    --primary: 250 100% 72%;
-    --primary-foreground: 240 10% 8%;
-    --primary-hover: 250 100% 76%;
-    --primary-glow: 250 100% 80%;
+    /* Primary: Indigo (brighter for dark mode) */
+    --primary: 239 84% 70%;
+    --primary-foreground: 222.2 84% 4.9%;
+    --primary-hover: 239 84% 75%;
+    --primary-glow: 239 84% 80%;
 
-    /* Secondary: Teal */
-    --secondary: 171 100% 45%;
-    --secondary-foreground: 240 10% 8%;
+    /* Secondary: Dark gray */
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
 
-    /* Accent: Coral */
-    --accent: 0 100% 73%;
-    --accent-foreground: 240 10% 8%;
+    /* Accent: Indigo darker */
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 239 84% 70%;
 
-    --muted: 240 10% 16%;
-    --muted-foreground: 240 5% 65%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
 
-    --success: 142 76% 45%;
+    /* Success: Green (brighter for dark) */
+    --success: 160 84% 45%;
     --success-foreground: 0 0% 100%;
 
+    /* Warning: Amber (brighter for dark) */
     --warning: 38 92% 55%;
     --warning-foreground: 0 0% 100%;
 
+    /* Destructive: Red (brighter for dark) */
     --destructive: 0 84% 65%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 240 10% 20%;
-    --input: 240 10% 20%;
-    --ring: 250 100% 72%;
-    
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 239 84% 70%;
+
     /* Professional Dark Shadows */
-    --shadow-sm: 0 1px 3px 0 hsl(0 0% 0% / 0.3);
-    --shadow-md: 0 4px 6px -1px hsl(0 0% 0% / 0.3);
-    --shadow-lg: 0 10px 15px -3px hsl(0 0% 0% / 0.3);
-    --shadow-xl: 0 20px 25px -5px hsl(0 0% 0% / 0.3);
+    --shadow-sm: 0 1px 3px 0 hsl(0 0% 0% / 0.4);
+    --shadow-md: 0 4px 6px -1px hsl(0 0% 0% / 0.4);
+    --shadow-lg: 0 10px 15px -3px hsl(0 0% 0% / 0.4);
+    --shadow-xl: 0 20px 25px -5px hsl(0 0% 0% / 0.4);
+
+    /* Chart Colors (adjusted for dark mode) */
+    --chart-1: 239 84% 70%;   /* Indigo */
+    --chart-2: 160 84% 45%;   /* Emerald */
+    --chart-3: 38 92% 55%;    /* Amber */
+    --chart-4: 0 84% 65%;     /* Red */
+    --chart-5: 263 70% 55%;   /* Violet */
+    --chart-6: 187 92% 48%;   /* Cyan */
+    --chart-7: 25 95% 58%;    /* Orange */
+    --chart-8: 82 85% 48%;    /* Lime */
+    --chart-9: 330 81% 65%;   /* Pink */
+    --chart-10: 168 76% 48%;  /* Teal */
+    --chart-others: 217 19% 50%; /* Gray */
 
     /* Sidebar Dark */
-    --sidebar-background: 240 10% 10%;
-    --sidebar-foreground: 240 5% 90%;
-    --sidebar-primary: 250 100% 72%;
-    --sidebar-primary-foreground: 240 10% 8%;
-    --sidebar-accent: 240 10% 16%;
-    --sidebar-accent-foreground: 240 5% 90%;
-    --sidebar-border: 240 10% 18%;
-    --sidebar-ring: 250 100% 72%;
+    --sidebar-background: 222.2 84% 6%;
+    --sidebar-foreground: 210 40% 90%;
+    --sidebar-primary: 239 84% 70%;
+    --sidebar-primary-foreground: 222.2 84% 4.9%;
+    --sidebar-accent: 217.2 32.6% 17.5%;
+    --sidebar-accent-foreground: 210 40% 90%;
+    --sidebar-border: 217.2 32.6% 20%;
+    --sidebar-ring: 239 84% 70%;
   }
 }
 
@@ -335,5 +367,15 @@
   /* Smooth Interactions */
   .hover-lift {
     @apply transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-lg;
+  }
+
+  /* Hide scrollbar in sidebar while keeping scroll functionality */
+  [data-sidebar="content"] {
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE and Edge */
+  }
+
+  [data-sidebar="content"]::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Opera */
   }
 }

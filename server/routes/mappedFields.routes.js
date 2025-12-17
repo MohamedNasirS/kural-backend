@@ -1,10 +1,33 @@
+/**
+ * Mapped Fields Routes
+ *
+ * This module handles the mapping between survey responses and master data fields.
+ * It enables automatic translation of survey answers into structured master data
+ * that can be associated with voter records.
+ *
+ * Key Concepts:
+ * - SurveyMasterDataMapping: Defines how survey questions map to master data fields
+ * - MappedField: Stores the actual mapped values for each voter/survey response
+ * - Value Mapping: Translates survey response values to master data answer values
+ *
+ * Data Flow:
+ * 1. Admin creates a mapping between survey questions and master data questions
+ * 2. When survey responses are submitted, this mapping is applied
+ * 3. The apply-mapping endpoint processes responses and creates MappedField records
+ * 4. MappedFields link voters to their survey-derived master data
+ *
+ * Performance Optimizations:
+ * - Batch fetching voters to avoid N+1 queries (see batchFetchVotersByIds)
+ * - Parallel Promise.all for independent async operations
+ */
+
 import express from "express";
 import mongoose from "mongoose";
 import SurveyMasterDataMapping from "../models/SurveyMasterDataMapping.js";
 import MappedField from "../models/MappedField.js";
 import MasterDataSection from "../models/MasterDataSection.js";
 import { connectToDatabase } from "../config/database.js";
-import { findVoterById, findOneVoter, getVoterModel } from "../utils/voterCollection.js";
+import { findVoterById, findOneVoter, getVoterModel, batchFetchVotersByIds, batchFetchVotersByVoterID } from "../utils/voterCollection.js";
 import {
   getSurveyResponseModel,
   querySurveyResponses,
@@ -205,7 +228,28 @@ router.delete("/survey-master-data-mappings/:mappingId", async (req, res) => {
   }
 });
 
-// Apply mapping and save to mappedfields collection
+/**
+ * Apply Mapping Endpoint
+ *
+ * This is the core endpoint that processes survey responses and creates
+ * MappedField records linking voters to their survey-derived master data.
+ *
+ * Processing Flow:
+ * 1. Validate input (mappingId, surveyResponseId required)
+ * 2. Load the mapping configuration and verify it's active
+ * 3. Fetch survey responses (single or all based on applyToAll flag)
+ * 4. Batch fetch all voters to avoid N+1 queries
+ * 5. For each response, apply each mapping item:
+ *    - Extract survey answer value
+ *    - Apply value mapping if configured (e.g., "Yes" -> "Y")
+ *    - Create or update MappedField record
+ *
+ * @body {string} mappingId - The SurveyMasterDataMapping ID to apply
+ * @body {string} surveyResponseId - Target survey response (or first one if applyToAll)
+ * @body {string} voterId - Optional explicit voter ID
+ * @body {number} acNumber - AC number to scope the query
+ * @body {boolean} applyToAll - If true, apply to all responses for this survey
+ */
 router.post("/mapped-fields/apply-mapping", async (req, res) => {
   try {
     await connectToDatabase();
@@ -271,27 +315,60 @@ router.post("/mapped-fields/apply-mapping", async (req, res) => {
       return res.status(404).json({ message: "Master data section not found" });
     }
 
+    // OPTIMIZATION: Batch fetch all voters at once instead of N+1 queries
+    // Collect all voter identifiers first
+    const objectIdVoterIds = [];
+    const stringVoterIds = [];
+
+    for (const surveyResponse of surveyResponses) {
+      const responseVoterId = voterId || surveyResponse.voterId || surveyResponse.respondentName || '';
+      if (responseVoterId) {
+        if (mongoose.Types.ObjectId.isValid(responseVoterId)) {
+          objectIdVoterIds.push(responseVoterId);
+        } else {
+          stringVoterIds.push(responseVoterId);
+        }
+      }
+    }
+
+    // Batch fetch voters by ObjectIds and voterIDs in parallel
+    const [votersByObjectId, votersByVoterId] = await Promise.all([
+      batchFetchVotersByIds(objectIdVoterIds),
+      batchFetchVotersByVoterID(stringVoterIds)
+    ]);
+
+    // Cache AC info to avoid repeated lookups
+    let defaultAcInfo = null;
+    if (acNumber) {
+      try {
+        const VoterModel = getVoterModel(acNumber);
+        const sampleVoter = await VoterModel.findOne({}).select('aci_name ac_name').lean();
+        if (sampleVoter) {
+          defaultAcInfo = {
+            acNumber,
+            acName: sampleVoter.aci_name || sampleVoter.ac_name,
+            aci_id: acNumber,
+            aci_name: sampleVoter.aci_name || sampleVoter.ac_name,
+          };
+        }
+      } catch (err) {
+        console.warn(`Could not find AC info for AC ${acNumber}:`, err.message);
+      }
+    }
+
     const mappedFieldsArray = [];
 
     for (const surveyResponse of surveyResponses) {
       const responseVoterId = voterId || surveyResponse.voterId || surveyResponse.respondentName || '';
 
+      // Lookup voter from batch-fetched maps (O(1) instead of database query)
       let voter = null;
       if (responseVoterId) {
         if (mongoose.Types.ObjectId.isValid(responseVoterId)) {
-          const result = await findVoterById(responseVoterId);
-          if (result) voter = result.voter;
+          voter = votersByObjectId.get(responseVoterId.toString());
         }
-
         if (!voter) {
-          const result = await findOneVoter({
-            $or: [
-              { voterID: responseVoterId },
-              { "name.english": { $regex: new RegExp(responseVoterId, 'i') } },
-              { "name.tamil": { $regex: new RegExp(responseVoterId, 'i') } },
-            ],
-          });
-          if (result) voter = result.voter;
+          voter = votersByVoterId.get(responseVoterId);
         }
       }
 
@@ -307,19 +384,8 @@ router.post("/mapped-fields/apply-mapping", async (req, res) => {
         acInfo.acName = voter.aci_name || voter.ac_name;
         acInfo.aci_id = voter.aci_id || voter.aci_num;
         acInfo.aci_name = voter.aci_name || voter.ac_name;
-      } else if (acNumber) {
-        try {
-          const VoterModel = getVoterModel(acNumber);
-          const sampleVoter = await VoterModel.findOne({}).select('aci_name ac_name').lean();
-
-          if (sampleVoter) {
-            acInfo.acName = sampleVoter.aci_name || sampleVoter.ac_name;
-            acInfo.aci_id = acNumber;
-            acInfo.aci_name = sampleVoter.aci_name || sampleVoter.ac_name;
-          }
-        } catch (err) {
-          console.warn(`Could not find AC info for AC ${acNumber}:`, err.message);
-        }
+      } else if (defaultAcInfo) {
+        acInfo = { ...defaultAcInfo };
       }
 
       const responseAnswers = surveyResponse.answers || surveyResponse.responses || {};

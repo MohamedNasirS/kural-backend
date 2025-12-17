@@ -50,8 +50,15 @@ import {
   SESSION_SECRET,
 } from "./config/index.js";
 
+// Import all models BEFORE routes to ensure they're registered with Mongoose
+// This prevents "Schema hasn't been registered for model" errors during populate()
+import "./models/index.js";
+
 // Import route registrar
 import { registerRoutes } from "./routes/index.js";
+
+// Import Swagger documentation
+import { setupSwagger } from "./config/swagger.js";
 
 // Import pre-computed stats for background job
 import { startStatsComputeJob } from "./utils/precomputedStats.js";
@@ -196,6 +203,11 @@ startEventLoopMonitor();
 
 // Register all routes
 registerRoutes(app);
+
+// Setup Swagger API documentation (only in non-production or when explicitly enabled)
+if (!isProduction || process.env.ENABLE_SWAGGER === 'true') {
+  setupSwagger(app);
+}
 
 // 404 handler (after all routes)
 app.use(notFoundHandler);

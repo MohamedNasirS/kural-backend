@@ -34,13 +34,14 @@ interface BoothAgent {
 
 interface Booth {
   _id: string;
-  booth_id: string;
-  boothCode: string;
-  boothNumber: number;
-  boothName: string;
-  ac_id: number;
-  ac_name: string;
-  assignedAgents: string[];
+  booth_id?: string;
+  boothCode?: string;
+  boothNumber?: number;
+  boothNo?: number;
+  boothName?: string;
+  ac_id?: number;
+  ac_name?: string;
+  assignedAgents?: string[];
 }
 
 export const BoothAgentManagementNew = () => {
@@ -55,7 +56,9 @@ export const BoothAgentManagementNew = () => {
   const [editingAgent, setEditingAgent] = useState<BoothAgent | null>(null);
   const [creating, setCreating] = useState(false);
   const [updating, setUpdating] = useState(false);
-  const [filterAC, setFilterAC] = useState<string>('all');
+  // Default to empty - user must select AC first (for L0/L1)
+  const [filterAC, setFilterAC] = useState<string>('');
+  const [filterBooth, setFilterBooth] = useState<string>('all');
   
   // Form states
   const [newAgent, setNewAgent] = useState({
@@ -81,9 +84,22 @@ export const BoothAgentManagementNew = () => {
   const [loadingCreateBooths, setLoadingCreateBooths] = useState(false);
 
   // Fetch data on mount and when filter changes
+  // For L0/L1: only fetch when AC is selected
+  // For L2: always fetch (they have assigned AC)
   useEffect(() => {
     if (user) {
-      fetchData();
+      if (user.role === 'L2') {
+        // L2 users always have an assigned AC, fetch immediately
+        fetchData();
+      } else if (filterAC) {
+        // L0/L1 users must select an AC first
+        fetchData();
+      } else {
+        // Clear data when no AC is selected
+        setAgents([]);
+        setBooths([]);
+        setLoading(false);
+      }
     }
   }, [user, filterAC]);
 
@@ -94,7 +110,7 @@ export const BoothAgentManagementNew = () => {
       // Determine AC filter for booths - L2 always uses their AC, L0/L1 can filter
       const acForBooths = user?.role === 'L2'
         ? user.assignedAC
-        : (filterAC !== 'all' ? parseInt(filterAC) : null);
+        : (filterAC ? parseInt(filterAC) : null);
 
       // Build booth API URL with AC filter if specified
       const boothUrl = acForBooths
@@ -106,8 +122,9 @@ export const BoothAgentManagementNew = () => {
         api.get(boothUrl)
       ]);
 
-      console.log('Fetched agents:', agentsResponse);
-      console.log('Fetched booths:', boothsResponse);
+      console.log('[BoothAgentMgmt] Fetched agents:', agentsResponse.users?.length || 0, 'agents');
+      console.log('[BoothAgentMgmt] Fetched booths:', boothsResponse.booths?.length || 0, 'booths');
+      console.log('[BoothAgentMgmt] Sample booth:', boothsResponse.booths?.[0]);
 
       // Map backend fields to frontend interface
       const mappedAgents = (agentsResponse.users || []).map((agent: any) => ({
@@ -169,17 +186,30 @@ export const BoothAgentManagementNew = () => {
     }
   }, [user]);
 
-  // Filter agents based on role and AC filter
+  // Filter agents based on role, AC filter, and booth filter
   const filteredAgents = (() => {
-    let result = user?.role === 'L2' 
+    let result = user?.role === 'L2'
       ? agents.filter(agent => agent.aci_id === user.assignedAC)
       : agents;
-      
+
     // Apply AC filter for L0/L1 users
-    if (user?.role !== 'L2' && filterAC !== 'all') {
+    if (user?.role !== 'L2' && filterAC) {
       result = result.filter(agent => agent.aci_id === parseInt(filterAC));
     }
-    
+
+    // Apply booth filter
+    if (filterBooth && filterBooth !== 'all') {
+      console.log('[BoothAgentMgmt] Filtering by booth:', filterBooth);
+      console.log('[BoothAgentMgmt] Agents before booth filter:', result.map(a => ({ name: a.fullName, booth_id: a.booth_id, boothCode: a.boothCode })));
+      result = result.filter(agent => {
+        const agentBoothId = agent.booth_id || agent.boothCode || '';
+        const match = agentBoothId === filterBooth;
+        console.log(`[BoothAgentMgmt] Agent ${agent.fullName}: booth_id=${agentBoothId}, match=${match}`);
+        return match;
+      });
+      console.log('[BoothAgentMgmt] Agents after booth filter:', result.length);
+    }
+
     return result;
   })();
 
@@ -367,18 +397,36 @@ export const BoothAgentManagementNew = () => {
                 : 'Manage booth agents and their assignments'}
             </p>
           </div>
-          <div className="flex gap-4">
+          <div className="flex flex-wrap gap-4">
             {user?.role !== 'L2' && (
-              <Select value={filterAC} onValueChange={setFilterAC}>
+              <Select value={filterAC} onValueChange={(value) => {
+                setFilterAC(value);
+                setFilterBooth('all'); // Reset booth filter when AC changes
+              }}>
                 <SelectTrigger className="w-[280px]">
                   <Filter className="mr-2 h-4 w-4" />
-                  <SelectValue placeholder="Filter by Constituency" />
+                  <SelectValue placeholder="Select Constituency" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Constituencies</SelectItem>
                   {CONSTITUENCIES.map(constituency => (
                     <SelectItem key={constituency.number} value={constituency.number.toString()}>
                       AC {constituency.number} - {constituency.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            {/* Booth filter - show when AC is selected (L0/L1) or always for L2 */}
+            {(user?.role === 'L2' || filterAC) && (
+              <Select value={filterBooth} onValueChange={setFilterBooth}>
+                <SelectTrigger className="w-[220px]">
+                  <SelectValue placeholder="All Booths" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Booths ({booths.length})</SelectItem>
+                  {booths.map(booth => (
+                    <SelectItem key={booth._id || booth.boothCode} value={booth._id || booth.boothCode}>
+                      {booth.boothName || `Booth ${booth.boothNumber || booth.boothNo}`}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -509,7 +557,16 @@ export const BoothAgentManagementNew = () => {
           </div>
         </div>
 
-        {loading ? (
+        {/* Show select AC prompt for L0/L1 when no AC selected */}
+        {user?.role !== 'L2' && !filterAC ? (
+          <Card className="p-8 text-center">
+            <Filter className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+            <h3 className="text-lg font-semibold mb-2">Select a Constituency</h3>
+            <p className="text-muted-foreground mb-4">
+              Please select an Assembly Constituency from the dropdown above to view booth agents.
+            </p>
+          </Card>
+        ) : loading ? (
           <Card className="p-8 text-center">
             <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
             <p className="text-muted-foreground">Loading booth agents...</p>
@@ -518,7 +575,9 @@ export const BoothAgentManagementNew = () => {
           <Card className="p-8 text-center">
             <UsersIcon className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
             <h3 className="text-lg font-semibold mb-2">No Booth Agents Found</h3>
-            <p className="text-muted-foreground mb-4">Get started by adding your first booth agent</p>
+            <p className="text-muted-foreground mb-4">
+              {filterAC ? `No booth agents found for AC ${filterAC}. ` : ''}Get started by adding your first booth agent.
+            </p>
             <Button onClick={() => setIsOpen(true)}>
               <UserPlus className="mr-2 h-4 w-4" />
               Add Booth Agent

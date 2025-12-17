@@ -109,7 +109,8 @@ const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode;
   }
 
   if (user && !allowedRoles.includes(user.role)) {
-    return <Navigate to="/" replace />;
+    // Redirect to user's role-appropriate dashboard instead of public page
+    return <Navigate to="/dashboard" replace />;
   }
 
   return <>{children}</>;

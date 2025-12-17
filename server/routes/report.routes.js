@@ -6,11 +6,14 @@ import { aggregateSurveyResponses } from "../utils/surveyResponseCollection.js";
 import { isAuthenticated, canAccessAC } from "../middleware/auth.js";
 import { getCache, setCache, TTL } from "../utils/cache.js";
 import { getPrecomputedStats } from "../utils/precomputedStats.js";
+import { aggregationRateLimiter } from "../middleware/rateLimit.js";
+import { CACHE_CONFIG } from "../config/constants.js";
 
 const router = express.Router();
 
-// Apply authentication to all routes
+// Apply authentication and rate limiting to all routes
 router.use(isAuthenticated);
+router.use(aggregationRateLimiter);
 
 // Get booth performance reports
 // OPTIMIZED v3: Uses precomputed stats when available, falls back to aggregation
@@ -44,7 +47,7 @@ router.get("/:acId/booth-performance", async (req, res) => {
 
     // OPTIMIZATION: Try precomputed stats first (for all booths - most common case)
     if (!booth || booth === 'all') {
-      const precomputed = await getPrecomputedStats(acId, 10 * 60 * 1000); // 10 min max age
+      const precomputed = await getPrecomputedStats(acId, CACHE_CONFIG.precomputedStats); // 10 min max age
       if (precomputed && precomputed.boothStats && precomputed.boothStats.length > 0) {
         console.log(`[Reports] Using precomputed stats for AC ${acId} booth-performance`);
 

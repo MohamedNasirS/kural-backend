@@ -5,6 +5,9 @@ import { NotificationProvider } from '@/contexts/NotificationContext';
 import { ActivityLogProvider } from '@/contexts/ActivityLogContext';
 import { NotificationCenter } from './NotificationCenter';
 import { ThemeToggle } from './ThemeToggle';
+import KuralFullLogo from '@/assets/images/Kural_full.png';
+import KuralHalfLogo from '@/assets/images/Kural_half.png';
+import PartyLogo from '@/assets/images/Electora_AI.png';
 import {
   LayoutDashboard,
   Users,
@@ -48,7 +51,6 @@ import {
   SidebarMenuButton,
   SidebarProvider,
   SidebarTrigger,
-  useSidebar,
 } from './ui/sidebar';
 
 interface DashboardLayoutProps {
@@ -75,7 +77,6 @@ const AppSidebar = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const { state } = useSidebar();
 
   const handleLogout = async () => {
     await logout();
@@ -90,7 +91,7 @@ const AppSidebar = () => {
 
   const selectedAC = getSelectedAC();
 
-  const getMenuItems = () => {
+  const getMenuItems = (): { icon: any; label: string; path: string }[] => {
     switch (user?.role) {
       case 'L0':
         return [
@@ -187,29 +188,23 @@ const AppSidebar = () => {
   };
 
   const menuItems = getMenuItems();
-  const isCollapsed = state === 'collapsed';
 
   if (!user) return null;
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader className="border-b">
-        <div className="flex items-center justify-between p-4">
-          {!isCollapsed && (
-            <div className="flex-1 min-w-0">
-              <h1 className="text-xl font-bold text-primary truncate">
-                {dashboardTitles[user?.role as keyof typeof dashboardTitles] || 'Dashboard'}
-              </h1>
-              <p className="text-xs text-foreground/70 mt-1 truncate">Management System</p>
-            </div>
-          )}
-          {isCollapsed && (
-            <div className="flex justify-center w-full">
-              <div className="bg-primary rounded-md p-1.5">
-                <Home className="h-5 w-5 text-primary-foreground" />
-              </div>
-            </div>
-          )}
+      <SidebarHeader className="border-b border-sidebar-border p-0">
+        <div className="flex items-center justify-center transition-all duration-200 p-4 group-data-[collapsible=icon]:p-2">
+          <img
+            src={KuralFullLogo}
+            alt="Kural AI"
+            className="h-10 w-auto object-contain group-data-[collapsible=icon]:hidden"
+          />
+          <img
+            src={KuralHalfLogo}
+            alt="Kural AI"
+            className="h-8 w-8 min-w-8 object-contain flex-shrink-0 hidden group-data-[collapsible=icon]:block"
+          />
         </div>
       </SidebarHeader>
 
@@ -234,40 +229,43 @@ const AppSidebar = () => {
         </SidebarMenu>
       </SidebarContent>
 
-      <SidebarFooter className="border-t">
-        <div className="p-4 space-y-3">
-          {/* Always show user info and logout button with proper responsive handling */}
-          <div className={`p-3 bg-accent rounded-lg sidebar-user-info ${isCollapsed ? 'sidebar-collapsed' : ''}`}>
-            {!isCollapsed ? (
-              <>
-                <p className="text-sm font-semibold text-accent-foreground truncate">{user?.name}</p>
-                <p className="text-xs text-accent-foreground/80 truncate">{roleLabels[user?.role || 'L0']}</p>
-                {user?.aciName && (
-                  <p className="text-xs text-accent-foreground/80 mt-1 truncate">{user.aciName}</p>
-                )}
+      <SidebarFooter className="border-t border-sidebar-border p-0">
+        <div className="p-3 space-y-2 group-data-[collapsible=icon]:p-1 group-data-[collapsible=icon]:space-y-1 group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:items-center">
+          {/* User info with party logo */}
+          <div className="p-3 bg-sidebar-accent rounded-lg group-data-[collapsible=icon]:p-0 group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:justify-center">
+            {/* Expanded view */}
+            <div className="flex items-center gap-3 group-data-[collapsible=icon]:hidden">
+              <img
+                src={PartyLogo}
+                alt="Party"
+                className="h-10 w-10 rounded-full object-cover flex-shrink-0 bg-white p-0.5"
+              />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-sidebar-foreground truncate">{user?.name}</p>
+                <p className="text-xs text-sidebar-foreground/70 truncate">{roleLabels[user?.role || 'L0']}</p>
                 {user?.assignedAC && (
-                  <p className="text-xs text-accent-foreground/80 truncate">
+                  <p className="text-xs text-sidebar-foreground/70 truncate">
                     AC {user.assignedAC}
                   </p>
                 )}
-              </>
-            ) : (
-              // Show compact user info when sidebar is collapsed
-              <div className="flex flex-col items-center justify-center w-full">
-                <UserCircle className="h-5 w-5 mb-1 sidebar-icon text-accent-foreground flex-shrink-0" />
-                <span className="text-xs text-accent-foreground/80 text-center truncate w-full">{user?.name?.charAt(0)}</span>
               </div>
-            )}
+            </div>
+            {/* Collapsed view - party logo only */}
+            <img
+              src={PartyLogo}
+              alt="Party"
+              className="h-7 w-7 min-w-7 rounded-full object-cover flex-shrink-0 bg-white p-0.5 hidden group-data-[collapsible=icon]:block"
+            />
           </div>
-          
-          {/* Logout button with consistent icon sizing and responsive text */}
-          <SidebarMenuButton 
-            onClick={handleLogout} 
-            tooltip={!isCollapsed ? "Logout" : undefined}
-            className={`transition-all duration-200 ease-in-out logout-button ${isCollapsed ? 'justify-center h-10' : ''}`}
+
+          {/* Logout button */}
+          <SidebarMenuButton
+            onClick={handleLogout}
+            tooltip="Sign Out"
+            className="transition-all duration-200 ease-in-out text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent group-data-[collapsible=icon]:justify-center"
           >
-            <LogOut className={`h-5 w-5 ${!isCollapsed ? 'mr-2 sidebar-icon' : 'sidebar-icon'} flex-shrink-0`} />
-            {!isCollapsed && <span>Logout</span>}
+            <LogOut className="h-5 w-5 flex-shrink-0" />
+            <span className="group-data-[collapsible=icon]:hidden">Sign Out</span>
           </SidebarMenuButton>
         </div>
       </SidebarFooter>

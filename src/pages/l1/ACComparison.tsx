@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/table';
 import { api } from '@/lib/api';
 import { CONSTITUENCIES } from '@/constants/constituencies';
+import { CHART_COLORS as COLORS_ARRAY, SEMANTIC_COLORS } from '@/lib/chartColors';
 
 interface ACData {
   acNumber: string;
@@ -50,12 +51,12 @@ interface DerivedMetrics {
   surveyRate: number;
 }
 
-const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
+const COLORS = COLORS_ARRAY.slice(0, 4);
 const CHART_COLORS = {
-  primary: '#3b82f6',
-  success: '#10b981',
-  warning: '#f59e0b',
-  danger: '#ef4444',
+  primary: SEMANTIC_COLORS.primary,
+  success: SEMANTIC_COLORS.success,
+  warning: SEMANTIC_COLORS.warning,
+  danger: SEMANTIC_COLORS.error,
   purple: '#8b5cf6',
   pink: '#ec4899',
   cyan: '#06b6d4',

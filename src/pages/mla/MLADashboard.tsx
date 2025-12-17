@@ -15,20 +15,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
 import {
-  PieChart,
-  Pie,
-  Cell,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-  LineChart,
-  Line,
-  CartesianGrid,
-} from 'recharts';
+  BeautifulDonutChart,
+  BeautifulBarChart,
+  BeautifulLineChart,
+} from '@/components/charts';
+import {
+  SEMANTIC_COLORS,
+  SOCIAL_SENTIMENT_COLORS,
+  SHARE_OF_VOICE_COLORS,
+  PARTY_COLORS,
+} from '@/lib/chartColors';
 
 interface ACOverview {
   ac: { id: number; name: string; district: string };
@@ -116,21 +112,13 @@ interface SentimentBreakdownData {
 }
 
 const SENTIMENT_COLORS = {
-  favorable: '#22c55e',
-  negative: '#ef4444',
-  balanced: '#f59e0b',
-  flippable: '#f97316',
+  favorable: SEMANTIC_COLORS.positive,
+  negative: SEMANTIC_COLORS.negative,
+  balanced: SEMANTIC_COLORS.balanced,
+  flippable: SEMANTIC_COLORS.flippable,
 };
 
-const GENDER_COLORS = ['#3b82f6', '#ec4899', '#8b5cf6'];
-
-const SOCIAL_SENTIMENT_COLORS = {
-  positive: '#22c55e',
-  neutral: '#6b7280',
-  negative: '#ef4444',
-};
-
-const SHARE_OF_VOICE_COLORS = ['#3b82f6', '#ef4444', '#f59e0b', '#10b981', '#8b5cf6', '#f97316'];
+const GENDER_COLORS = [SEMANTIC_COLORS.male, SEMANTIC_COLORS.female, SEMANTIC_COLORS.other];
 
 export default function MLADashboard() {
   const { user } = useAuth();
@@ -375,38 +363,15 @@ export default function MLADashboard() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Booth Sentiment Distribution</CardTitle>
+            <p className="text-xs text-muted-foreground">Distribution of booths by sentiment analysis</p>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
-              <PieChart>
-                <Pie
-                  data={sentimentChartData}
-                  cx="50%"
-                  cy="40%"
-                  innerRadius={45}
-                  outerRadius={70}
-                  dataKey="value"
-                  label={false}
-                  labelLine={false}
-                >
-                  {sentimentChartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value: number) => value.toLocaleString()} />
-                <Legend
-                  layout="horizontal"
-                  verticalAlign="bottom"
-                  align="center"
-                  wrapperStyle={{ fontSize: '12px', paddingTop: '5px' }}
-                  formatter={(value, entry: any) => {
-                    const total = sentimentChartData.reduce((sum, item) => sum + item.value, 0);
-                    const percent = total > 0 ? Math.round((entry.payload.value / total) * 100) : 0;
-                    return <span style={{ color: entry.color }}>{value} {percent}%</span>;
-                  }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
+            <BeautifulDonutChart
+              data={sentimentChartData}
+              height={280}
+              valueLabel="Booths"
+              showMoreThreshold={4}
+            />
           </CardContent>
         </Card>
 
@@ -414,38 +379,18 @@ export default function MLADashboard() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Gender Distribution</CardTitle>
+            <p className="text-xs text-muted-foreground">Voter distribution by gender</p>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
-              <PieChart>
-                <Pie
-                  data={genderChartData}
-                  cx="50%"
-                  cy="40%"
-                  innerRadius={45}
-                  outerRadius={70}
-                  dataKey="value"
-                  label={false}
-                  labelLine={false}
-                >
-                  {genderChartData.map((_, index) => (
-                    <Cell key={`cell-${index}`} fill={GENDER_COLORS[index % GENDER_COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value: number) => value.toLocaleString()} />
-                <Legend
-                  layout="horizontal"
-                  verticalAlign="bottom"
-                  align="center"
-                  wrapperStyle={{ fontSize: '12px', paddingTop: '5px' }}
-                  formatter={(value, entry: any) => {
-                    const total = genderChartData.reduce((sum, item) => sum + item.value, 0);
-                    const percent = total > 0 ? Math.round((entry.payload.value / total) * 100) : 0;
-                    return <span style={{ color: GENDER_COLORS[genderChartData.findIndex(d => d.name === value)] }}>{value}: {percent}%</span>;
-                  }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
+            <BeautifulDonutChart
+              data={genderChartData.map((item, idx) => ({
+                ...item,
+                color: GENDER_COLORS[idx],
+              }))}
+              height={280}
+              valueLabel="Voters"
+              showMoreThreshold={3}
+            />
           </CardContent>
         </Card>
 
@@ -453,16 +398,18 @@ export default function MLADashboard() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Booth Size Distribution</CardTitle>
+            <p className="text-xs text-muted-foreground">Number of booths by voter count range</p>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={boothSizeData?.boothSizeDistribution || []} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                <XAxis dataKey="range" tick={{ fontSize: 10 }} interval={0} />
-                <YAxis tick={{ fontSize: 10 }} />
-                <Tooltip formatter={(value: number) => [value.toLocaleString(), 'Booths']} />
-                <Bar dataKey="count" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <BeautifulBarChart
+              data={(boothSizeData?.boothSizeDistribution || []).map(item => ({
+                name: item.range,
+                value: item.count,
+              }))}
+              height={250}
+              barColor="#8b5cf6"
+              valueLabel="Booths"
+            />
           </CardContent>
         </Card>
 
@@ -470,20 +417,24 @@ export default function MLADashboard() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Victory Margin Distribution</CardTitle>
+            <p className="text-xs text-muted-foreground">Booths by win/loss margin ranges</p>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={marginData?.marginDistribution || []} layout="vertical" margin={{ top: 5, right: 20, left: 5, bottom: 5 }}>
-                <XAxis type="number" tick={{ fontSize: 10 }} />
-                <YAxis dataKey="range" type="category" tick={{ fontSize: 9 }} width={80} />
-                <Tooltip formatter={(value: number) => [value.toLocaleString(), 'Booths']} />
-                <Bar dataKey="count" radius={[0, 4, 4, 0]}>
-                  {marginData?.marginDistribution.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.type === 'won' ? '#22c55e' : '#ef4444'} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <BeautifulBarChart
+              data={(marginData?.marginDistribution || []).map(item => ({
+                name: item.range,
+                value: item.count,
+                type: item.type,
+              }))}
+              height={250}
+              layout="vertical"
+              valueLabel="Booths"
+              showLegend={true}
+              legendItems={[
+                { name: 'Won', color: '#22c55e' },
+                { name: 'Lost', color: '#ef4444' },
+              ]}
+            />
           </CardContent>
         </Card>
       </div>
@@ -495,64 +446,23 @@ export default function MLADashboard() {
             <CardTitle className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
               <span className="text-base">Historical Vote Share Trends (2009-2021)</span>
               {historicalData?.leadingSummary && (
-                <span className="text-xs sm:text-sm font-normal text-gray-500">{historicalData.leadingSummary}</span>
+                <span className="text-xs sm:text-sm font-normal text-muted-foreground">{historicalData.leadingSummary}</span>
               )}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={280}>
-              <LineChart data={historicalChartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis
-                  dataKey="year"
-                  tick={{ fontSize: 11 }}
-                  tickLine={false}
-                />
-                <YAxis
-                  domain={[0, 100]}
-                  tick={{ fontSize: 10 }}
-                  tickLine={false}
-                  axisLine={false}
-                  width={35}
-                />
-                <Tooltip
-                  formatter={(value: number, name: string) => [`${value.toFixed(1)}%`, name]}
-                  labelFormatter={(label) => {
-                    const item = historicalChartData.find((d) => d.year === label);
-                    return `${label} (${item?.type || 'Election'})`;
-                  }}
-                  contentStyle={{ fontSize: '12px', borderRadius: '8px' }}
-                />
-                <Legend
-                  wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }}
-                  iconType="circle"
-                />
-                <Line
-                  type="monotone"
-                  dataKey="AIADMK"
-                  stroke="#10b981"
-                  strokeWidth={2}
-                  dot={{ fill: '#10b981', strokeWidth: 2, r: 4 }}
-                  activeDot={{ r: 6 }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="DMK"
-                  stroke="#ef4444"
-                  strokeWidth={2}
-                  dot={{ fill: '#ef4444', strokeWidth: 2, r: 4 }}
-                  activeDot={{ r: 6 }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="Others"
-                  stroke="#8b5cf6"
-                  strokeWidth={2}
-                  dot={{ fill: '#8b5cf6', strokeWidth: 2, r: 3 }}
-                  strokeDasharray="5 5"
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            <BeautifulLineChart
+              data={historicalChartData}
+              xAxisKey="year"
+              height={300}
+              yAxisDomain={[0, 100]}
+              lines={[
+                { dataKey: 'AIADMK', color: PARTY_COLORS.AIADMK || '#10b981', name: 'AIADMK', strokeWidth: 2 },
+                { dataKey: 'DMK', color: PARTY_COLORS.DMK || '#ef4444', name: 'DMK', strokeWidth: 2 },
+                { dataKey: 'Others', color: '#8b5cf6', name: 'Others', strokeWidth: 2, dashed: true },
+              ]}
+              formatTooltipValue={(value) => `${value.toFixed(1)}%`}
+            />
           </CardContent>
         </Card>
       )}
@@ -570,8 +480,8 @@ export default function MLADashboard() {
                     onClick={() => setSocialTimeRange(range)}
                     className={`px-3 py-1 text-xs rounded-full transition-colors ${
                       socialTimeRange === range
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-muted text-muted-foreground hover:bg-muted/80'
                     }`}
                   >
                     {range === '7d' ? '7 Days' : range === '30d' ? '30 Days' : '90 Days'}
@@ -585,94 +495,36 @@ export default function MLADashboard() {
               {/* Share of Voice Chart */}
               {shareOfVoice?.data?.items?.length > 0 && (
                 <div>
-                  <h4 className="font-medium mb-2 text-sm">Share of Voice</h4>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <PieChart>
-                      <Pie
-                        data={shareOfVoice.data.items.map((item, idx) => ({
-                          name: item.competitor_name,
-                          value: item.mention_count,
-                          percent: item.percentage,
-                          sentiment: item.avg_sentiment,
-                          color: SHARE_OF_VOICE_COLORS[idx % SHARE_OF_VOICE_COLORS.length],
-                        }))}
-                        cx="50%"
-                        cy="40%"
-                        innerRadius={40}
-                        outerRadius={65}
-                        dataKey="value"
-                        label={false}
-                        labelLine={false}
-                      >
-                        {shareOfVoice.data.items.map((_, idx) => (
-                          <Cell key={`cell-${idx}`} fill={SHARE_OF_VOICE_COLORS[idx % SHARE_OF_VOICE_COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        formatter={(value: number, name: string, props: any) => [
-                          `${value} mentions (${props.payload.percent.toFixed(1)}%)`,
-                          name,
-                        ]}
-                      />
-                      <Legend
-                        layout="horizontal"
-                        verticalAlign="bottom"
-                        align="center"
-                        wrapperStyle={{ fontSize: '11px', paddingTop: '5px' }}
-                        formatter={(value, entry: any) => (
-                          <span style={{ color: entry.color }}>{value}: {entry.payload.percent.toFixed(0)}%</span>
-                        )}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
+                  <BeautifulDonutChart
+                    data={shareOfVoice.data.items.map((item, idx) => ({
+                      name: item.competitor_name,
+                      value: item.mention_count,
+                      color: SHARE_OF_VOICE_COLORS[idx % SHARE_OF_VOICE_COLORS.length],
+                    }))}
+                    title="Share of Voice"
+                    subtitle="Distribution of mentions across competitors"
+                    height={280}
+                    valueLabel="Mentions"
+                    showMoreThreshold={6}
+                  />
                 </div>
               )}
 
               {/* Social Sentiment Breakdown */}
               {socialSentiment?.data && (
                 <div>
-                  <h4 className="font-medium mb-2 text-sm">Social Media Sentiment</h4>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <PieChart>
-                      <Pie
-                        data={[
-                          { name: 'Positive', value: socialSentiment.data.positive, color: SOCIAL_SENTIMENT_COLORS.positive },
-                          { name: 'Neutral', value: socialSentiment.data.neutral, color: SOCIAL_SENTIMENT_COLORS.neutral },
-                          { name: 'Negative', value: socialSentiment.data.negative, color: SOCIAL_SENTIMENT_COLORS.negative },
-                        ].filter(d => d.value > 0)}
-                        cx="50%"
-                        cy="40%"
-                        innerRadius={40}
-                        outerRadius={65}
-                        dataKey="value"
-                        label={false}
-                        labelLine={false}
-                      >
-                        {[
-                          { name: 'Positive', value: socialSentiment.data.positive, color: SOCIAL_SENTIMENT_COLORS.positive },
-                          { name: 'Neutral', value: socialSentiment.data.neutral, color: SOCIAL_SENTIMENT_COLORS.neutral },
-                          { name: 'Negative', value: socialSentiment.data.negative, color: SOCIAL_SENTIMENT_COLORS.negative },
-                        ].filter(d => d.value > 0).map((entry, idx) => (
-                          <Cell key={`cell-${idx}`} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip formatter={(value: number) => value.toLocaleString()} />
-                      <Legend
-                        layout="horizontal"
-                        verticalAlign="bottom"
-                        align="center"
-                        wrapperStyle={{ fontSize: '11px', paddingTop: '5px' }}
-                        formatter={(value, entry: any) => {
-                          const total = socialSentiment.data.total || 1;
-                          const percent = Math.round((entry.payload.value / total) * 100);
-                          return <span style={{ color: entry.payload.color }}>{value}: {percent}%</span>;
-                        }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div className="text-center text-xs text-gray-500 mt-2">
-                    Total: {socialSentiment.data.total.toLocaleString()} mentions
-                  </div>
+                  <BeautifulDonutChart
+                    data={[
+                      { name: 'Positive', value: socialSentiment.data.positive, color: SOCIAL_SENTIMENT_COLORS.positive },
+                      { name: 'Neutral', value: socialSentiment.data.neutral, color: SOCIAL_SENTIMENT_COLORS.neutral },
+                      { name: 'Negative', value: socialSentiment.data.negative, color: SOCIAL_SENTIMENT_COLORS.negative },
+                    ].filter(d => d.value > 0)}
+                    title="Social Media Sentiment"
+                    subtitle={`Total: ${socialSentiment.data.total.toLocaleString()} mentions`}
+                    height={280}
+                    valueLabel="Mentions"
+                    showMoreThreshold={3}
+                  />
                 </div>
               )}
             </div>

@@ -106,7 +106,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         if (response.ok) {
           const data = await response.json();
-          setUser(normalizeUser(data.user));
+          // Handle standardized response format: { success, data: { user }, message }
+          const user = data.data?.user || data.user;
+          setUser(normalizeUser(user));
         } else if (response.status === 401) {
           // Session expired or invalid - clear user
           setUser(null);
@@ -178,7 +180,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       const data = await response.json();
-      const authenticatedUser = normalizeUser(data.user as User);
+      // Handle standardized response format: { success, data: { user }, message }
+      const user = data.data?.user || data.user;
+      const authenticatedUser = normalizeUser(user as User);
       setUser(authenticatedUser);
       setIsCheckingSession(false);
       return { success: true };

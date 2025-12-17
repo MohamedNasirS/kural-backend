@@ -65,7 +65,7 @@ export const SurveyResponses = () => {
     pages: 0,
   });
   const [searchTerm, setSearchTerm] = useState('');
-  const [acFilter, setAcFilter] = useState<string>('all');
+  const [acFilter, setAcFilter] = useState<string>('');
   const [boothFilter, setBoothFilter] = useState<string>('all');
   const [surveyFilter, setSurveyFilter] = useState<string>('all');
   const [booths, setBooths] = useState<Booth[]>([]);
@@ -77,7 +77,7 @@ export const SurveyResponses = () => {
 
   useEffect(() => {
     // Require AC selection before fetching responses
-    if (acFilter === 'all') {
+    if (!acFilter) {
       setResponses([]);
       setLoading(false);
       return;
@@ -87,7 +87,7 @@ export const SurveyResponses = () => {
 
   // Fetch booths when constituency changes
   useEffect(() => {
-    if (acFilter && acFilter !== 'all') {
+    if (acFilter) {
       fetchBoothsForAC(parseInt(acFilter));
     } else {
       setBooths([]);
@@ -116,7 +116,7 @@ export const SurveyResponses = () => {
         limit: pagination.limit.toString(),
       });
 
-      if (acFilter && acFilter !== 'all') {
+      if (acFilter) {
         params.append('ac', acFilter);
       }
 
@@ -282,10 +282,9 @@ export const SurveyResponses = () => {
                 setPagination(prev => ({ ...prev, page: 1 }));
               }}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Filter by Constituency" />
+                  <SelectValue placeholder="Select Constituency" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Constituencies</SelectItem>
                   {CONSTITUENCIES.map((constituency) => (
                     <SelectItem key={constituency.number} value={String(constituency.number)}>
                       AC {constituency.number} - {constituency.name}
@@ -299,7 +298,7 @@ export const SurveyResponses = () => {
                   setBoothFilter(value);
                   setPagination(prev => ({ ...prev, page: 1 }));
                 }}
-                disabled={acFilter === 'all' || loadingBooths}
+                disabled={!acFilter || loadingBooths}
               >
                 <SelectTrigger>
                   <SelectValue placeholder={acFilter === 'all' ? 'Select Constituency First' : loadingBooths ? 'Loading...' : 'Filter by Booth'} />

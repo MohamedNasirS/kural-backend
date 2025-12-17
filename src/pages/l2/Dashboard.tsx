@@ -57,7 +57,9 @@ export const L2Dashboard = () => {
         throw new Error('Failed to fetch dashboard statistics');
       }
 
-      const data = await response.json();
+      const responseData = await response.json();
+      // Handle standardized API response format
+      const data = responseData.data || responseData;
       setStats(data);
     } catch (err) {
       console.error('Error fetching dashboard stats:', err);

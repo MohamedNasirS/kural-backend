@@ -127,7 +127,7 @@ export const VoterFieldManager = () => {
   });
 
   // Voter data management state
-  const [selectedAC, setSelectedAC] = useState<string>('111');
+  const [selectedAC, setSelectedAC] = useState<string>('');
   const [voters, setVoters] = useState<Voter[]>([]);
   const [booths, setBooths] = useState<{ boothNo: number; boothName: string; label: string; boothId?: string }[]>([]);
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -163,8 +163,10 @@ export const VoterFieldManager = () => {
   const fetchExistingFieldsFromVoters = async () => {
     try {
       setLoadingExistingFields(true);
-      const data = await api.get('/voters/fields/existing');
-      console.log('Existing fields data:', data);
+      const response = await api.get('/voters/fields/existing');
+      console.log('Existing fields response:', response);
+      // Handle standardized API response format: { success, data: { fields } }
+      const data = response.data || response;
       if (data && data.fields) {
         setExistingFieldsFromVoters(data.fields);
       } else {
@@ -192,21 +194,27 @@ export const VoterFieldManager = () => {
 
   const fetchBooths = async () => {
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/voters/${encodeURIComponent(selectedAC)}/booths`,
-        {
-          credentials: 'include',
-        },
-      );
+      console.log('[VoterFieldManager] Fetching booths for AC:', selectedAC);
+      const response = await api.get(`/voters/${encodeURIComponent(selectedAC)}/booths`);
+      console.log('[VoterFieldManager] Booths response:', response);
 
-      if (!response.ok) {
-        throw new Error('Failed to fetch booths');
-      }
+      // Handle standardized API response format: { success, data: { booths } }
+      const data = response.data || response;
+      const boothsArray = data.booths || [];
 
-      const data = await response.json();
-      setBooths(data.booths || []);
+      // Map the response to expected format
+      const boothsList = boothsArray.map((booth: any) => ({
+        boothNo: booth.boothNo || booth.boothno,
+        boothName: booth.boothName || booth.boothname || `Booth ${booth.boothNo || booth.boothno}`,
+        label: booth.label || booth.boothName || booth.boothname || `Booth ${booth.boothNo || booth.boothno}`,
+        boothId: booth.booth_id || booth.boothId
+      }));
+
+      console.log('[VoterFieldManager] Processed booths:', boothsList.length);
+      setBooths(boothsList);
     } catch (err) {
-      console.error('Error fetching booths:', err);
+      console.error('[VoterFieldManager] Error fetching booths:', err);
+      setBooths([]);
     }
   };
 
@@ -243,9 +251,16 @@ export const VoterFieldManager = () => {
         throw new Error('Failed to fetch voters');
       }
 
-      const data = await response.json();
+      const responseData = await response.json();
+      // Handle standardized API response format: { success, data: { voters, pagination } }
+      const data = responseData.data || responseData;
       setVoters(data.voters || []);
-      setPagination(data.pagination);
+      setPagination(data.pagination || {
+        page: 1,
+        limit: 50,
+        total: 0,
+        pages: 0
+      });
     } catch (err) {
       console.error('Error fetching voters:', err);
       setVotersError(err instanceof Error ? err.message : 'Failed to load voters');
@@ -308,7 +323,9 @@ export const VoterFieldManager = () => {
   const fetchFields = async () => {
     try {
       setLoading(true);
-      const data = await api.get('/voters/fields');
+      const response = await api.get('/voters/fields');
+      // Handle standardized API response format: { success, data: { fields } }
+      const data = response.data || response;
       setFields(data.fields || []);
     } catch (error: any) {
       toast({
@@ -476,7 +493,9 @@ export const VoterFieldManager = () => {
       }
 
       // Fetch fresh fields list to check if field exists in schema
-      const fieldsData = await api.get('/voters/fields');
+      const fieldsResponse = await api.get('/voters/fields');
+      // Handle standardized API response format: { success, data: { fields } }
+      const fieldsData = fieldsResponse.data || fieldsResponse;
       const fieldInSchema = (fieldsData.fields || []).find((f: VoterField) => f.name === targetFieldName);
       
       // Check if type actually changed
@@ -822,7 +841,11 @@ export const VoterFieldManager = () => {
                 </div>
                 {/* Filters row */}
                 <div className="flex flex-wrap gap-4">
-                  <Select value={selectedAC} onValueChange={setSelectedAC}>
+                  <Select value={selectedAC} onValueChange={(value) => {
+                    setSelectedAC(value);
+                    setBoothFilter('all'); // Reset booth filter when AC changes
+                    setBooths([]); // Clear booths until new ones are fetched
+                  }}>
                     <SelectTrigger className="w-[220px]">
                       <SelectValue placeholder="Select AC" />
                     </SelectTrigger>
@@ -832,15 +855,15 @@ export const VoterFieldManager = () => {
                       ))}
                     </SelectContent>
                   </Select>
-                  <Select value={boothFilter} onValueChange={setBoothFilter}>
+                  <Select value={boothFilter} onValueChange={setBoothFilter} disabled={!selectedAC}>
                     <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="All Booths" />
+                      <SelectValue placeholder={!selectedAC ? "Select AC first" : "All Booths"} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Booths</SelectItem>
+                      <SelectItem value="all">All Booths ({booths.length})</SelectItem>
                       {booths.map((booth) => (
                         <SelectItem key={booth.boothNo} value={booth.boothId || `BOOTH${booth.boothNo}-${selectedAC}`}>
-                          {booth.boothName}
+                          {booth.boothName || `Booth ${booth.boothNo}`}
                         </SelectItem>
                       ))}
                     </SelectContent>

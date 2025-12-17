@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Plus, Search, Edit2, Trash2, Users, UserPlus, UserCog } from "lucide-react";
+import { Plus, Search, Edit2, Trash2, Users, UserPlus, UserCog, Filter } from "lucide-react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -90,7 +90,7 @@ export const ModeratorManagement: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [activeTab, setActiveTab] = useState<string>("L1");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [acFilter, setAcFilter] = useState<string>("all");
+  const [acFilter, setAcFilter] = useState<string>("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -108,6 +108,13 @@ export const ModeratorManagement: React.FC = () => {
   });
 
   useEffect(() => {
+    // For L2 and BoothAgent tabs, require AC selection before fetching
+    const requiresACSelection = activeTab === "L2" || activeTab === "BoothAgent";
+    if (requiresACSelection && !acFilter) {
+      setUsers([]);
+      setLoading(false);
+      return;
+    }
     fetchUsers();
     fetchBooths();
   }, [activeTab, statusFilter, acFilter]);
@@ -152,7 +159,7 @@ export const ModeratorManagement: React.FC = () => {
         params.append("status", statusFilter);
       }
 
-      if ((activeTab === "BoothAgent" || activeTab === "L2") && acFilter !== "all") {
+      if ((activeTab === "BoothAgent" || activeTab === "L2") && acFilter) {
         params.append("ac", acFilter);
       }
 
@@ -342,6 +349,20 @@ export const ModeratorManagement: React.FC = () => {
   const renderUsersTable = () => {
     const showAssignedAC = activeTab === "L2" || activeTab === "BoothAgent";
     const showBoothNumber = activeTab === "BoothAgent";
+    const requiresACSelection = activeTab === "L2" || activeTab === "BoothAgent";
+
+    // Show "Select Constituency" message when AC is required but not selected
+    if (requiresACSelection && !acFilter) {
+      return (
+        <div className="flex flex-col items-center justify-center p-8 text-center">
+          <Filter className="h-12 w-12 text-muted-foreground mb-4 opacity-50" />
+          <h3 className="text-lg font-semibold mb-2">Select a Constituency</h3>
+          <p className="text-muted-foreground">
+            Please select an Assembly Constituency from the dropdown above to view users.
+          </p>
+        </div>
+      );
+    }
 
     if (loading) {
       return (
@@ -355,7 +376,9 @@ export const ModeratorManagement: React.FC = () => {
       return (
         <div className="flex flex-col items-center justify-center p-8 text-center">
           <Users className="h-12 w-12 text-muted-foreground mb-4" />
-          <p className="text-muted-foreground">No users found</p>
+          <p className="text-muted-foreground">
+            {acFilter ? `No users found for AC ${acFilter}` : 'No users found'}
+          </p>
         </div>
       );
     }
@@ -727,10 +750,9 @@ export const ModeratorManagement: React.FC = () => {
                     }}
                   >
                     <SelectTrigger className="w-[280px]">
-                      <SelectValue placeholder="All Constituencies" />
+                      <SelectValue placeholder="Select Constituency" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Constituencies</SelectItem>
                       {CONSTITUENCIES.map((ac) => (
                         <SelectItem key={ac.number} value={ac.number.toString()}>
                           AC {ac.number} - {ac.name}
@@ -755,10 +777,9 @@ export const ModeratorManagement: React.FC = () => {
                     }}
                   >
                     <SelectTrigger className="w-[280px]">
-                      <SelectValue placeholder="All Constituencies" />
+                      <SelectValue placeholder="Select Constituency" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Constituencies</SelectItem>
                       {CONSTITUENCIES.map((ac) => (
                         <SelectItem key={ac.number} value={ac.number.toString()}>
                           AC {ac.number} - {ac.name}

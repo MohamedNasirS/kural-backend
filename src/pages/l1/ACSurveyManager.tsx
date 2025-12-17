@@ -73,7 +73,9 @@ export const ACSurveyManager = () => {
         throw new Error('Failed to fetch booths');
       }
 
-      const data = await response.json();
+      const responseData = await response.json();
+      // Handle standardized API response format
+      const data = responseData.data || responseData;
       setBooths(data.booths || []);
     } catch (err) {
       console.error('Error fetching booths:', err);
@@ -102,9 +104,11 @@ export const ACSurveyManager = () => {
         throw new Error('Failed to fetch survey responses');
       }
 
-      const data = await response.json();
+      const responseData = await response.json();
+      // Handle standardized API response format
+      const data = responseData.data || responseData;
       setSurveys(data.responses || []);
-      setPagination(data.pagination);
+      setPagination(data.pagination || { page: 1, limit: 50, total: 0, pages: 0 });
     } catch (err) {
       console.error('Error fetching survey responses:', err);
       setError(err instanceof Error ? err.message : 'Failed to load survey responses');

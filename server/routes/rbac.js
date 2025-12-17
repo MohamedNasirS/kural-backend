@@ -7,8 +7,8 @@ import express from "express";
 import bcrypt from "bcryptjs";
 import mongoose from "mongoose";
 import User from "../models/User.js";
-import Booth from "../models/Booth.js";
 import Survey from "../models/Survey.js";
+// Note: Booth model is imported via server/models/index.js for populate() support
 import { resolveAssignedACFromUser } from "../utils/ac.js";
 import {
   getVoterModel,
@@ -496,15 +496,27 @@ router.get("/users", isAuthenticated, async (req, res) => {
     }
 
     // Search by name, email, or phone
-    if (search) {
-      const searchRegex = new RegExp(search, "i");
-      const searchFilter = {
-        $or: [
-          { name: searchRegex },
-          { email: searchRegex },
-          { phone: searchRegex },
-        ]
-      };
+    if (search && search.trim()) {
+      const searchTerm = search.trim();
+      let searchFilter;
+
+      // Use text search for 3+ characters (faster with text index)
+      // Use regex for shorter searches (partial match support)
+      if (searchTerm.length >= 3) {
+        // Text search - uses the user_search_text index
+        searchFilter = { $text: { $search: searchTerm } };
+      } else {
+        // Short search - use prefix regex for partial matches
+        const escapedSearch = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const searchRegex = new RegExp(`^${escapedSearch}`, "i");
+        searchFilter = {
+          $or: [
+            { name: searchRegex },
+            { email: searchRegex },
+            { phone: searchRegex },
+          ]
+        };
+      }
 
       // If there's already a $and (from L1 + role filter), add search to it
       if (query.$and) {
@@ -516,8 +528,11 @@ router.get("/users", isAuthenticated, async (req, res) => {
           searchFilter
         ];
         delete query.$or;
-      } else {
+      } else if (searchFilter.$or) {
         query.$or = searchFilter.$or;
+      } else {
+        // For text search, add directly to query
+        Object.assign(query, searchFilter);
       }
     }
 
@@ -684,103 +699,31 @@ router.post("/users", isAuthenticated, async (req, res) => {
     }
 
     // Auto-generate booth_agent_id for Booth Agent role if not provided
+    // Simplified: No longer uses Booth collection, booth info stored directly in user document
     let finalBoothAgentId = booth_agent_id;
-    let resolvedBoothId = null; // Will hold the MongoDB ObjectId if booth exists in DB
-    let boothIdentifier = null; // Will hold the string like "BOOTH1-111"
+    let boothIdentifier = assignedBoothId || booth_id; // Use the booth_id string directly
 
-    if ((role === "Booth Agent" || role === "BoothAgent") && assignedBoothId && !booth_agent_id) {
-      // Try to find the booth - handle both MongoDB ObjectId and string booth_id formats
-      let booth = null;
+    if ((role === "Booth Agent" || role === "BoothAgent") && boothIdentifier && !booth_agent_id) {
+      // Count existing agents assigned to this specific booth (by booth_id string)
+      const existingAgentsCount = await User.countDocuments({
+        role: { $in: ["Booth Agent", "BoothAgent"] },
+        isActive: true,
+        booth_id: boothIdentifier
+      });
 
-      // Check if assignedBoothId is a valid MongoDB ObjectId
-      if (mongoose.Types.ObjectId.isValid(assignedBoothId) && !assignedBoothId.startsWith('BOOTH')) {
-        booth = await Booth.findById(assignedBoothId);
-      }
+      // Generate booth_agent_id: {booth_id}-{sequence}
+      let sequence = existingAgentsCount + 1;
+      finalBoothAgentId = `${boothIdentifier}-${sequence}`;
 
-      // If not found by _id, try to find by boothCode or booth_id (for voter-derived booths)
-      if (!booth) {
-        booth = await Booth.findOne({
-          $or: [
-            { boothCode: assignedBoothId },
-            { booth_id: assignedBoothId }
-          ],
-          isActive: true
-        });
-      }
-
-      // If booth exists in DB, use it
-      if (booth) {
-        boothIdentifier = booth.booth_id || booth.boothCode || `BOOTH${booth.boothNumber}-${booth.ac_id}`;
-        resolvedBoothId = booth._id;
-      } else if (assignedBoothId.startsWith('BOOTH')) {
-        // Booth doesn't exist in DB but we have a valid booth string ID (from voter data)
-        // Create the booth record from voter data
-        const boothMatch = assignedBoothId.match(/^BOOTH(\d+)-(\d+)$/);
-        if (boothMatch) {
-          const boothNumber = parseInt(boothMatch[1]);
-          const acIdFromBooth = parseInt(boothMatch[2]);
-
-          // Try to get booth name from voter data
-          try {
-            const voterCollection = mongoose.connection.collection(`voters_${acIdFromBooth}`);
-            const voterSample = await voterCollection.findOne({ booth_id: assignedBoothId });
-            const boothName = voterSample?.boothname || `Booth ${boothNumber}`;
-
-            booth = new Booth({
-              boothNumber: boothNumber,
-              boothName: boothName,
-              boothCode: assignedBoothId,
-              booth_id: assignedBoothId,
-              ac_id: acIdFromBooth,
-              ac_name: aci_name || `AC ${acIdFromBooth}`,
-              isActive: true,
-              assignedAgents: [],
-              createdBy: req.user._id
-            });
-            await booth.save();
-            console.log(`Created new booth from voter data during user creation: ${assignedBoothId}`);
-
-            boothIdentifier = assignedBoothId;
-            resolvedBoothId = booth._id;
-          } catch (boothCreateErr) {
-            console.error(`Error creating booth ${assignedBoothId}:`, boothCreateErr);
-            // Use the string ID directly without a Booth record
-            boothIdentifier = assignedBoothId;
-          }
-        } else {
-          // Invalid format but starts with BOOTH - use as-is
-          boothIdentifier = assignedBoothId;
-        }
-      }
-
-      if (boothIdentifier) {
-        // Count existing agents assigned to this specific booth (by booth_id string or ObjectId)
-        const existingAgentsQuery = {
-          role: { $in: ["Booth Agent", "BoothAgent"] },
-          isActive: true,
-          $or: [
-            { booth_id: boothIdentifier }
-          ]
-        };
-        if (resolvedBoothId) {
-          existingAgentsQuery.$or.push({ assignedBoothId: resolvedBoothId });
-        }
-        const existingAgentsCount = await User.countDocuments(existingAgentsQuery);
-
-        // Generate booth_agent_id: {booth_id}-{sequence}
-        let sequence = existingAgentsCount + 1;
+      // Check if booth_agent_id already exists
+      let existingAgentId = await User.findOne({ booth_agent_id: finalBoothAgentId });
+      while (existingAgentId) {
+        sequence++;
         finalBoothAgentId = `${boothIdentifier}-${sequence}`;
-
-        // Check if booth_agent_id already exists
-        let existingAgentId = await User.findOne({ booth_agent_id: finalBoothAgentId });
-        while (existingAgentId) {
-          sequence++;
-          finalBoothAgentId = `${boothIdentifier}-${sequence}`;
-          existingAgentId = await User.findOne({ booth_agent_id: finalBoothAgentId });
-        }
-
-        console.log(`Auto-generated booth_agent_id: ${finalBoothAgentId} for booth ${boothIdentifier}`);
+        existingAgentId = await User.findOne({ booth_agent_id: finalBoothAgentId });
       }
+
+      console.log(`Auto-generated booth_agent_id: ${finalBoothAgentId} for booth ${boothIdentifier}`);
     }
 
     // Check if booth_agent_id already exists (if manually provided)
@@ -794,35 +737,8 @@ router.post("/users", isAuthenticated, async (req, res) => {
       }
     }
 
-    // Get booth_id string if assignedBoothId is provided but booth_id is not
-    let finalBoothId = booth_id;
-    if (!finalBoothId && assignedBoothId) {
-      // Use the already resolved boothIdentifier if available
-      if (boothIdentifier) {
-        finalBoothId = boothIdentifier;
-      } else {
-        // Try to resolve booth if not already done
-        let booth = null;
-        if (mongoose.Types.ObjectId.isValid(assignedBoothId) && !assignedBoothId.startsWith('BOOTH')) {
-          booth = await Booth.findById(assignedBoothId);
-        }
-        if (!booth) {
-          booth = await Booth.findOne({
-            $or: [
-              { boothCode: assignedBoothId },
-              { booth_id: assignedBoothId }
-            ]
-          });
-        }
-        if (booth) {
-          finalBoothId = booth.booth_id || booth.boothCode || `BOOTH${booth.boothNumber}-${booth.ac_id}`;
-          resolvedBoothId = booth._id;
-        } else if (assignedBoothId.startsWith('BOOTH')) {
-          // Use the string directly
-          finalBoothId = assignedBoothId;
-        }
-      }
-    }
+    // Use booth_id directly (no Booth collection lookup needed)
+    let finalBoothId = booth_id || assignedBoothId;
 
     // Hash password
     const passwordHash = await bcrypt.hash(password, 10);
@@ -838,7 +754,7 @@ router.post("/users", isAuthenticated, async (req, res) => {
       assignedAC: aci_id || assignedAC || (req.user.role === "L1" ? req.user.assignedAC : undefined),
       aci_id: aci_id || assignedAC,
       aci_name: aci_name || (req.user.role === "L1" ? req.user.aci_name : undefined),
-      assignedBoothId: resolvedBoothId || undefined, // Use resolved MongoDB ObjectId (or undefined if booth not in DB)
+      // assignedBoothId removed - no longer using Booth collection
       booth_id: finalBoothId,
       booth_agent_id: finalBoothAgentId,
       status: status || "Active",
@@ -854,8 +770,7 @@ router.post("/users", isAuthenticated, async (req, res) => {
     // Return user without password
     const userResponse = await User.findById(newUser._id)
       .select("-password -passwordHash")
-      .populate("createdBy", "name role")
-      .populate("assignedBoothId", "boothName boothCode booth_id");
+      .populate("createdBy", "name role");
 
     // Invalidate user caches to ensure fresh data on next fetch
     invalidateCache('users:');
@@ -954,117 +869,17 @@ router.post("/users/booth-agent", isAuthenticated, async (req, res) => {
       });
     }
 
-    // Verify booth exists and is in the correct AC
-    // First try to find by ObjectId, then by boothCode/booth_id
-    let booth = null;
+    // Simplified: No longer uses Booth collection
+    // Booth info is stored directly in user document, booth data comes from voter collections
     const aciIdNum = typeof aci_id === 'number' ? aci_id : parseInt(aci_id);
 
-    // Check if booth_id is a valid MongoDB ObjectId (24 hex chars, not starting with BOOTH)
-    const isObjectId = mongoose.Types.ObjectId.isValid(booth_id) &&
-      booth_id.length === 24 &&
-      !booth_id.startsWith('BOOTH') &&
-      !booth_id.startsWith('voter-booth-');
-
-    if (isObjectId) {
-      booth = await Booth.findById(booth_id);
-    }
-
-    // If not found by _id, try to find by boothCode (for voter-derived booths like "BOOTH1-111")
-    if (!booth) {
-      let boothCode = booth_id;
-
-      // Handle "voter-booth-111-1" format
-      if (booth_id.startsWith('voter-booth-')) {
-        const parts = booth_id.split('-');
-        const acIdFromId = parseInt(parts[2]);
-        const boothNumberFromId = parseInt(parts[3]);
-        boothCode = `BOOTH${boothNumberFromId}-${acIdFromId}`;
-      }
-
-      booth = await Booth.findOne({
-        $or: [
-          { boothCode: boothCode },
-          { booth_id: boothCode },
-          { boothCode: booth_id },
-          { booth_id: booth_id }
-        ],
-        isActive: true
-      });
-
-      // If booth doesn't exist in Booth collection, check for inactive or create from voter data
-      // This handles booths that are aggregated from voter_xxx collections
-      if (!booth) {
-        let finalBoothCode = boothCode;
-        let boothNumber = 1;
-        let acIdForBooth = aciIdNum;
-
-        // Extract booth number from code like "BOOTH1-111"
-        const boothMatch = finalBoothCode.match(/^BOOTH(\d+)-(\d+)$/);
-        if (boothMatch) {
-          boothNumber = parseInt(boothMatch[1]);
-          acIdForBooth = parseInt(boothMatch[2]);
-        }
-
-        // Check for an inactive booth with the same code - reactivate it instead of creating new
-        const inactiveBooth = await Booth.findOne({
-          $or: [
-            { boothCode: finalBoothCode },
-            { booth_id: finalBoothCode }
-          ],
-          isActive: false
-        });
-
-        if (inactiveBooth) {
-          console.log(`Reactivating inactive booth: ${finalBoothCode}`);
-          inactiveBooth.isActive = true;
-          inactiveBooth.ac_name = aci_name || inactiveBooth.ac_name || `AC ${acIdForBooth}`;
-          await inactiveBooth.save();
-          booth = inactiveBooth;
-        } else {
-          // Try to get booth name from voter data
-          let boothName = `Booth ${boothNumber}`;
-          try {
-            const VoterModel = getVoterModel(acIdForBooth);
-            const voterSample = await VoterModel.findOne({ booth_id: finalBoothCode });
-            if (voterSample?.boothname) {
-              boothName = voterSample.boothname;
-            }
-          } catch (err) {
-            console.log(`Could not fetch booth name from voters: ${err.message}`);
-          }
-
-          console.log(`Creating booth from voter-derived data: ${finalBoothCode}, name: ${boothName}`);
-
-          booth = new Booth({
-            boothNumber: boothNumber,
-            boothName: boothName,
-            boothCode: finalBoothCode,
-            booth_id: finalBoothCode,
-            ac_id: acIdForBooth,
-            ac_name: aci_name || `AC ${acIdForBooth}`,
-            isActive: true,
-            assignedAgents: [],
-            createdBy: req.user._id
-          });
-          await booth.save();
-          console.log(`Created new booth from voter data: ${finalBoothCode}`);
-        }
-      }
-    }
-
-    if (!booth || !booth.isActive) {
-      return res.status(404).json({
-        success: false,
-        message: "Booth not found or inactive",
-      });
-    }
-
-    // aciIdNum already declared above
-    if (booth.ac_id !== aciIdNum) {
-      return res.status(400).json({
-        success: false,
-        message: "Booth does not belong to the specified AC",
-      });
+    // Normalize booth_id - handle various formats
+    let boothIdentifier = booth_id;
+    if (booth_id.startsWith('voter-booth-')) {
+      const parts = booth_id.split('-');
+      const acIdFromId = parseInt(parts[2]);
+      const boothNumberFromId = parseInt(parts[3]);
+      boothIdentifier = `BOOTH${boothNumberFromId}-${acIdFromId}`;
     }
 
     // Check if user already exists (by email/username or phone)
@@ -1087,15 +902,9 @@ router.post("/users/booth-agent", isAuthenticated, async (req, res) => {
 
     // Generate booth_agent_id
     // Format: {booth_id}-{sequence} where sequence is the number of agents for this booth
-    // Get the booth's booth_id (e.g., "BOOTH1-119")
-    const boothIdentifier = booth.booth_id || booth.boothCode || `BOOTH${booth.boothNumber}-${booth.ac_id}`;
-
-    // Count existing agents assigned to this specific booth (by booth ObjectId OR booth_id string)
+    // Count existing agents assigned to this specific booth (by booth_id string)
     const existingAgentsCount = await User.countDocuments({
-      $or: [
-        { assignedBoothId: booth._id },
-        { booth_id: boothIdentifier }
-      ],
+      booth_id: boothIdentifier,
       role: { $in: ["Booth Agent", "BoothAgent"] },
       isActive: true
     });
@@ -1121,7 +930,7 @@ router.post("/users/booth-agent", isAuthenticated, async (req, res) => {
     // Create booth agent user
     // Store username in email field for login purposes
     // Store normalized phone number for consistency
-    const boothIdentifierStr = booth.booth_id || booth.boothCode || `BOOTH${booth.boothNumber}-${booth.ac_id}`;
+    // Simplified: No longer uses Booth collection ObjectId reference
     const newUser = new User({
       email: username.toLowerCase(),
       name: fullName.trim(),
@@ -1131,9 +940,9 @@ router.post("/users/booth-agent", isAuthenticated, async (req, res) => {
       role: "Booth Agent",
       assignedAC: aciIdNum,
       aci_id: aciIdNum,
-      aci_name: aci_name || booth.ac_name,
-      assignedBoothId: booth._id, // Store the actual booth ObjectId reference
-      booth_id: boothIdentifierStr, // Store the booth identifier string (e.g., "BOOTH1-111")
+      aci_name: aci_name || `AC ${aciIdNum}`,
+      // assignedBoothId removed - no longer using Booth collection
+      booth_id: boothIdentifier, // Store the booth identifier string (e.g., "BOOTH1-111")
       booth_agent_id,
       status: "Active",
       createdBy: req.user._id,
@@ -1143,25 +952,14 @@ router.post("/users/booth-agent", isAuthenticated, async (req, res) => {
       loginAttempts: 0,
     });
 
-    console.log(`Creating booth agent with booth: ${boothIdentifierStr}, boothObjectId: ${booth._id}`);
+    console.log(`Creating booth agent with booth: ${boothIdentifier}`);
 
     await newUser.save();
-
-    // Update booth to include this agent in assignedAgents
-    if (!booth.assignedAgents.includes(newUser._id)) {
-      booth.assignedAgents.push(newUser._id);
-      // If this is the first agent, set as primary
-      if (!booth.primaryAgent) {
-        booth.primaryAgent = newUser._id;
-      }
-      await booth.save();
-    }
 
     // Return user without password
     const userResponse = await User.findById(newUser._id)
       .select("-password -passwordHash")
-      .populate("createdBy", "name role")
-      .populate("assignedBoothId", "boothName boothCode booth_id");
+      .populate("createdBy", "name role");
 
     // Invalidate caches to ensure fresh data on next fetch
     invalidateCache('users:');
@@ -1249,129 +1047,24 @@ router.put("/users/:userId", isAuthenticated, async (req, res) => {
     if (isActive !== undefined && req.user.role === "L0") user.isActive = isActive;
 
     // Handle booth assignment update for booth agents
+    // Simplified: No longer uses Booth collection, just stores booth_id string
     const newBoothId = booth_id || assignedBoothId;
     if (newBoothId !== undefined && (user.role === "Booth Agent" || user.role === "BoothAgent")) {
-      // Store old booth info for updating assignedAgents
-      const oldBoothId = user.assignedBoothId;
-
-      // Look up the new booth (similar logic to create endpoint)
-      let booth = null;
-
-      // Check if booth_id is a valid MongoDB ObjectId
-      if (mongoose.Types.ObjectId.isValid(newBoothId) && !newBoothId.startsWith('voter-booth-')) {
-        booth = await Booth.findById(newBoothId);
+      // Normalize booth_id - handle various formats
+      let boothIdentifier = newBoothId;
+      if (newBoothId.startsWith('voter-booth-')) {
+        const parts = newBoothId.split('-');
+        const acIdFromId = parseInt(parts[2]);
+        const boothNumberFromId = parseInt(parts[3]);
+        boothIdentifier = `BOOTH${boothNumberFromId}-${acIdFromId}`;
       }
 
-      // If not found by _id, try to find by boothCode (for voter-derived booths)
-      if (!booth) {
-        // Extract boothCode from synthetic ID like "voter-booth-111-1" or use as-is
-        let boothCode = newBoothId;
-        if (newBoothId.startsWith('voter-booth-')) {
-          // Synthetic ID format: voter-booth-{acId}-{boothNumber}
-          const parts = newBoothId.split('-');
-          const acIdFromId = parseInt(parts[2]);
-          const boothNumberFromId = parseInt(parts[3]);
-          boothCode = `BOOTH${boothNumberFromId}-${acIdFromId}`;
-        }
+      // Update user's booth_id field directly
+      user.booth_id = boothIdentifier;
+      // Clear assignedBoothId as we no longer use Booth collection
+      user.assignedBoothId = undefined;
 
-        booth = await Booth.findOne({
-          $or: [
-            { boothCode: boothCode },
-            { booth_id: boothCode },
-            { boothCode: newBoothId }
-          ],
-          isActive: true
-        });
-
-        // If booth still doesn't exist, create it from voter data
-        if (!booth) {
-          let boothNumber = 1;
-          let acIdForBooth = user.assignedAC;
-          let finalBoothCode = boothCode;
-
-          if (newBoothId.startsWith('voter-booth-')) {
-            // Handle voter-booth-xxx-xxx format
-            const parts = newBoothId.split('-');
-            acIdForBooth = parseInt(parts[2]);
-            boothNumber = parseInt(parts[3]);
-            finalBoothCode = `BOOTH${boothNumber}-${acIdForBooth}`;
-          } else if (newBoothId.match(/^BOOTH(\d+)-(\d+)$/)) {
-            // Handle BOOTHx-xxx format (e.g., "BOOTH1-111")
-            const boothMatch = newBoothId.match(/^BOOTH(\d+)-(\d+)$/);
-            boothNumber = parseInt(boothMatch[1]);
-            acIdForBooth = parseInt(boothMatch[2]);
-            finalBoothCode = newBoothId;
-          }
-
-          if (finalBoothCode && acIdForBooth) {
-            // Try to get booth name from voter data
-            let boothName = `Booth ${boothNumber}`;
-            try {
-              const voterCollection = mongoose.connection.collection(`voters_${acIdForBooth}`);
-              const voterSample = await voterCollection.findOne({ booth_id: finalBoothCode });
-              if (voterSample?.boothname) {
-                boothName = voterSample.boothname;
-              }
-            } catch (voterErr) {
-              console.log(`Could not fetch booth name from voters_${acIdForBooth}: ${voterErr.message}`);
-            }
-
-            booth = new Booth({
-              boothNumber: boothNumber,
-              boothName: boothName,
-              boothCode: finalBoothCode,
-              booth_id: finalBoothCode,
-              ac_id: acIdForBooth,
-              ac_name: user.aci_name || `AC ${acIdForBooth}`,
-              isActive: true,
-              assignedAgents: [],
-              createdBy: req.user._id
-            });
-            await booth.save();
-            console.log(`Created new booth from voter data during update: ${finalBoothCode}`);
-          }
-        }
-      }
-
-      if (booth && booth.isActive) {
-        // Get booth identifier string
-        const boothIdentifierStr = booth.booth_id || booth.boothCode || `BOOTH${booth.boothNumber}-${booth.ac_id}`;
-
-        // Update user's booth fields
-        user.assignedBoothId = booth._id;
-        user.booth_id = boothIdentifierStr;
-
-        console.log(`Updating booth agent ${user._id} booth assignment: ${user.booth_id} -> ${boothIdentifierStr}`);
-
-        // Remove user from old booth's assignedAgents if booth changed
-        if (oldBoothId && oldBoothId.toString() !== booth._id.toString()) {
-          const oldBooth = await Booth.findById(oldBoothId);
-          if (oldBooth) {
-            oldBooth.assignedAgents = oldBooth.assignedAgents.filter(
-              agentId => agentId.toString() !== user._id.toString()
-            );
-            // If this was the primary agent, clear it
-            if (oldBooth.primaryAgent && oldBooth.primaryAgent.toString() === user._id.toString()) {
-              oldBooth.primaryAgent = oldBooth.assignedAgents.length > 0 ? oldBooth.assignedAgents[0] : null;
-            }
-            await oldBooth.save();
-            console.log(`Removed agent from old booth ${oldBooth.boothCode}`);
-          }
-        }
-
-        // Add user to new booth's assignedAgents if not already there
-        if (!booth.assignedAgents.includes(user._id)) {
-          booth.assignedAgents.push(user._id);
-          // If this is the first agent, set as primary
-          if (!booth.primaryAgent) {
-            booth.primaryAgent = user._id;
-          }
-          await booth.save();
-          console.log(`Added agent to new booth ${booth.boothCode}`);
-        }
-      } else {
-        console.warn(`Booth not found for update: ${newBoothId}`);
-      }
+      console.log(`Updating booth agent ${user._id} booth assignment to: ${boothIdentifier}`);
     }
 
     // Update password if provided - update both fields for compatibility
@@ -1385,8 +1078,7 @@ router.put("/users/:userId", isAuthenticated, async (req, res) => {
 
     const userResponse = await User.findById(user._id)
       .select("-password -passwordHash")
-      .populate("createdBy", "name role")
-      .populate("assignedBoothId", "boothName boothCode");
+      .populate("createdBy", "name role");
 
     // Invalidate caches to ensure fresh data on next fetch
     invalidateCache('users:');
@@ -1460,20 +1152,8 @@ router.delete("/users/:userId", isAuthenticated, async (req, res) => {
       // L1 can delete all other user types (L1, L2, BoothAgent)
     }
 
-    // If user is a booth agent, remove them from booth's assignedAgents before deletion
-    if (user.assignedBoothId) {
-      const booth = await Booth.findById(user.assignedBoothId);
-      if (booth) {
-        booth.assignedAgents = booth.assignedAgents.filter(
-          (agentId) => agentId.toString() !== userId
-        );
-        // If this was the primary agent, clear it
-        if (booth.primaryAgent && booth.primaryAgent.toString() === userId) {
-          booth.primaryAgent = null;
-        }
-        await booth.save();
-      }
-    }
+    // No longer need to update Booth collection since we don't use it for agent tracking
+    // Agent-booth relationship is stored in user document only
 
     // Permanently delete the user from the database
     await User.findByIdAndDelete(userId);
@@ -1692,209 +1372,36 @@ router.get("/booths", isAuthenticated, canManageBooths, validateACAccess, async 
 
 /**
  * POST /api/rbac/booths
- * Create a new booth
- * Access: L0, L1, L2
+ * DISABLED - Booths are derived from voter data
+ * Booth data comes from voter collections, not the booths collection
  */
-router.post("/booths", isAuthenticated, canManageBooths, validateACAccess, async (req, res) => {
-  try {
-    // Support both acId/acName and ac_id/ac_name for backward compatibility
-    const { boothName, boothCode, acId, acName, ac_id, ac_name, address, totalVoters } = req.body;
-
-    // Normalize field names
-    const normalizedAcId = parseInt(acId || ac_id);
-    const normalizedAcName = acName || ac_name;
-
-    // Validate required fields
-    if (!boothName || !normalizedAcId || !normalizedAcName) {
-      return res.status(400).json({
-        success: false,
-        message: "Booth name, AC ID, and AC name are required",
-      });
-    }
-
-    // Check AC access
-    if (!canAccessAC(req.user, normalizedAcId)) {
-      return res.status(403).json({
-        success: false,
-        message: "You can only create booths in your assigned AC",
-      });
-    }
-
-    // Auto-generate booth number: find the max booth number for this AC and increment by 1
-    const maxBooth = await Booth.findOne({ ac_id: normalizedAcId, isActive: true })
-      .sort({ boothNumber: -1 })
-      .select("boothNumber")
-      .lean();
-
-    const nextBoothNumber = maxBooth ? maxBooth.boothNumber + 1 : 1;
-    console.log(`Auto-generated booth number for AC ${normalizedAcId}: ${nextBoothNumber}`);
-
-    // Generate booth_id in format: BOOTH<number>-<AC number>
-    const boothIdentifier = boothCode || `BOOTH${nextBoothNumber}-${normalizedAcId}`;
-    console.log("Generated booth_id:", boothIdentifier);
-
-    // Check if booth code already exists
-    const existingBooth = await Booth.findOne({ boothCode: boothIdentifier, isActive: true });
-    if (existingBooth) {
-      return res.status(409).json({
-        success: false,
-        message: "Booth with this code already exists",
-      });
-    }
-
-    // Create booth
-    const newBooth = new Booth({
-      boothNumber: nextBoothNumber,
-      boothName,
-      boothCode: boothIdentifier,
-      booth_id: boothIdentifier,
-      ac_id: normalizedAcId,
-      ac_name: normalizedAcName,
-      address,
-      totalVoters: totalVoters || 0,
-      createdBy: req.user._id,
-      isActive: true,
-    });
-
-    await newBooth.save();
-
-    // Populate references before returning
-    await newBooth.populate("createdBy", "name role");
-
-    // Invalidate booth caches to ensure fresh data on next fetch
-    invalidateCache('booths');
-
-    res.status(201).json({
-      success: true,
-      message: "Booth created successfully",
-      booth: newBooth,
-    });
-  } catch (error) {
-    console.error("Error creating booth:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to create booth",
-      error: error.message,
-    });
-  }
+router.post("/booths", isAuthenticated, canManageBooths, async (req, res) => {
+  res.status(410).json({
+    success: false,
+    message: "Manual booth creation is disabled. Booths are derived from voter data.",
+  });
 });
 
 /**
  * PUT /api/rbac/booths/:boothId
- * Update an existing booth
- * Access: L0, L1, L2
+ * DISABLED - Booths are derived from voter data
  */
-router.put("/booths/:boothId", isAuthenticated, canManageBooths, validateACAccess, async (req, res) => {
-  try {
-    const { boothId } = req.params;
-    const { boothNumber, boothName, boothCode, address, totalVoters } = req.body;
-
-    const booth = await Booth.findById(boothId);
-    if (!booth || !booth.isActive) {
-      return res.status(404).json({
-        success: false,
-        message: "Booth not found",
-      });
-    }
-
-    // Check AC access
-    if (!canAccessAC(req.user, booth.ac_id)) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied to this booth",
-      });
-    }
-
-    // Update fields
-    if (boothNumber) booth.boothNumber = boothNumber;
-    if (boothName) booth.boothName = boothName;
-    if (boothCode) {
-      // Check if new booth code is unique
-      const existingBooth = await Booth.findOne({
-        boothCode,
-        _id: { $ne: boothId },
-        isActive: true,
-      });
-      if (existingBooth) {
-        return res.status(409).json({
-          success: false,
-          message: "Booth code already exists",
-        });
-      }
-      booth.boothCode = boothCode;
-    }
-    if (address) booth.address = address;
-    if (totalVoters !== undefined) booth.totalVoters = totalVoters;
-
-    await booth.save();
-    await booth.populate([
-      { path: "assignedAgents", select: "name phone role" },
-      { path: "primaryAgent", select: "name phone role" },
-      { path: "createdBy", select: "name role" },
-    ]);
-
-    // Invalidate booth caches to ensure fresh data on next fetch
-    invalidateCache('booths');
-
-    res.json({
-      success: true,
-      message: "Booth updated successfully",
-      booth,
-    });
-  } catch (error) {
-    console.error("Error updating booth:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to update booth",
-      error: error.message,
-    });
-  }
+router.put("/booths/:boothId", isAuthenticated, canManageBooths, async (req, res) => {
+  res.status(410).json({
+    success: false,
+    message: "Manual booth update is disabled. Booths are derived from voter data.",
+  });
 });
 
 /**
  * DELETE /api/rbac/booths/:boothId
- * Soft delete a booth
- * Access: L0, L1, L2
+ * DISABLED - Booths are derived from voter data
  */
-router.delete("/booths/:boothId", isAuthenticated, canManageBooths, validateACAccess, async (req, res) => {
-  try {
-    const { boothId } = req.params;
-
-    const booth = await Booth.findById(boothId);
-    if (!booth) {
-      return res.status(404).json({
-        success: false,
-        message: "Booth not found",
-      });
-    }
-
-    // Check AC access
-    if (!canAccessAC(req.user, booth.ac_id)) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied to this booth",
-      });
-    }
-
-    // Soft delete
-    booth.isActive = false;
-    await booth.save();
-
-    // Invalidate booth caches to ensure fresh data on next fetch
-    invalidateCache('booths');
-
-    res.json({
-      success: true,
-      message: "Booth deleted successfully",
-    });
-  } catch (error) {
-    console.error("Error deleting booth:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to delete booth",
-      error: error.message,
-    });
-  }
+router.delete("/booths/:boothId", isAuthenticated, canManageBooths, async (req, res) => {
+  res.status(410).json({
+    success: false,
+    message: "Manual booth deletion is disabled. Booths are derived from voter data.",
+  });
 });
 
 // ==================== BOOTH AGENT MANAGEMENT ROUTES ====================
@@ -1943,11 +1450,23 @@ router.get("/booth-agents", isAuthenticated, canManageBoothAgents, validateACAcc
     }
 
     // BUGFIX: Search by name or phone (preserve role filter)
-    if (search) {
-      const searchRegex = new RegExp(search, "i");
-      const searchCondition = {
-        $or: [{ name: searchRegex }, { phone: searchRegex }]
-      };
+    if (search && search.trim()) {
+      const searchTerm = search.trim();
+      let searchCondition;
+
+      // Use text search for 3+ characters (faster with text index)
+      // Use regex for shorter searches (partial match support)
+      if (searchTerm.length >= 3) {
+        // Text search - uses the user_search_text index
+        searchCondition = { $text: { $search: searchTerm } };
+      } else {
+        // Short search - use prefix regex for partial matches
+        const escapedSearch = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const searchRegex = new RegExp(`^${escapedSearch}`, "i");
+        searchCondition = {
+          $or: [{ name: searchRegex }, { phone: searchRegex }]
+        };
+      }
 
       // Combine with existing query using $and to preserve role filter
       if (query.$or) {
@@ -1959,7 +1478,10 @@ router.get("/booth-agents", isAuthenticated, canManageBoothAgents, validateACAcc
           isActive: query.isActive,
           ...(query.assignedAC && { assignedAC: query.assignedAC })
         };
+      } else if (searchCondition.$or) {
+        Object.assign(query, searchCondition);
       } else {
+        // For text search, add directly to query
         Object.assign(query, searchCondition);
       }
     }
@@ -1967,62 +1489,41 @@ router.get("/booth-agents", isAuthenticated, canManageBoothAgents, validateACAcc
     // OPTIMIZATION: Use .lean() for better performance (returns plain JS objects)
     const agents = await User.find(query)
       .select("-password -passwordHash")
-      .populate("assignedBoothId", "boothName boothCode booth_id boothNumber ac_id")
       .sort({ name: 1 })
       .lean();
 
-    // If filtering by assigned status, check booth assignments
+    // Simplified: Filter by assigned status using booth_id field directly
     let filteredAgents = agents;
     if (assigned !== undefined) {
       const isAssigned = assigned === "true";
-      const agentIds = agents.map((agent) => agent._id);
-
-      const boothsWithAgents = await Booth.find({
-        assignedAgents: { $in: agentIds },
-        isActive: true,
-      }).select("assignedAgents");
-
-      const assignedAgentIds = new Set();
-      boothsWithAgents.forEach((booth) => {
-        booth.assignedAgents.forEach((agentId) => {
-          assignedAgentIds.add(agentId.toString());
-        });
-      });
-
       filteredAgents = agents.filter((agent) => {
-        const isAgentAssigned = assignedAgentIds.has(agent._id.toString());
-        return isAssigned ? isAgentAssigned : !isAgentAssigned;
+        const hasBoothAssignment = !!agent.booth_id;
+        return isAssigned ? hasBoothAssignment : !hasBoothAssignment;
       });
     }
 
     // Transform agents to include booth info in a format the frontend expects
+    // Simplified: No longer uses Booth collection, booth info comes from booth_id string
     const transformedAgents = filteredAgents.map(agent => {
       const agentObj = agent.toObject ? agent.toObject() : agent;
 
-      // Get booth info from populated assignedBoothId or from booth_id string
-      let boothName = null;
+      // Get booth info from booth_id string
       let boothNo = null;
-      let boothId = null;
+      let boothId = agentObj.booth_id || null;
 
-      if (agentObj.assignedBoothId && typeof agentObj.assignedBoothId === 'object') {
-        // Populated booth reference
-        boothName = agentObj.assignedBoothId.boothName;
-        boothNo = agentObj.assignedBoothId.boothNumber || agentObj.assignedBoothId.boothCode;
-        boothId = agentObj.assignedBoothId.booth_id || agentObj.assignedBoothId.boothCode;
-      } else if (agentObj.booth_id) {
-        // Extract booth number from booth_id string (e.g., "BOOTH1-101" -> "1")
-        const match = agentObj.booth_id.match(/^BOOTH(\d+)-(\d+)$/);
-        if (match) {
-          boothNo = match[1];
-          boothId = agentObj.booth_id;
-        } else {
-          boothId = agentObj.booth_id;
+      if (agentObj.booth_id) {
+        // Extract booth number from booth_id string (e.g., "BOOTH1-101" -> "1", "ac101002" -> "002")
+        const boothMatch = agentObj.booth_id.match(/^BOOTH(\d+)-(\d+)$/);
+        const acMatch = agentObj.booth_id.match(/^ac(\d+)(\d{3})$/);
+        if (boothMatch) {
+          boothNo = boothMatch[1];
+        } else if (acMatch) {
+          boothNo = parseInt(acMatch[2]).toString();
         }
       }
 
       return {
         ...agentObj,
-        boothName: boothName,
         boothNo: boothNo,
         boothId: boothId,
       };
@@ -2050,180 +1551,40 @@ router.get("/booth-agents", isAuthenticated, canManageBoothAgents, validateACAcc
 
 /**
  * POST /api/rbac/booth-agents/:boothId/assign
- * Assign a booth agent to a booth
- * Access: L0, L1, L2
+ * DEPRECATED: Booth collection is no longer used. Agent assignment is done via user's booth_id field.
+ * Use PUT /booth-agents/:agentId/assign-booth instead
  */
 router.post("/booth-agents/:boothId/assign", isAuthenticated, canAssignAgents, validateACAccess, async (req, res) => {
-  try {
-    const { boothId } = req.params;
-    const { agentId, isPrimary } = req.body;
-
-    if (!agentId) {
-      return res.status(400).json({
-        success: false,
-        message: "agentId is required",
-      });
-    }
-
-    // Find booth
-    const booth = await Booth.findById(boothId);
-    if (!booth || !booth.isActive) {
-      return res.status(404).json({
-        success: false,
-        message: "Booth not found",
-      });
-    }
-
-    // Check AC access
-    if (!canAccessAC(req.user, booth.ac_id)) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied to this booth",
-      });
-    }
-
-    // Find agent
-    const agent = await User.findById(agentId);
-    if (!agent || (agent.role !== "Booth Agent" && agent.role !== "BoothAgent") || !agent.isActive) {
-      return res.status(404).json({
-        success: false,
-        message: "Booth agent not found",
-      });
-    }
-
-    // Verify agent is in the same AC
-    if (agent.assignedAC && agent.assignedAC !== booth.ac_id) {
-      return res.status(400).json({
-        success: false,
-        message: "Agent must be assigned to the same AC as the booth",
-      });
-    }
-
-    // Check if already assigned
-    const isAlreadyAssigned = booth.assignedAgents.some(
-      (id) => id.toString() === agentId
-    );
-
-    if (!isAlreadyAssigned) {
-      booth.assignedAgents.push(agentId);
-    }
-
-    // BUGFIX: Also update agent's assignedBoothId to keep in sync
-    if (agent.assignedBoothId && agent.assignedBoothId.toString() !== boothId) {
-      await Booth.findByIdAndUpdate(agent.assignedBoothId, { $pull: { assignedAgents: agentId } });
-    }
-    agent.assignedBoothId = booth._id;
-    await agent.save();
-
-    // Set as primary if requested
-    if (isPrimary) {
-      booth.primaryAgent = agentId;
-    }
-
-    await booth.save();
-    await booth.populate([
-      { path: "assignedAgents", select: "name phone role isActive", match: { isActive: true } },
-      { path: "primaryAgent", select: "name phone role isActive", match: { isActive: true } },
-    ]);
-
-    // Invalidate caches to ensure fresh data on next fetch
-    invalidateCache('booth-agents:');
-    invalidateCache('booths');
-    invalidateCache('users:');
-
-    res.json({
-      success: true,
-      message: "Agent assigned successfully",
-      booth,
-    });
-  } catch (error) {
-    console.error("Error assigning agent:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to assign agent",
-      error: error.message,
-    });
-  }
+  res.status(410).json({
+    success: false,
+    message: "This endpoint is deprecated. Use PUT /api/rbac/booth-agents/:agentId/assign-booth instead. Booth assignments are now stored directly on user documents.",
+  });
 });
 
 /**
  * DELETE /api/rbac/booth-agents/:boothId/unassign/:agentId
- * Unassign a booth agent from a booth
- * Access: L0, L1, L2
+ * DEPRECATED: Booth collection is no longer used. Agent assignment is done via user's booth_id field.
+ * Use PUT /booth-agents/:agentId/assign-booth with no boothId to unassign
  */
 router.delete("/booth-agents/:boothId/unassign/:agentId", isAuthenticated, canAssignAgents, validateACAccess, async (req, res) => {
-  try {
-    const { boothId, agentId } = req.params;
-
-    // Find booth
-    const booth = await Booth.findById(boothId);
-    if (!booth || !booth.isActive) {
-      return res.status(404).json({
-        success: false,
-        message: "Booth not found",
-      });
-    }
-
-    // Check AC access
-    if (!canAccessAC(req.user, booth.ac_id)) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied to this booth",
-      });
-    }
-
-    // Remove agent from assignedAgents
-    booth.assignedAgents = booth.assignedAgents.filter(
-      (id) => id.toString() !== agentId
-    );
-
-    // Remove as primary if needed
-    if (booth.primaryAgent && booth.primaryAgent.toString() === agentId) {
-      booth.primaryAgent = null;
-    }
-
-    // BUGFIX: Also clear agent's assignedBoothId
-    const agent = await User.findById(agentId);
-    if (agent && agent.assignedBoothId && agent.assignedBoothId.toString() === boothId) {
-      agent.assignedBoothId = null;
-      await agent.save();
-    }
-
-    await booth.save();
-    await booth.populate([
-      { path: "assignedAgents", select: "name phone role isActive", match: { isActive: true } },
-      { path: "primaryAgent", select: "name phone role isActive", match: { isActive: true } },
-    ]);
-
-    // Invalidate caches to ensure fresh data on next fetch
-    invalidateCache('booth-agents:');
-    invalidateCache('booths');
-    invalidateCache('users:');
-
-    res.json({
-      success: true,
-      message: "Agent unassigned successfully",
-      booth,
-    });
-  } catch (error) {
-    console.error("Error unassigning agent:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to unassign agent",
-      error: error.message,
-    });
-  }
+  res.status(410).json({
+    success: false,
+    message: "This endpoint is deprecated. Use PUT /api/rbac/booth-agents/:agentId/assign-booth without boothId to unassign. Booth assignments are now stored directly on user documents.",
+  });
 });
 
 /**
  * PUT /api/rbac/booth-agents/:agentId/assign-booth
- * Assign an agent directly to a booth (updates agent's assignedBoothId)
+ * Assign an agent directly to a booth (updates agent's booth_id field)
+ * SIMPLIFIED: No longer uses Booth collection, just stores booth_id string on user
  * Access: L0, L1, L2
+ * @body booth_id - String identifier for the booth (e.g., "ac101002", "BOOTH2-101"). Send empty/null to unassign.
  */
 router.put("/booth-agents/:agentId/assign-booth", isAuthenticated, canAssignAgents, validateACAccess, async (req, res) => {
   try {
     const { agentId } = req.params;
-    const { boothId } = req.body;
+    // Accept both booth_id (string) and boothId (legacy) for backwards compatibility
+    const boothIdInput = req.body.booth_id || req.body.boothId;
 
     // Find agent
     const agent = await User.findById(agentId);
@@ -2242,54 +1603,60 @@ router.put("/booth-agents/:agentId/assign-booth", isAuthenticated, canAssignAgen
       });
     }
 
-    // If boothId provided, validate booth
-    if (boothId) {
-      const booth = await Booth.findById(boothId);
-      if (!booth || !booth.isActive) {
-        return res.status(404).json({
-          success: false,
-          message: "Booth not found",
-        });
+    // If booth_id provided, validate and assign
+    if (boothIdInput) {
+      // Normalize booth_id format
+      let normalizedBoothId = boothIdInput;
+
+      // Handle voter-booth-{acId}-{boothNumber} format from frontend
+      if (boothIdInput.startsWith('voter-booth-')) {
+        const parts = boothIdInput.split('-');
+        if (parts.length >= 4) {
+          const acIdFromId = parseInt(parts[2]);
+          const boothNumberFromId = parseInt(parts[3]);
+          normalizedBoothId = `ac${acIdFromId}${String(boothNumberFromId).padStart(3, '0')}`;
+        }
       }
 
-      // Check AC access for booth
-      if (!canAccessAC(req.user, booth.ac_id)) {
-        return res.status(403).json({
-          success: false,
-          message: "Access denied to this booth",
-        });
+      // Extract AC from booth_id for validation (formats: "ac101002", "BOOTH2-101")
+      let boothAC = null;
+      if (normalizedBoothId.startsWith('ac')) {
+        // Format: ac101002 -> AC 101
+        boothAC = parseInt(normalizedBoothId.substring(2, 5));
+      } else if (normalizedBoothId.includes('-')) {
+        // Format: BOOTH2-101 -> AC 101
+        const parts = normalizedBoothId.split('-');
+        boothAC = parseInt(parts[parts.length - 1]);
       }
 
-      // Verify booth and agent are in same AC
-      if (agent.assignedAC && agent.assignedAC !== booth.ac_id) {
+      // Verify booth and agent are in same AC (if we can determine booth AC)
+      if (boothAC && agent.assignedAC && agent.assignedAC !== boothAC) {
         return res.status(400).json({
           success: false,
           message: "Agent and booth must be in the same AC",
         });
       }
 
-      // BUGFIX: Sync Booth assignedAgents array
-      const oldBoothId = agent.assignedBoothId;
-      if (oldBoothId && oldBoothId.toString() !== boothId.toString()) {
-        await Booth.findByIdAndUpdate(oldBoothId, { $pull: { assignedAgents: agentId } });
+      // Check AC access for the booth
+      if (boothAC && !canAccessAC(req.user, boothAC)) {
+        return res.status(403).json({
+          success: false,
+          message: "Access denied to this booth",
+        });
       }
-      await Booth.findByIdAndUpdate(boothId, { $addToSet: { assignedAgents: agentId } });
 
-      agent.assignedBoothId = boothId;
+      agent.booth_id = normalizedBoothId;
+      agent.assignedBoothId = undefined; // Clear legacy field
     } else {
-      // Unassign booth - also remove from booth assignedAgents
-      const oldBoothId = agent.assignedBoothId;
-      if (oldBoothId) {
-        await Booth.findByIdAndUpdate(oldBoothId, { $pull: { assignedAgents: agentId } });
-      }
-      agent.assignedBoothId = null;
+      // Unassign booth
+      agent.booth_id = undefined;
+      agent.assignedBoothId = undefined;
     }
 
     await agent.save();
 
     const agentResponse = await User.findById(agent._id)
-      .select("-password -passwordHash")
-      .populate("assignedBoothId", "boothName boothCode ac_id ac_name");
+      .select("-password -passwordHash");
 
     // Invalidate caches to ensure fresh data on next fetch
     invalidateCache('booth-agents:');
@@ -2298,7 +1665,7 @@ router.put("/booth-agents/:agentId/assign-booth", isAuthenticated, canAssignAgen
 
     res.json({
       success: true,
-      message: boothId ? "Agent assigned to booth successfully" : "Agent unassigned from booth",
+      message: boothIdInput ? "Agent assigned to booth successfully" : "Agent unassigned from booth",
       agent: agentResponse,
     });
   } catch (error) {
@@ -2317,7 +1684,8 @@ router.put("/booth-agents/:agentId/assign-booth", isAuthenticated, canAssignAgen
  * GET /api/rbac/dashboard/stats
  * Get dashboard statistics
  * Access: L0, L1, L2
- * OPTIMIZED: Added caching for L0 users (5 minute TTL)
+ * OPTIMIZED: Uses precomputed stats for booth count (from voter data)
+ * Agent assignment stats come from user documents (booth_id field)
  */
 router.get("/dashboard/stats", isAuthenticated, validateACAccess, async (req, res) => {
   try {
@@ -2333,36 +1701,48 @@ router.get("/dashboard/stats", isAuthenticated, validateACAccess, async (req, re
       return res.json(cached);
     }
 
-    const boothQuery = assignedAC !== null ? { isActive: true, ac_id: assignedAC } : { isActive: true };
     const userQuery = assignedAC !== null ? { isActive: true, assignedAC } : { isActive: true };
     const agentRoleFilter = {
       $or: [{ role: "Booth Agent" }, { role: "BoothAgent" }],
     };
 
-    // Parallelize independent queries for better performance
-    const [totalBooths, totalAgents, boothsWithAgents] = await Promise.all([
-      Booth.countDocuments(boothQuery),
+    // Get booth count from precomputed stats (derived from voter data)
+    let totalBooths = 0;
+    if (assignedAC !== null) {
+      const precomputed = await getPrecomputedStats(assignedAC, 60 * 60 * 1000);
+      totalBooths = precomputed?.totalBooths || 0;
+    } else {
+      // L0: aggregate from all ACs
+      const allStats = await getAllPrecomputedStats();
+      totalBooths = allStats.reduce((sum, stat) => sum + (stat.totalBooths || 0), 0);
+    }
+
+    // Get agent statistics from user documents
+    // Assigned agents = agents with booth_id set
+    // Unassigned agents = agents without booth_id
+    const [totalAgents, assignedAgents, agentsWithBoothIds] = await Promise.all([
       User.countDocuments({ ...userQuery, ...agentRoleFilter }),
-      Booth.find(boothQuery).select("assignedAgents").lean()
+      User.countDocuments({
+        ...userQuery,
+        ...agentRoleFilter,
+        booth_id: { $exists: true, $ne: null, $ne: "" }
+      }),
+      // Get unique booth_ids to count active booths
+      User.distinct("booth_id", {
+        ...userQuery,
+        ...agentRoleFilter,
+        booth_id: { $exists: true, $ne: null, $ne: "" }
+      })
     ]);
 
-    const assignedAgentIds = new Set();
-    boothsWithAgents.forEach((booth) => {
-      if (booth.assignedAgents) {
-        booth.assignedAgents.forEach((agentId) => {
-          assignedAgentIds.add(agentId.toString());
-        });
-      }
-    });
-    const boothsActive = boothsWithAgents.filter(
-      (booth) => Array.isArray(booth.assignedAgents) && booth.assignedAgents.length > 0,
-    ).length;
+    const unassignedAgents = Math.max(totalAgents - assignedAgents, 0);
+    const boothsActive = agentsWithBoothIds.length; // Count of unique booths with agents
 
     const stats = {
       totalBooths,
       totalAgents,
-      assignedAgents: assignedAgentIds.size,
-      unassignedAgents: Math.max(totalAgents - assignedAgentIds.size, 0),
+      assignedAgents,
+      unassignedAgents,
       boothsActive,
     };
 
@@ -2665,50 +2045,56 @@ router.get("/dashboard/ac-overview", isAuthenticated, async (req, res) => {
 /**
  * GET /api/rbac/booths/:boothId/agents
  * Get all agents assigned to a specific booth
+ * SIMPLIFIED: Queries users by booth_id field instead of using Booth collection
  * Access: L0, L1, L2
+ * @param boothId - booth_id string (e.g., "ac101002", "voter-booth-101-2")
  */
 router.get("/booths/:boothId/agents", isAuthenticated, async (req, res) => {
   try {
     const { boothId } = req.params;
 
-    // BUGFIX: Filter out inactive/deleted users when populating
-    const booth = await Booth.findById(boothId)
-      .populate({
-        path: "assignedAgents",
-        select: "name phone email booth_agent_id booth_id status isActive",
-        match: { isActive: true }
-      })
-      .populate({
-        path: "primaryAgent",
-        select: "name phone email booth_agent_id isActive",
-        match: { isActive: true }
-      });
-
-    if (!booth) {
-      return res.status(404).json({
-        success: false,
-        message: "Booth not found",
-      });
+    // Try to extract AC from booth_id for access control
+    let boothAC = null;
+    if (boothId.startsWith('ac')) {
+      // Format: ac101002 -> AC 101
+      boothAC = parseInt(boothId.substring(2, 5));
+    } else if (boothId.startsWith('voter-booth-')) {
+      // Format: voter-booth-101-2 -> AC 101
+      const parts = boothId.split('-');
+      if (parts.length >= 3) {
+        boothAC = parseInt(parts[2]);
+      }
+    } else if (boothId.includes('-')) {
+      // Format: BOOTH2-101 -> AC 101
+      const parts = boothId.split('-');
+      boothAC = parseInt(parts[parts.length - 1]);
     }
 
     // Check AC access for L2 only (L0 and L1 can access all ACs)
-    if (req.user.role === "L2" && booth.ac_id !== req.user.assignedAC) {
+    if (req.user.role === "L2" && boothAC && boothAC !== req.user.assignedAC) {
       return res.status(403).json({
         success: false,
         message: "Access denied to this booth",
       });
     }
 
+    // Query users by booth_id field
+    const agents = await User.find({
+      booth_id: boothId,
+      $or: [{ role: "Booth Agent" }, { role: "BoothAgent" }],
+      isActive: true
+    })
+      .select("name phone email booth_agent_id booth_id status isActive assignedAC")
+      .lean();
+
     res.json({
       success: true,
       booth: {
-        _id: booth._id,
-        boothName: booth.boothName,
-        boothCode: booth.boothCode,
-        booth_id: booth.booth_id,
+        booth_id: boothId,
+        acId: boothAC,
       },
-      agents: (booth.assignedAgents || []).filter(a => a !== null),
-      primaryAgent: booth.primaryAgent,
+      agents: agents,
+      primaryAgent: null, // No longer tracking primary agent in Booth collection
     });
   } catch (error) {
     console.error("Error fetching booth agents:", error);

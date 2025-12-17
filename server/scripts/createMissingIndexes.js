@@ -205,6 +205,83 @@ async function createMissingIndexes() {
     console.log('  mobileappresponses: error configuring indexes');
   }
 
+  // Users Collection - RBAC Query Optimization
+  try {
+    const usersCollection = db.collection('users');
+    await createIndex(usersCollection, { email: 1 }, { unique: true, sparse: true });
+    await createIndex(usersCollection, { phone: 1 }, { unique: true, sparse: true });
+    await createIndex(usersCollection, { role: 1 });
+    await createIndex(usersCollection, { assignedAC: 1 });
+    await createIndex(usersCollection, { isActive: 1 });
+    await createIndex(usersCollection, { status: 1 });
+    await createIndex(usersCollection, { role: 1, isActive: 1 });
+    await createIndex(usersCollection, { assignedAC: 1, role: 1 });
+    await createIndex(usersCollection, { assignedAC: 1, isActive: 1 });
+    await createIndex(usersCollection, { createdAt: -1 });
+    await createIndex(usersCollection, { name: 'text' }); // For search
+    console.log('  users: indexes configured');
+  } catch (error) {
+    console.log('  users: error configuring indexes');
+  }
+
+  // Booths Collection - RBAC Query Optimization
+  try {
+    const boothsCollection = db.collection('booths');
+    await createIndex(boothsCollection, { acId: 1 });
+    await createIndex(boothsCollection, { boothNumber: 1 });
+    await createIndex(boothsCollection, { booth_id: 1 });
+    await createIndex(boothsCollection, { isActive: 1 });
+    await createIndex(boothsCollection, { acId: 1, isActive: 1 });
+    await createIndex(boothsCollection, { acId: 1, boothNumber: 1 });
+    await createIndex(boothsCollection, { assignedAgents: 1 });
+    console.log('  booths: indexes configured');
+  } catch (error) {
+    console.log('  booths: error configuring indexes');
+  }
+
+  // Surveys Collection
+  try {
+    const surveysCollection = db.collection('surveys');
+    await createIndex(surveysCollection, { status: 1 });
+    await createIndex(surveysCollection, { assignedACs: 1 });
+    await createIndex(surveysCollection, { createdAt: -1 });
+    await createIndex(surveysCollection, { createdBy: 1 });
+    await createIndex(surveysCollection, { title: 'text' });
+    console.log('  surveys: indexes configured');
+  } catch (error) {
+    console.log('  surveys: error configuring indexes');
+  }
+
+  // Precomputed Stats Collection
+  try {
+    const statsCollection = db.collection('precomputed_stats');
+    await createIndex(statsCollection, { acId: 1 }, { unique: true });
+    await createIndex(statsCollection, { computedAt: 1 });
+    console.log('  precomputed_stats: indexes configured');
+  } catch (error) {
+    console.log('  precomputed_stats: error configuring indexes');
+  }
+
+  // MappedFields Collection
+  try {
+    const mappedFieldsCollection = db.collection('mappedfields');
+    await createIndex(mappedFieldsCollection, { voterId: 1 });
+    await createIndex(mappedFieldsCollection, { surveyId: 1 });
+    await createIndex(mappedFieldsCollection, { surveyResponseId: 1 });
+    await createIndex(mappedFieldsCollection, { masterDataSectionId: 1 });
+    await createIndex(mappedFieldsCollection, { acNumber: 1 });
+    await createIndex(mappedFieldsCollection, { mappedAt: -1 });
+    await createIndex(mappedFieldsCollection, {
+      voterId: 1,
+      surveyId: 1,
+      surveyResponseId: 1,
+      masterDataSectionId: 1
+    });
+    console.log('  mappedfields: indexes configured');
+  } catch (error) {
+    console.log('  mappedfields: error configuring indexes');
+  }
+
   console.log('\n' + '='.repeat(60));
   console.log('\nIndex creation complete!');
   console.log(`Total indexes processed: ${totalCreated + totalFailed}`);

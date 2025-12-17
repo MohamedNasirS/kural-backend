@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Users, Home, FileCheck, MapPin, Activity, Clock, TrendingUp, LineChart, Loader2, UserCheck, Phone } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart as RechartsLineChart, Line, AreaChart, Area } from 'recharts';
+import { BeautifulLineChart, BeautifulBarChart } from '@/components/charts';
 import { BoothDetailDrawer } from '@/components/BoothDetailDrawer';
 import { AgentLeaderboard } from '@/components/AgentLeaderboard';
 import { ExportButton } from '@/components/ExportButton';
@@ -376,30 +376,26 @@ export const ACDetailedDashboard = () => {
                 <LineChart className="h-5 w-5" />
                 Survey Progress Over Time
               </h3>
-              <ResponsiveContainer width="100%" height={300}>
-                <RechartsLineChart data={timeSeriesData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis />
-                  <Tooltip />
-                  <Legend />
-                  <Line type="monotone" dataKey="surveys" stroke="hsl(var(--primary))" strokeWidth={2} name="Surveys" />
-                </RechartsLineChart>
-              </ResponsiveContainer>
+              <BeautifulLineChart
+                data={timeSeriesData}
+                xAxisKey="date"
+                height={300}
+                lines={[
+                  { dataKey: 'surveys', color: '#4361ee', name: 'Surveys', strokeWidth: 2 },
+                ]}
+              />
             </Card>
 
             <Card className="p-6">
               <h3 className="text-lg font-semibold mb-4">Voter Registration Trends</h3>
-              <ResponsiveContainer width="100%" height={300}>
-                <AreaChart data={timeSeriesData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis />
-                  <Tooltip />
-                  <Legend />
-                  <Area type="monotone" dataKey="voters" stroke="hsl(var(--success))" fill="hsl(var(--success))" fillOpacity={0.3} name="Voters" />
-                </AreaChart>
-              </ResponsiveContainer>
+              <BeautifulLineChart
+                data={timeSeriesData}
+                xAxisKey="date"
+                height={300}
+                lines={[
+                  { dataKey: 'voters', color: '#22c55e', name: 'Voters', strokeWidth: 2 },
+                ]}
+              />
             </Card>
           </TabsContent>
 
@@ -434,20 +430,15 @@ export const ACDetailedDashboard = () => {
                   : 'No booth data available for this AC'}
               </p>
               {boothPerformanceData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={400}>
-                  <BarChart data={boothPerformanceData.slice(0, 20)} onClick={(data) => {
-                    if (data && data.activePayload) {
-                      setSelectedBooth(data.activePayload[0].payload);
-                    }
-                  }}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="booth" angle={-45} textAnchor="end" height={100} interval={0} fontSize={10} />
-                    <YAxis />
-                    <Tooltip cursor={{ fill: 'hsl(var(--primary) / 0.1)' }} />
-                    <Legend />
-                    <Bar dataKey="voters" fill="hsl(var(--success))" name="Total Voters" className="cursor-pointer" />
-                  </BarChart>
-                </ResponsiveContainer>
+                <BeautifulBarChart
+                  data={boothPerformanceData.slice(0, 20).map(item => ({
+                    name: item.booth,
+                    value: item.voters,
+                  }))}
+                  height={400}
+                  barColor="#22c55e"
+                  valueLabel="Total Voters"
+                />
               ) : (
                 <div className="flex items-center justify-center h-[200px] text-muted-foreground">
                   No booth data available

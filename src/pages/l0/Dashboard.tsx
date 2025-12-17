@@ -9,7 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Users, UserCircle, Shield, CheckCircle, TrendingUp, TrendingDown, Calendar as CalendarIcon, Filter, Activity, Home, FileCheck, Layers, Loader2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LineChart, Line, BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { BeautifulLineChart, BeautifulBarChart } from '@/components/charts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/api';
@@ -297,19 +298,18 @@ export const L0Dashboard = () => {
           <TabsContent value="overview" className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <Card className="p-6">
-                <h3 className="text-lg font-semibold mb-4">System Growth (5 Months)</h3>
                 {stats.systemGrowthData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={300}>
-                    <LineChart data={stats.systemGrowthData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="month" />
-                      <YAxis />
-                      <Tooltip />
-                      <Legend />
-                      <Line type="monotone" dataKey="voters" stroke="hsl(var(--primary))" strokeWidth={2} name="Voters" />
-                      <Line type="monotone" dataKey="surveys" stroke="hsl(var(--success))" strokeWidth={2} name="Surveys" />
-                    </LineChart>
-                  </ResponsiveContainer>
+                  <BeautifulLineChart
+                    data={stats.systemGrowthData}
+                    xAxisKey="month"
+                    title="System Growth (5 Months)"
+                    subtitle="Voter and survey growth over time"
+                    height={300}
+                    lines={[
+                      { dataKey: 'voters', color: '#4f46e5', name: 'Voters', strokeWidth: 2 },
+                      { dataKey: 'surveys', color: '#10b981', name: 'Surveys', strokeWidth: 2 },
+                    ]}
+                  />
                 ) : (
                   <div className="flex h-[300px] items-center justify-center text-sm text-muted-foreground">
                     No valid data available.
@@ -318,19 +318,22 @@ export const L0Dashboard = () => {
               </Card>
 
               <Card className="p-6">
-                <h3 className="text-lg font-semibold mb-4">Survey Distribution (Weekly)</h3>
                 {stats.surveyDistribution.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={stats.surveyDistribution}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="category" />
-                      <YAxis />
-                      <Tooltip />
-                      <Legend />
-                      <Bar dataKey="completed" fill="hsl(var(--success))" name="Completed" />
-                      <Bar dataKey="pending" fill="hsl(var(--warning))" name="Pending" />
-                    </BarChart>
-                  </ResponsiveContainer>
+                  <BeautifulBarChart
+                    data={stats.surveyDistribution.flatMap(item => [
+                      { name: `${item.category} (Completed)`, value: item.completed, color: '#10b981' },
+                      { name: `${item.category} (Pending)`, value: item.pending, color: '#f59e0b' },
+                    ])}
+                    title="Survey Distribution (Weekly)"
+                    subtitle="Completed vs pending surveys by category"
+                    height={300}
+                    valueLabel="Surveys"
+                    showLegend={true}
+                    legendItems={[
+                      { name: 'Completed', color: '#10b981' },
+                      { name: 'Pending', color: '#f59e0b' },
+                    ]}
+                  />
                 ) : (
                   <div className="flex h-[300px] items-center justify-center text-sm text-muted-foreground">
                     No valid data available.

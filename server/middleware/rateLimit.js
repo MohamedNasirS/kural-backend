@@ -103,7 +103,7 @@ export const loginRateLimiter = createRateLimiter({
  */
 export const apiRateLimiter = createRateLimiter({
   windowMs: 60 * 1000, // 1 minute
-  max: 100,
+  max: 100, // 100 requests per minute per IP
   message: "Too many requests. Please slow down.",
 });
 
@@ -123,6 +123,36 @@ export const writeRateLimiter = createRateLimiter({
 });
 
 /**
+ * Pre-configured rate limiter for heavy aggregation/export endpoints
+ * These are resource-intensive operations - limit to 10 per minute per user
+ */
+export const aggregationRateLimiter = createRateLimiter({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10, // 10 heavy aggregation requests per minute
+  message: "Too many data export requests. Please wait before requesting more reports.",
+  keyGenerator: (req) => {
+    const ip = req.ip || req.connection.remoteAddress || "unknown";
+    const userId = req.session?.user?._id || "anon";
+    return `aggregate:${ip}:${userId}`;
+  },
+});
+
+/**
+ * Pre-configured rate limiter for dashboard/analytics endpoints
+ * Allow more requests but still protect against abuse - 30 per minute
+ */
+export const dashboardRateLimiter = createRateLimiter({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30, // 30 dashboard requests per minute
+  message: "Too many dashboard requests. Please slow down.",
+  keyGenerator: (req) => {
+    const ip = req.ip || req.connection.remoteAddress || "unknown";
+    const userId = req.session?.user?._id || "anon";
+    return `dashboard:${ip}:${userId}`;
+  },
+});
+
+/**
  * Reset rate limit for a specific key (useful after successful login)
  * @param {string} key - The rate limit key to reset
  */
@@ -135,5 +165,7 @@ export default {
   loginRateLimiter,
   apiRateLimiter,
   writeRateLimiter,
+  aggregationRateLimiter,
+  dashboardRateLimiter,
   resetRateLimit,
 };

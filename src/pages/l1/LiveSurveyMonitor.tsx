@@ -52,7 +52,7 @@ const ResponseSkeleton = () => (
 
 export const LiveSurveyMonitor = () => {
   const { toast } = useToast();
-  const [selectedAC, setSelectedAC] = useState<number>(CONSTITUENCIES[0]?.number || 111);
+  const [selectedAC, setSelectedAC] = useState<number | null>(null);
   const [selectedSurvey, setSelectedSurvey] = useState<NormalizedSurveyResponse | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [formFilter, setFormFilter] = useState<string>('all');
@@ -98,7 +98,9 @@ export const LiveSurveyMonitor = () => {
         throw new Error('Failed to fetch survey responses');
       }
 
-      const data = await response.json();
+      const responseData = await response.json();
+      // Handle standardized API response format
+      const data = responseData.data || responseData;
       // Normalize responses using universal mapper
       const normalizedResponses = (data.responses || []).map((r: any) => normalizeSurveyResponse(r));
       setSurveyResponses(normalizedResponses);
@@ -181,7 +183,7 @@ export const LiveSurveyMonitor = () => {
         <Card className="p-4">
           <div className="flex flex-wrap gap-3 items-center">
             {/* AC Dropdown */}
-            <Select value={String(selectedAC)} onValueChange={handleACChange}>
+            <Select value={selectedAC ? String(selectedAC) : ''} onValueChange={handleACChange}>
               <SelectTrigger className="w-[220px]">
                 <MapPin className="h-4 w-4 mr-2 text-muted-foreground" />
                 <SelectValue placeholder="Select AC" />

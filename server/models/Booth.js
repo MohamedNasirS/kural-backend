@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import softDeletePlugin from "../utils/softDeletePlugin.js";
 
 const boothSchema = new mongoose.Schema(
   {
@@ -78,5 +79,9 @@ boothSchema.pre("save", function (next) {
   }
   next();
 });
+
+// Apply soft delete plugin (uses isActive field)
+// This automatically filters out inactive booths in find operations
+boothSchema.plugin(softDeletePlugin, { field: 'isActive' });
 
 export default mongoose.models.Booth || mongoose.model("Booth", boothSchema);

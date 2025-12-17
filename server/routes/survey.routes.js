@@ -13,7 +13,15 @@ import {
 } from "../utils/helpers.js";
 import { isAuthenticated, canAccessAC } from "../middleware/auth.js";
 import { writeRateLimiter } from "../middleware/rateLimit.js";
-import { getCache, setCache, TTL } from "../utils/cache.js";
+import { getCache, setCache, TTL, invalidateCache } from "../utils/cache.js";
+import {
+  sendSuccess,
+  sendCreated,
+  sendBadRequest,
+  sendNotFound,
+  sendServerError
+} from "../utils/responseHelpers.js";
+import { MESSAGES } from "../config/constants.js";
 
 const router = express.Router();
 
@@ -31,7 +39,7 @@ router.get("/", async (req, res) => {
     const cacheKey = `surveys:list:${role || 'all'}:${assignedAC || 'all'}`;
     const cached = getCache(cacheKey);
     if (cached) {
-      return res.json(cached);
+      return sendSuccess(res, cached);
     }
 
     const filter = {};
@@ -68,15 +76,15 @@ router.get("/", async (req, res) => {
 
     const surveys = await Survey.find(filter).sort({ createdAt: -1 });
 
-    const response = surveys.map((survey) => survey.toJSON());
+    const data = surveys.map((survey) => survey.toJSON());
 
     // Cache surveys list for 5 minutes
-    setCache(cacheKey, response, TTL.MEDIUM);
+    setCache(cacheKey, data, TTL.MEDIUM);
 
-    return res.json(response);
+    return sendSuccess(res, data);
   } catch (error) {
     console.error("Error fetching surveys", error);
-    return res.status(500).json({ message: "Failed to fetch surveys" });
+    return sendServerError(res, "Failed to fetch surveys", error);
   }
 });
 
@@ -88,31 +96,31 @@ router.get("/:surveyId", async (req, res) => {
     const { surveyId } = req.params;
 
     if (!mongoose.Types.ObjectId.isValid(surveyId)) {
-      return res.status(400).json({ message: "Invalid survey ID" });
+      return sendBadRequest(res, "Invalid survey ID");
     }
 
     // Check cache first
     const cacheKey = `survey:${surveyId}`;
     const cached = getCache(cacheKey);
     if (cached) {
-      return res.json(cached);
+      return sendSuccess(res, cached);
     }
 
     const survey = await Survey.findById(surveyId);
 
     if (!survey) {
-      return res.status(404).json({ message: "Survey not found" });
+      return sendNotFound(res, "Survey not found");
     }
 
-    const response = survey.toJSON();
+    const data = survey.toJSON();
 
     // Cache individual survey for 10 minutes
-    setCache(cacheKey, response, TTL.MEDIUM * 2);
+    setCache(cacheKey, data, TTL.MEDIUM * 2);
 
-    return res.json(response);
+    return sendSuccess(res, data);
   } catch (error) {
     console.error("Error fetching survey", error);
-    return res.status(500).json({ message: "Failed to fetch survey" });
+    return sendServerError(res, "Failed to fetch survey", error);
   }
 });
 
@@ -177,7 +185,11 @@ router.post("/", writeRateLimiter, async (req, res) => {
     const savedSurvey = survey.toJSON();
     console.log('Saved survey:', JSON.stringify(savedSurvey, null, 2));
 
-    return res.status(201).json(savedSurvey);
+    // Cache invalidation: Clear survey list caches
+    invalidateCache('surveys:list');
+    console.log(`[Cache] Invalidated survey list caches after creating survey "${savedSurvey.title}"`);
+
+    return sendCreated(res, savedSurvey, MESSAGES.success.created);
   } catch (error) {
     console.error("Error creating survey", error);
     console.error("Error details:", {
@@ -186,22 +198,13 @@ router.post("/", writeRateLimiter, async (req, res) => {
       stack: error.stack,
     });
     if (error.name === "ValidationError") {
-      return res.status(400).json({
-        message: error.message,
-        errors: error.errors
-      });
+      return sendBadRequest(res, error.message, error);
     }
     // Handle duplicate key error for formNumber
     if (error.code === 11000 && error.message.includes('formNumber')) {
-      return res.status(400).json({
-        message: "A survey with this form number already exists. Please use a different form number or leave it empty.",
-        error: "Duplicate form number"
-      });
+      return sendBadRequest(res, "A survey with this form number already exists. Please use a different form number or leave it empty.");
     }
-    return res.status(500).json({
-      message: "Failed to create survey",
-      error: error.message
-    });
+    return sendServerError(res, "Failed to create survey", error);
   }
 });
 
@@ -213,13 +216,13 @@ router.put("/:surveyId", writeRateLimiter, async (req, res) => {
     const { surveyId } = req.params;
 
     if (!mongoose.Types.ObjectId.isValid(surveyId)) {
-      return res.status(400).json({ message: "Invalid survey ID" });
+      return sendBadRequest(res, "Invalid survey ID");
     }
 
     const survey = await Survey.findById(surveyId);
 
     if (!survey) {
-      return res.status(404).json({ message: "Survey not found" });
+      return sendNotFound(res, "Survey not found");
     }
 
     const {
@@ -256,13 +259,18 @@ router.put("/:surveyId", writeRateLimiter, async (req, res) => {
     const updatedSurvey = survey.toJSON();
     console.log('Update - Saved survey:', JSON.stringify(updatedSurvey, null, 2));
 
-    return res.json(updatedSurvey);
+    // Cache invalidation: Clear survey caches
+    invalidateCache('surveys:list');
+    invalidateCache(`survey:${surveyId}`);
+    console.log(`[Cache] Invalidated survey caches after updating survey "${updatedSurvey.title}"`);
+
+    return sendSuccess(res, updatedSurvey, MESSAGES.success.updated);
   } catch (error) {
     console.error("Error updating survey", error);
     if (error.name === "ValidationError") {
-      return res.status(400).json({ message: error.message });
+      return sendBadRequest(res, error.message, error);
     }
-    return res.status(500).json({ message: "Failed to update survey" });
+    return sendServerError(res, "Failed to update survey", error);
   }
 });
 
@@ -274,19 +282,24 @@ router.delete("/:surveyId", writeRateLimiter, async (req, res) => {
     const { surveyId } = req.params;
 
     if (!mongoose.Types.ObjectId.isValid(surveyId)) {
-      return res.status(400).json({ message: "Invalid survey ID" });
+      return sendBadRequest(res, "Invalid survey ID");
     }
 
     const survey = await Survey.findByIdAndDelete(surveyId);
 
     if (!survey) {
-      return res.status(404).json({ message: "Survey not found" });
+      return sendNotFound(res, "Survey not found");
     }
+
+    // Cache invalidation: Clear survey caches
+    invalidateCache('surveys:list');
+    invalidateCache(`survey:${surveyId}`);
+    console.log(`[Cache] Invalidated survey caches after deleting survey ${surveyId}`);
 
     return res.status(204).send();
   } catch (error) {
     console.error("Error deleting survey", error);
-    return res.status(500).json({ message: "Failed to delete survey" });
+    return sendServerError(res, "Failed to delete survey", error);
   }
 });
 

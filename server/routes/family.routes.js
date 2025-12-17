@@ -4,6 +4,14 @@ import { getVoterModel, aggregateVoters } from "../utils/voterCollection.js";
 import { isAuthenticated, canAccessAC } from "../middleware/auth.js";
 import { getCache, setCache, TTL, cacheKeys } from "../utils/cache.js";
 import { getPrecomputedStats } from "../utils/precomputedStats.js";
+import {
+  sendSuccess,
+  sendBadRequest,
+  sendForbidden,
+  sendNotFound,
+  sendServerError
+} from "../utils/responseHelpers.js";
+import { MESSAGES } from "../config/constants.js";
 
 const router = express.Router();
 
@@ -26,22 +34,19 @@ router.get("/:acId", async (req, res) => {
     const skip = (pageNum - 1) * limitNum;
 
     if (isNaN(acId)) {
-      return res.status(400).json({ message: "Invalid AC ID" });
+      return sendBadRequest(res, "Invalid AC ID");
     }
 
     // AC Isolation: Check if user can access this AC
     if (!canAccessAC(req.user, acId)) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied. You do not have permission to view this AC's data."
-      });
+      return sendForbidden(res, "Access denied. You do not have permission to view this AC's data.");
     }
 
     // OPTIMIZATION: Check cache first (15 min TTL for families list - increased for better performance)
     const cacheKey = `ac:${acId}:families:${booth || 'all'}:${search || ''}:${pageNum}:${limitNum}`;
     const cached = getCache(cacheKey, TTL.LONG);
     if (cached) {
-      return res.json(cached);
+      return sendSuccess(res, cached);
     }
 
     // Build match query - only include voters with valid familyId
@@ -67,21 +72,33 @@ router.get("/:acId", async (req, res) => {
     // Stage 1: Get distinct familyIds with pagination (fast)
     // Stage 2: Get voter details only for paginated families
 
-    // Build search match stage (after grouping)
-    let searchMatch = null;
-    if (search) {
-      const searchRegex = new RegExp(escapeRegex(search), 'i');
-      searchMatch = {
-        $match: {
-          $or: [
-            { family_head: searchRegex },
-            { "first_member_name.english": searchRegex },
-            { "first_member_name.tamil": searchRegex },
-            { address: searchRegex },
-            { _id: searchRegex }
-          ]
-        }
-      };
+    // Build search match stages
+    let preGroupSearch = null;  // Text search before grouping (faster, uses index)
+    let postGroupSearch = null; // Regex search after grouping (fallback)
+
+    if (search && search.trim()) {
+      const searchTerm = search.trim();
+
+      if (searchTerm.length >= 3) {
+        // Use text search before grouping (faster with text index)
+        preGroupSearch = {
+          $match: { $text: { $search: searchTerm } }
+        };
+      } else {
+        // Short search - use prefix regex after grouping
+        const escapedSearch = escapeRegex(searchTerm);
+        const searchRegex = new RegExp(`^${escapedSearch}`, 'i');
+        postGroupSearch = {
+          $match: {
+            $or: [
+              { family_head: searchRegex },
+              { "first_member_name.english": searchRegex },
+              { "first_member_name.tamil": searchRegex },
+              { _id: searchRegex }
+            ]
+          }
+        };
+      }
     }
 
     // OPTIMIZED: Don't push ALL voters - only count and get first member info
@@ -101,14 +118,20 @@ router.get("/:acId", async (req, res) => {
 
     // Build pipeline - NO $push of all voters!
     const basePipeline = [
-      { $match: matchQuery },
-      groupStage,
-      { $sort: { boothno: 1, _id: 1 } }
+      { $match: matchQuery }
     ];
 
-    // Add search filter if provided
-    if (searchMatch) {
-      basePipeline.push(searchMatch);
+    // Add pre-group text search (uses text index for speed)
+    if (preGroupSearch) {
+      basePipeline.push(preGroupSearch);
+    }
+
+    basePipeline.push(groupStage);
+    basePipeline.push({ $sort: { boothno: 1, _id: 1 } });
+
+    // Add post-group search filter if provided (for short searches)
+    if (postGroupSearch) {
+      basePipeline.push(postGroupSearch);
     }
 
     // Use $facet for parallel count and paginated results
@@ -160,11 +183,11 @@ router.get("/:acId", async (req, res) => {
     // Cache the response (15 min TTL)
     setCache(cacheKey, response, TTL.LONG);
 
-    return res.json(response);
+    return sendSuccess(res, response);
 
   } catch (error) {
     console.error("Error fetching families:", error);
-    return res.status(500).json({ message: "Failed to fetch families" });
+    return sendServerError(res, "Failed to fetch families", error);
   }
 });
 
@@ -179,15 +202,12 @@ router.get("/:acId/details", async (req, res) => {
     console.log('Family details request:', { acId, familyId, address, booth, boothNo });
 
     if (isNaN(acId)) {
-      return res.status(400).json({ message: "Invalid AC ID" });
+      return sendBadRequest(res, "Invalid AC ID");
     }
 
     // AC Isolation: Check if user can access this AC
     if (!canAccessAC(req.user, acId)) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied. You do not have permission to view this AC's data."
-      });
+      return sendForbidden(res, "Access denied. You do not have permission to view this AC's data.");
     }
 
     const VoterModel = getVoterModel(acId);
@@ -225,7 +245,7 @@ router.get("/:acId/details", async (req, res) => {
     console.log('Found members:', members.length);
 
     if (members.length === 0) {
-      return res.status(404).json({ message: "Family not found" });
+      return sendNotFound(res, "Family not found");
     }
 
     // Calculate demographics
@@ -255,8 +275,7 @@ router.get("/:acId/details", async (req, res) => {
       caste: member.caste || 'N/A'
     }));
 
-    return res.json({
-      success: true,
+    return sendSuccess(res, {
       family: {
         id: familyId || members[0].familyId || `${address}-${booth}`.replace(/[^a-zA-Z0-9]/g, '').substring(0, 10).toUpperCase(),
         headName: familyHead.familyHead || familyHead.name?.english || familyHead.name?.tamil || 'N/A',
@@ -274,7 +293,7 @@ router.get("/:acId/details", async (req, res) => {
 
   } catch (error) {
     console.error("Error fetching family details:", error);
-    return res.status(500).json({ message: "Failed to fetch family details", error: error.message });
+    return sendServerError(res, "Failed to fetch family details", error);
   }
 });
 

@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import softDeletePlugin from "../utils/softDeletePlugin.js";
 
 const userSchema = new mongoose.Schema(
   {
@@ -142,6 +143,10 @@ userSchema.index({ assignedAC: 1 });
 userSchema.index({ role: 1, assignedAC: 1 });
 userSchema.index({ isActive: 1 });
 userSchema.index({ phone: 1 });
+
+// Apply soft delete plugin (uses isActive field)
+// This automatically filters out inactive users in find operations
+userSchema.plugin(softDeletePlugin, { field: 'isActive' });
 
 export default mongoose.models.User || mongoose.model("User", userSchema);
 

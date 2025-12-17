@@ -76,19 +76,27 @@ export async function fetchSurveys({
     assignedAC: assignedParam,
   });
 
-  return api.get(`/surveys${query}`);
+  const response = await api.get(`/surveys${query}`);
+  // Handle standardized API response format: { success, data }
+  return response.data || response;
 }
 
 export async function fetchSurvey(id: string): Promise<Survey> {
-  return api.get(`/surveys/${id}`);
+  const response = await api.get(`/surveys/${id}`);
+  // Handle standardized API response format: { success, data }
+  return response.data || response;
 }
 
 export async function createSurvey(payload: SurveyPayload): Promise<Survey> {
-  return api.post("/surveys", payload);
+  const response = await api.post("/surveys", payload);
+  // Handle standardized API response format: { success, data }
+  return response.data || response;
 }
 
 export async function updateSurvey(id: string, payload: SurveyPayload): Promise<Survey> {
-  return api.put(`/surveys/${id}`, payload);
+  const response = await api.put(`/surveys/${id}`, payload);
+  // Handle standardized API response format: { success, data }
+  return response.data || response;
 }
 
 export async function updateSurveyStatus(id: string, status: SurveyStatus): Promise<Survey> {

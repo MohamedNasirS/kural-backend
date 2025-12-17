@@ -17,8 +17,18 @@ import {
   ALL_AC_IDS,
 } from "../utils/voterCollection.js";
 import { isAuthenticated, canAccessAC } from "../middleware/auth.js";
-import { getCache, setCache, TTL } from "../utils/cache.js";
+import { getCache, setCache, TTL, invalidateCache, invalidateACCache } from "../utils/cache.js";
 import { getPrecomputedStats } from "../utils/precomputedStats.js";
+import {
+  sendSuccess,
+  sendCreated,
+  sendBadRequest,
+  sendForbidden,
+  sendNotFound,
+  sendServerError,
+  sendPaginated
+} from "../utils/responseHelpers.js";
+import { MESSAGES, PAGINATION_CONFIG, CACHE_CONFIG } from "../config/constants.js";
 
 const router = express.Router();
 
@@ -36,9 +46,9 @@ router.get("/fields/existing", async (req, res) => {
 
     // Check cache first (30 minute TTL)
     const cacheKey = 'global:voter:fields:existing';
-    const cached = getCache(cacheKey, 30 * 60 * 1000);
+    const cached = getCache(cacheKey, CACHE_CONFIG.veryLong);
     if (cached) {
-      return res.json(cached);
+      return sendSuccess(res, cached);
     }
 
     // Sample from voters_111 which has the most data (10k voters)
@@ -55,9 +65,9 @@ router.get("/fields/existing", async (req, res) => {
       .lean();
 
     if (sampleVoters.length === 0) {
-      const response = { fields: {}, totalVoters: 0, samplesAnalyzed: 0 };
-      setCache(cacheKey, response, 30 * 60 * 1000);
-      return res.json(response);
+      const data = { fields: {}, totalVoters: 0, samplesAnalyzed: 0 };
+      setCache(cacheKey, data, CACHE_CONFIG.veryLong);
+      return sendSuccess(res, data);
     }
 
     // Analyze all fields present in voter documents
@@ -149,19 +159,19 @@ router.get("/fields/existing", async (req, res) => {
       }
     });
 
-    const response = {
+    const data = {
       fields: sortedFields,
       totalVoters,
       samplesAnalyzed: sampleVoters.length
     };
 
     // Cache the result
-    setCache(cacheKey, response, 30 * 60 * 1000);
+    setCache(cacheKey, data, CACHE_CONFIG.veryLong);
 
-    return res.json(response);
+    return sendSuccess(res, data);
   } catch (error) {
     console.error("Error fetching existing fields from voters:", error);
-    return res.status(500).json({ message: "Failed to fetch existing fields", error: error.message });
+    return sendServerError(res, "Failed to fetch existing fields", error);
   }
 });
 
@@ -172,7 +182,7 @@ router.get("/fields", async (req, res) => {
 
     const fields = await VoterField.find().sort({ name: 1 });
 
-    return res.json({
+    return sendSuccess(res, {
       fields: fields.map(field => ({
         name: field.name,
         type: field.type,
@@ -186,7 +196,7 @@ router.get("/fields", async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching voter fields:", error);
-    return res.status(500).json({ message: "Failed to fetch voter fields", error: error.message });
+    return sendServerError(res, "Failed to fetch voter fields", error);
   }
 });
 
@@ -247,18 +257,14 @@ router.post("/fields/convert-all", async (_req, res) => {
       }
     }
 
-    return res.json({
-      message: `Flattened ${totalFlattenedFields} legacy field instances across ${totalVotersUpdated} voter documents`,
+    return sendSuccess(res, {
       flattenedFields: totalFlattenedFields,
       votersUpdated: totalVotersUpdated,
       votersChecked: totalVotersChecked,
-    });
+    }, `Flattened ${totalFlattenedFields} legacy field instances across ${totalVotersUpdated} voter documents`);
   } catch (error) {
     console.error("Error flattening legacy field objects:", error);
-    return res.status(500).json({
-      message: "Failed to normalize voter fields",
-      error: error.message,
-    });
+    return sendServerError(res, "Failed to normalize voter fields", error);
   }
 });
 
@@ -270,20 +276,18 @@ router.post("/fields", async (req, res) => {
     const { name, type, required, default: defaultValue, label, description } = req.body;
 
     if (!name || !type) {
-      return res.status(400).json({ message: "Field name and type are required" });
+      return sendBadRequest(res, "Field name and type are required");
     }
 
     // Validate field name
     if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
-      return res.status(400).json({
-        message: "Field name must start with a letter or underscore and contain only letters, numbers, and underscores"
-      });
+      return sendBadRequest(res, "Field name must start with a letter or underscore and contain only letters, numbers, and underscores");
     }
 
     // Check if field already exists
     const existingField = await VoterField.findOne({ name });
     if (existingField) {
-      return res.status(400).json({ message: `Field "${name}" already exists` });
+      return sendBadRequest(res, `Field "${name}" already exists`);
     }
 
     // Create field metadata
@@ -317,8 +321,14 @@ router.post("/fields", async (req, res) => {
       totalVoters += await VoterModel.countDocuments({});
     }
 
-    return res.status(201).json({
-      message: `Field "${name}" has been successfully added to all ${totalVoters} voters. ${totalUpdated} voters were updated.`,
+    // Cache invalidation: Clear all AC caches since field affects all voters
+    for (const acId of ALL_AC_IDS) {
+      invalidateACCache(acId);
+    }
+    invalidateCache('global:voter:fields');
+    console.log(`[Cache] Invalidated all AC caches after adding field "${name}"`);
+
+    return sendCreated(res, {
       field: {
         name: newField.name,
         type: newField.type,
@@ -327,10 +337,10 @@ router.post("/fields", async (req, res) => {
         label: newField.label,
         description: newField.description,
       },
-    });
+    }, `Field "${name}" has been successfully added to all ${totalVoters} voters. ${totalUpdated} voters were updated.`);
   } catch (error) {
     console.error("Error adding voter field:", error);
-    return res.status(500).json({ message: "Failed to add voter field", error: error.message });
+    return sendServerError(res, "Failed to add voter field", error);
   }
 });
 
@@ -343,14 +353,12 @@ router.post("/fields/:oldFieldName/rename", async (req, res) => {
     const { newFieldName } = req.body;
 
     if (!newFieldName || !newFieldName.trim()) {
-      return res.status(400).json({ message: "New field name is required" });
+      return sendBadRequest(res, "New field name is required");
     }
 
     // Validate new field name
     if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(newFieldName.trim())) {
-      return res.status(400).json({
-        message: "New field name must start with a letter or underscore and contain only letters, numbers, and underscores"
-      });
+      return sendBadRequest(res, "New field name must start with a letter or underscore and contain only letters, numbers, and underscores");
     }
 
     // Only prevent renaming of critical fields
@@ -358,9 +366,7 @@ router.post("/fields/:oldFieldName/rename", async (req, res) => {
     const isCritical = CRITICAL_FIELDS.some(cf => cf.toLowerCase() === oldFieldName.toLowerCase());
 
     if (isCritical) {
-      return res.status(400).json({
-        message: `Field "${oldFieldName}" is a critical system field and cannot be renamed`
-      });
+      return sendBadRequest(res, `Field "${oldFieldName}" is a critical system field and cannot be renamed`);
     }
 
     const trimmedNewName = newFieldName.trim();
@@ -380,9 +386,7 @@ router.post("/fields/:oldFieldName/rename", async (req, res) => {
     const votersWithoutField = totalVoters - votersWithOldField;
 
     if (votersWithOldField === 0) {
-      return res.status(404).json({
-        message: `Field "${oldFieldName}" not found in any voter documents. Total voters: ${totalVoters}`
-      });
+      return sendNotFound(res, `Field "${oldFieldName}" not found in any voter documents. Total voters: ${totalVoters}`);
     }
 
     // Handle field metadata
@@ -456,6 +460,13 @@ router.post("/fields/:oldFieldName/rename", async (req, res) => {
       }
     }
 
+    // Cache invalidation: Clear all AC caches since field rename affects all voters
+    for (const acId of ALL_AC_IDS) {
+      invalidateACCache(acId);
+    }
+    invalidateCache('global:voter:fields');
+    console.log(`[Cache] Invalidated all AC caches after renaming field "${oldFieldName}" to "${trimmedNewName}"`);
+
     let message;
     if (needsMerge) {
       message = `Field "${oldFieldName}" has been merged into "${trimmedNewName}" in ${renamedCount} voter documents.`;
@@ -463,8 +474,7 @@ router.post("/fields/:oldFieldName/rename", async (req, res) => {
       message = `Field "${oldFieldName}" has been successfully renamed to "${trimmedNewName}" in ${renamedCount} voter documents`;
     }
 
-    return res.json({
-      message,
+    return sendSuccess(res, {
       oldFieldName,
       newFieldName: trimmedNewName,
       votersAffected: renamedCount,
@@ -473,19 +483,18 @@ router.post("/fields/:oldFieldName/rename", async (req, res) => {
       votersWithoutField,
       merged: needsMerge,
       mergedCount: needsMerge ? mergedCount : 0,
-    });
+    }, message);
   } catch (error) {
     console.error("Error renaming voter field:", error);
     const newName = newFieldName?.trim() || 'unknown';
     if (error.message?.includes('already exists') || error.message?.includes('duplicate') || error.code === 11000) {
-      return res.json({
-        message: `Field rename/merge completed. Some metadata conflicts were resolved automatically.`,
+      return sendSuccess(res, {
         oldFieldName,
         newFieldName: newName,
         merged: true,
-      });
+      }, `Field rename/merge completed. Some metadata conflicts were resolved automatically.`);
     }
-    return res.status(500).json({ message: "Failed to rename voter field", error: error.message });
+    return sendServerError(res, "Failed to rename voter field", error);
   }
 });
 
@@ -498,14 +507,12 @@ router.put("/fields/:fieldName/visibility", async (req, res) => {
     const { visible } = req.body;
 
     if (typeof visible !== 'boolean') {
-      return res.status(400).json({ message: "Visible parameter must be a boolean value" });
+      return sendBadRequest(res, "Visible parameter must be a boolean value");
     }
 
     const CRITICAL_FIELDS = ['_id', 'createdAt', 'updatedAt'];
     if (CRITICAL_FIELDS.includes(fieldName)) {
-      return res.status(400).json({
-        message: `Field "${fieldName}" is a critical system field and cannot have visibility toggled`
-      });
+      return sendBadRequest(res, `Field "${fieldName}" is a critical system field and cannot have visibility toggled`);
     }
 
     let field = await VoterField.findOne({ name: fieldName });
@@ -516,9 +523,7 @@ router.put("/fields/:fieldName/visibility", async (req, res) => {
     } else {
       const sampleVoterResult = await findOneVoter({ [fieldName]: { $exists: true } });
       if (!sampleVoterResult) {
-        return res.status(404).json({
-          message: `Field "${fieldName}" not found in schema or voter documents`
-        });
+        return sendNotFound(res, `Field "${fieldName}" not found in schema or voter documents`);
       }
 
       const { actualValue } = unwrapLegacyFieldValue(sampleVoterResult.voter[fieldName]);
@@ -531,20 +536,20 @@ router.put("/fields/:fieldName/visibility", async (req, res) => {
       await field.save();
     }
 
-    return res.json({
-      message: `Field "${fieldName}" visibility updated to ${visible ? 'visible' : 'hidden'}`,
+    // Cache invalidation: Clear field-related caches
+    invalidateCache('global:voter:fields');
+    console.log(`[Cache] Invalidated field caches after toggling visibility for "${fieldName}"`);
+
+    return sendSuccess(res, {
       field: {
         name: field.name,
         type: field.type,
         visible: field.visible,
       },
-    });
+    }, `Field "${fieldName}" visibility updated to ${visible ? 'visible' : 'hidden'}`);
   } catch (error) {
     console.error("Error toggling field visibility:", error);
-    return res.status(500).json({
-      message: "Failed to toggle field visibility",
-      error: error.message || String(error),
-    });
+    return sendServerError(res, "Failed to toggle field visibility", error);
   }
 });
 
@@ -558,7 +563,7 @@ router.put("/fields/:fieldName", async (req, res) => {
 
     const field = await VoterField.findOne({ name: fieldName });
     if (!field) {
-      return res.status(404).json({ message: `Field "${fieldName}" not found` });
+      return sendNotFound(res, `Field "${fieldName}" not found`);
     }
 
     if (type !== undefined) field.type = type;
@@ -578,8 +583,11 @@ router.put("/fields/:fieldName", async (req, res) => {
       }
     }
 
-    return res.json({
-      message: `Field "${fieldName}" has been successfully updated`,
+    // Cache invalidation: Clear field-related caches
+    invalidateCache('global:voter:fields');
+    console.log(`[Cache] Invalidated field caches after updating "${fieldName}"`);
+
+    return sendSuccess(res, {
       field: {
         name: field.name,
         type: field.type,
@@ -589,10 +597,10 @@ router.put("/fields/:fieldName", async (req, res) => {
         description: field.description,
         visible: field.visible !== undefined ? field.visible : true,
       },
-    });
+    }, `Field "${fieldName}" has been successfully updated`);
   } catch (error) {
     console.error("Error updating voter field:", error);
-    return res.status(500).json({ message: "Failed to update voter field", error: error.message });
+    return sendServerError(res, "Failed to update voter field", error);
   }
 });
 
@@ -617,15 +625,21 @@ router.delete("/fields/:fieldName", async (req, res) => {
       totalModified += result.modifiedCount;
     }
 
-    return res.json({
-      message: `Field "${fieldName}" has been successfully deleted from all voters`,
+    // Cache invalidation: Clear all AC caches since field deletion affects all voters
+    for (const acId of ALL_AC_IDS) {
+      invalidateACCache(acId);
+    }
+    invalidateCache('global:voter:fields');
+    console.log(`[Cache] Invalidated all AC caches after deleting field "${fieldName}"`);
+
+    return sendSuccess(res, {
       fieldName,
       votersAffected: totalModified,
       wasInSchema: !!field,
-    });
+    }, `Field "${fieldName}" has been successfully deleted from all voters`);
   } catch (error) {
     console.error("Error deleting voter field:", error);
-    return res.status(500).json({ message: "Failed to delete voter field", error: error.message });
+    return sendServerError(res, "Failed to delete voter field", error);
   }
 });
 
@@ -637,19 +651,19 @@ router.get("/details/:voterId", async (req, res) => {
     const { voterId } = req.params;
 
     if (!mongoose.Types.ObjectId.isValid(voterId)) {
-      return res.status(400).json({ message: "Invalid voter ID" });
+      return sendBadRequest(res, "Invalid voter ID");
     }
 
     const result = await findVoterById(voterId);
 
     if (!result) {
-      return res.status(404).json({ message: "Voter not found" });
+      return sendNotFound(res, "Voter not found");
     }
 
-    return res.json(result.voter);
+    return sendSuccess(res, result.voter);
   } catch (error) {
     console.error("Error fetching voter details:", error);
-    return res.status(500).json({ message: "Failed to fetch voter details", error: error.message });
+    return sendServerError(res, "Failed to fetch voter details", error);
   }
 });
 
@@ -662,12 +676,12 @@ router.put("/:voterId", async (req, res) => {
     const updateData = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(voterId)) {
-      return res.status(400).json({ message: "Invalid voter ID" });
+      return sendBadRequest(res, "Invalid voter ID");
     }
 
     const currentVoterResult = await findVoterById(voterId);
     if (!currentVoterResult) {
-      return res.status(404).json({ message: "Voter not found" });
+      return sendNotFound(res, "Voter not found");
     }
     const currentVoter = currentVoterResult.voter;
     const voterAcId = currentVoterResult.acId;
@@ -699,16 +713,20 @@ router.put("/:voterId", async (req, res) => {
     );
 
     if (!voter) {
-      return res.status(404).json({ message: "Voter not found" });
+      return sendNotFound(res, "Voter not found");
     }
 
-    return res.json({
-      message: "Voter updated successfully",
-      voter,
-    });
+    // Cache invalidation: Clear voter and dashboard caches for this AC
+    invalidateACCache(voterAcId);
+    invalidateCache(`ac:${voterAcId}:voters`);
+    invalidateCache(`ac:${voterAcId}:families`);
+    invalidateCache(`ac:${voterAcId}:dashboard`);
+    console.log(`[Cache] Invalidated caches for AC ${voterAcId} after voter update`);
+
+    return sendSuccess(res, { voter }, "Voter updated successfully");
   } catch (error) {
     console.error("Error updating voter:", error);
-    return res.status(500).json({ message: "Failed to update voter", error: error.message });
+    return sendServerError(res, "Failed to update voter", error);
   }
 });
 
@@ -721,16 +739,14 @@ router.get("/:acId", async (req, res) => {
 
     // Check if it's a reserved path
     if (['fields', 'details'].includes(acIdParam)) {
-      return res.status(400).json({ message: "Invalid route" });
+      return sendBadRequest(res, "Invalid route");
     }
 
     const rawIdentifier = acIdParam ?? req.query.aciName ?? req.query.acName;
 
     // Check if the identifier looks like an ObjectId
     if (mongoose.Types.ObjectId.isValid(rawIdentifier) && rawIdentifier.length === 24) {
-      return res.status(400).json({
-        message: "Invalid AC identifier. Use /api/voters/details/:voterId to fetch individual voter details."
-      });
+      return sendBadRequest(res, "Invalid AC identifier. Use /api/voters/details/:voterId to fetch individual voter details.");
     }
 
     let acId;
@@ -751,15 +767,12 @@ router.get("/:acId", async (req, res) => {
     }
 
     if (!acId) {
-      return res.status(400).json({ message: `Invalid AC identifier: ${rawIdentifier}` });
+      return sendBadRequest(res, `Invalid AC identifier: ${rawIdentifier}`);
     }
 
     // AC Isolation: Check if user can access this AC
     if (!canAccessAC(req.user, acId)) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied. You do not have permission to view this AC's data."
-      });
+      return sendForbidden(res, "Access denied. You do not have permission to view this AC's data.");
     }
 
     const { booth, search, status, page = 1, limit = 50 } = req.query;
@@ -771,7 +784,7 @@ router.get("/:acId", async (req, res) => {
     if (cacheKey) {
       const cached = getCache(cacheKey, TTL.MEDIUM); // 5 minute cache for voter lists (was 1 min)
       if (cached) {
-        return res.json(cached);
+        return sendSuccess(res, cached);
       }
     }
 
@@ -815,14 +828,23 @@ router.get("/:acId", async (req, res) => {
       }
     }
 
-    if (search) {
-      queryClauses.push({
-        $or: [
-          { "name.english": { $regex: search, $options: "i" } },
-          { "name.tamil": { $regex: search, $options: "i" } },
-          { voterID: { $regex: search, $options: "i" } },
-        ],
-      });
+    if (search && search.trim()) {
+      const searchTerm = search.trim();
+      // Use text search for 3+ characters (faster with text index)
+      // Use regex for shorter searches (partial match support)
+      if (searchTerm.length >= 3) {
+        // Text search - uses the voter_search_text index
+        queryClauses.push({ $text: { $search: searchTerm } });
+      } else {
+        // Short search - use prefix regex for partial matches
+        const escapedSearch = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        queryClauses.push({
+          $or: [
+            { voterID: { $regex: `^${escapedSearch}`, $options: "i" } },
+            { "name.english": { $regex: `^${escapedSearch}`, $options: "i" } },
+          ],
+        });
+      }
     }
 
     const query = queryClauses.length === 0 ? {} :
@@ -842,7 +864,7 @@ router.get("/:acId", async (req, res) => {
     let totalVoters;
     if (isSimpleQuery) {
       // Try precomputed stats first (fast - single document read)
-      const precomputed = await getPrecomputedStats(acId, 10 * 60 * 1000); // 10 min max age
+      const precomputed = await getPrecomputedStats(acId, CACHE_CONFIG.precomputedStats); // 10 min max age
       if (precomputed && precomputed.totalMembers) {
         totalVoters = precomputed.totalMembers;
       } else {
@@ -923,10 +945,10 @@ router.get("/:acId", async (req, res) => {
       setCache(cacheKey, response, TTL.MEDIUM);
     }
 
-    return res.json(response);
+    return sendSuccess(res, response);
   } catch (error) {
     console.error("Error fetching voters:", error);
-    return res.status(500).json({ message: "Failed to fetch voters" });
+    return sendServerError(res, "Failed to fetch voters", error);
   }
 });
 
@@ -955,15 +977,12 @@ router.get("/:acId/booths", async (req, res) => {
     }
 
     if (!acId) {
-      return res.status(400).json({ message: `Invalid AC identifier: ${rawIdentifier}` });
+      return sendBadRequest(res, `Invalid AC identifier: ${rawIdentifier}`);
     }
 
     // AC Isolation: Check if user can access this AC
     if (!canAccessAC(req.user, acId)) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied. You do not have permission to view this AC's data."
-      });
+      return sendForbidden(res, "Access denied. You do not have permission to view this AC's data.");
     }
 
     const VoterModel = getVoterModel(acId);
@@ -993,10 +1012,10 @@ router.get("/:acId/booths", async (req, res) => {
         displayName: `${booth._id} - ${booth.boothname || `Booth ${booth.boothno}`}`
       }));
 
-    return res.json({ booths });
+    return sendSuccess(res, { booths });
   } catch (error) {
     console.error("Error fetching booths:", error);
-    return res.status(500).json({ message: "Failed to fetch booths" });
+    return sendServerError(res, "Failed to fetch booths", error);
   }
 });
 

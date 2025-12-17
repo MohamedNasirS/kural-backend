@@ -9,7 +9,7 @@ import masterDataRoutes from "./masterData.routes.js";
 import mobileAppRoutes from "./mobileApp.routes.js";
 import mappedFieldsRoutes from "./mappedFields.routes.js";
 import healthRoutes from "./health.routes.js";
-import rbacRoutes from "./rbac.js";
+import rbacRoutes from "./rbac/index.js";
 import mlaDashboardRoutes from "./mla/index.js";
 
 // Import MLA models to register them with Mongoose

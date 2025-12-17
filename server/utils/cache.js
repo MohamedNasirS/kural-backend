@@ -1,27 +1,59 @@
 /**
  * Simple in-memory cache utility for frequently accessed data.
  *
- * Ideal for:
- * - Dashboard statistics (5 min TTL)
- * - Booth lists (15 min TTL)
- * - Survey forms (10 min TTL)
- * - AC metadata (1 hour TTL)
+ * Data Categories:
+ * 1. STATIC - Rarely changes (demographics, booth lists, AC metadata)
+ * 2. SEMI_DYNAMIC - Changes occasionally (survey forms, family groupings)
+ * 3. DYNAMIC - Changes frequently (survey responses, agent activities)
  *
- * For production with multiple server instances, consider Redis instead.
+ * Note: In-memory cache is per-worker. For shared cache across cluster workers,
+ * precomputed_stats in MongoDB serves as the shared cache layer.
+ *
+ * For production with 2,000+ users, consider adding Redis.
  */
 
 // Internal cache store
 const cache = new Map();
 
-// Default TTL values in milliseconds
+// Track cache statistics
+let cacheHits = 0;
+let cacheMisses = 0;
+
+/**
+ * TTL values in milliseconds, organized by data volatility
+ *
+ * Guidelines:
+ * - STATIC: Data that rarely changes (voter demographics, AC boundaries)
+ * - SEMI_DYNAMIC: Data that changes daily or on user action (survey forms, families)
+ * - DYNAMIC: Data that changes frequently (survey responses, live activities)
+ */
 export const TTL = {
-  DASHBOARD_STATS: 5 * 60 * 1000,      // 5 minutes
-  BOOTH_LIST: 15 * 60 * 1000,          // 15 minutes
-  SURVEY_FORMS: 10 * 60 * 1000,        // 10 minutes
-  AC_METADATA: 60 * 60 * 1000,         // 1 hour
-  SHORT: 60 * 1000,                     // 1 minute
+  // ========== STATIC DATA (rarely changes) ==========
+  // Safe to cache aggressively - voter demographics, gender counts, booth lists
+  AC_METADATA: 60 * 60 * 1000,         // 1 hour - AC names, IDs, boundaries
+  VOTER_DEMOGRAPHICS: 60 * 60 * 1000,  // 1 hour - gender/age distribution
+  BOOTH_LIST: 30 * 60 * 1000,          // 30 minutes - booth IDs and names
+  VOTER_FIELDS: 30 * 60 * 1000,        // 30 minutes - field definitions
+
+  // ========== SEMI-DYNAMIC DATA (changes occasionally) ==========
+  // Moderate caching - changes on user updates but not constantly
+  SURVEY_FORMS: 10 * 60 * 1000,        // 10 minutes - form definitions
+  FAMILY_DATA: 10 * 60 * 1000,         // 10 minutes - family groupings
+  DASHBOARD_STATS: 5 * 60 * 1000,      // 5 minutes - precomputed aggregates
+  USER_LIST: 5 * 60 * 1000,            // 5 minutes - user/agent lists
+
+  // ========== DYNAMIC DATA (changes frequently) ==========
+  // Short or no caching - actively changing data
+  SURVEY_RESPONSES: 2 * 60 * 1000,     // 2 minutes - recent submissions
+  AGENT_ACTIVITIES: 60 * 1000,         // 1 minute - live booth updates
+  LOCATION_DATA: 30 * 1000,            // 30 seconds - real-time location
+  VOTER_STATUS: 2 * 60 * 1000,         // 2 minutes - voter survey status
+
+  // ========== GENERIC ALIASES (for backward compatibility) ==========
+  SHORT: 60 * 1000,                    // 1 minute
   MEDIUM: 5 * 60 * 1000,               // 5 minutes
   LONG: 30 * 60 * 1000,                // 30 minutes
+  VERY_LONG: 60 * 60 * 1000,           // 1 hour
 };
 
 /**
@@ -34,15 +66,18 @@ export function getCache(key, ttlMs = TTL.MEDIUM) {
   const item = cache.get(key);
 
   if (!item) {
+    cacheMisses++;
     return null;
   }
 
   if (Date.now() - item.timestamp > ttlMs) {
     // Expired - remove from cache
     cache.delete(key);
+    cacheMisses++;
     return null;
   }
 
+  cacheHits++;
   return item.data;
 }
 
@@ -111,7 +146,7 @@ export function clearCache() {
 }
 
 /**
- * Get cache statistics
+ * Get cache statistics including hit/miss ratio
  * @returns {Object} Cache statistics
  */
 export function getCacheStats() {
@@ -127,11 +162,25 @@ export function getCacheStats() {
     }
   }
 
+  const totalRequests = cacheHits + cacheMisses;
+  const hitRate = totalRequests > 0 ? ((cacheHits / totalRequests) * 100).toFixed(2) : 0;
+
   return {
     total: cache.size,
     valid: validCount,
-    expired: expiredCount
+    expired: expiredCount,
+    hits: cacheHits,
+    misses: cacheMisses,
+    hitRate: `${hitRate}%`
   };
+}
+
+/**
+ * Reset cache hit/miss counters
+ */
+export function resetCacheStats() {
+  cacheHits = 0;
+  cacheMisses = 0;
 }
 
 /**
@@ -201,6 +250,18 @@ export function cached(fn, keyBuilder, ttlMs = TTL.MEDIUM) {
 // Auto-cleanup every 5 minutes
 setInterval(cleanupExpiredEntries, 5 * 60 * 1000);
 
+// Log cache stats every 10 minutes (only in production to reduce noise)
+if (process.env.NODE_ENV === 'production') {
+  setInterval(() => {
+    const stats = getCacheStats();
+    if (stats.hits + stats.misses > 0) {
+      console.log(`[Cache Stats] Entries: ${stats.valid}/${stats.total} | Hits: ${stats.hits} | Misses: ${stats.misses} | Hit Rate: ${stats.hitRate}`);
+      // Reset counters after logging to get fresh stats for next period
+      resetCacheStats();
+    }
+  }, 10 * 60 * 1000);
+}
+
 export default {
   getCache,
   setCache,
@@ -210,6 +271,7 @@ export default {
   invalidateACCache,
   clearCache,
   getCacheStats,
+  resetCacheStats,
   cleanupExpiredEntries,
   cacheKeys,
   cached,

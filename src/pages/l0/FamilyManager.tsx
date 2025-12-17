@@ -73,7 +73,9 @@ export const FamilyManager = () => {
         throw new Error('Failed to fetch booths');
       }
 
-      const data = await response.json();
+      const responseData = await response.json();
+      // Handle standardized API response format
+      const data = responseData.data || responseData;
       setBooths(data.booths || []);
     } catch (err) {
       console.error('Error fetching booths:', err);
@@ -107,9 +109,11 @@ export const FamilyManager = () => {
         throw new Error('Failed to fetch families');
       }
 
-      const data = await response.json();
+      const responseData = await response.json();
+      // Handle standardized API response format
+      const data = responseData.data || responseData;
       setFamilies(data.families || []);
-      setPagination(data.pagination);
+      setPagination(data.pagination || { page: 1, limit: 50, total: 0, pages: 0 });
     } catch (err) {
       console.error('Error fetching families:', err);
       setError(err instanceof Error ? err.message : 'Failed to load families');

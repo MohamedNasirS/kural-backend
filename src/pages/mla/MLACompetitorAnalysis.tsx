@@ -8,18 +8,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  Cell,
-  PieChart,
-  Pie,
-  Legend,
-} from 'recharts';
+import { PARTY_COLORS, OTHERS_COLOR } from '@/lib/chartColors';
+import { BeautifulDonutChart, BeautifulBarChart } from '@/components/charts';
 
 interface Competitor {
   party: string;
@@ -68,23 +58,9 @@ export default function MLACompetitorAnalysis() {
     fetchData();
   }, [acId]);
 
-  // Get party color
+  // Get party color from centralized config
   const getPartyColor = (party: string) => {
-    const colors: Record<string, string> = {
-      AIADMK: '#10b981',
-      DMK: '#ef4444',
-      BJP: '#f97316',
-      INC: '#3b82f6',
-      NTK: '#8b5cf6',
-      MNM: '#ec4899',
-      PMK: '#eab308',
-      CPM: '#dc2626',
-      CPI: '#b91c1c',
-      NOTA: '#6b7280',
-      IND: '#9ca3af',
-      AMMK: '#14b8a6',
-    };
-    return colors[party] || '#6b7280';
+    return PARTY_COLORS[party] || OTHERS_COLOR;
   };
 
   if (loading) {
@@ -187,34 +163,16 @@ export default function MLACompetitorAnalysis() {
             <CardTitle className="text-base">Vote Share Distribution</CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={pieData}
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={80}
-                  dataKey="value"
-                  label={({ name, percent }) => {
-                    // Only show label if slice is > 5% to avoid overlap
-                    if (percent < 0.05) return null;
-                    return `${name} ${(percent * 100).toFixed(0)}%`;
-                  }}
-                  labelLine={false}
-                >
-                  {pieData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value: number) => `${value.toFixed(1)}%`} />
-                <Legend
-                  layout="horizontal"
-                  verticalAlign="bottom"
-                  align="center"
-                  wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
+            <BeautifulDonutChart
+              data={pieData.map(item => ({
+                name: item.name,
+                value: item.value,
+                color: item.color,
+              }))}
+              height={300}
+              valueLabel="Vote Share %"
+              showMoreThreshold={6}
+            />
           </CardContent>
         </Card>
 
@@ -224,18 +182,16 @@ export default function MLACompetitorAnalysis() {
             <CardTitle className="text-base">Booths Won by Party</CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={boothWinData} layout="vertical">
-                <XAxis type="number" />
-                <YAxis dataKey="party" type="category" width={80} tick={{ fontSize: 12 }} />
-                <Tooltip />
-                <Bar dataKey="boothsWon" name="Booths Won">
-                  {boothWinData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <BeautifulBarChart
+              data={boothWinData.map(item => ({
+                name: item.party,
+                value: item.boothsWon,
+                color: item.color,
+              }))}
+              height={300}
+              layout="vertical"
+              valueLabel="Booths Won"
+            />
           </CardContent>
         </Card>
       </div>

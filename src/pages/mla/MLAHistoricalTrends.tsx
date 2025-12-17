@@ -8,19 +8,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-  CartesianGrid,
-  BarChart,
-  Bar,
-  Cell,
-} from 'recharts';
+import { BeautifulLineChart } from '@/components/charts';
 
 interface PartyTrend {
   year: number;
@@ -146,49 +134,19 @@ export default function MLAHistoricalTrends() {
           <CardTitle>Vote Share Trends (2009-2021)</CardTitle>
         </CardHeader>
         <CardContent>
-          <ResponsiveContainer width="100%" height={400}>
-            <LineChart data={lineChartData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="year" tick={{ fontSize: 12 }} />
-              <YAxis
-                domain={[0, 100]}
-                tick={{ fontSize: 12 }}
-                label={{ value: 'Vote Share %', angle: -90, position: 'insideLeft' }}
-              />
-              <Tooltip
-                formatter={(value: number, name: string) => [`${value.toFixed(1)}%`, name]}
-                labelFormatter={(label) => {
-                  const item = lineChartData.find((d) => d.year === label);
-                  return `${label} (${item?.type || 'Election'})`;
-                }}
-              />
-              <Legend />
-              <Line
-                type="monotone"
-                dataKey="AIADMK"
-                stroke="#10b981"
-                strokeWidth={3}
-                dot={{ fill: '#10b981', strokeWidth: 2, r: 6 }}
-                activeDot={{ r: 10 }}
-              />
-              <Line
-                type="monotone"
-                dataKey="DMK"
-                stroke="#ef4444"
-                strokeWidth={3}
-                dot={{ fill: '#ef4444', strokeWidth: 2, r: 6 }}
-                activeDot={{ r: 10 }}
-              />
-              <Line
-                type="monotone"
-                dataKey="Others"
-                stroke="#8b5cf6"
-                strokeWidth={2}
-                dot={{ fill: '#8b5cf6', strokeWidth: 2, r: 4 }}
-                strokeDasharray="5 5"
-              />
-            </LineChart>
-          </ResponsiveContainer>
+          <BeautifulLineChart
+            data={lineChartData}
+            xAxisKey="year"
+            height={400}
+            yAxisDomain={[0, 100]}
+            yAxisLabel="Vote Share %"
+            lines={[
+              { dataKey: 'AIADMK', color: '#10b981', name: 'AIADMK', strokeWidth: 3 },
+              { dataKey: 'DMK', color: '#ef4444', name: 'DMK', strokeWidth: 3 },
+              { dataKey: 'Others', color: '#8b5cf6', name: 'Others', strokeWidth: 2, dashed: true },
+            ]}
+            formatTooltipValue={(value) => `${value.toFixed(1)}%`}
+          />
         </CardContent>
       </Card>
 

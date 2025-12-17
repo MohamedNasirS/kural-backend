@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Plus, Search, Edit2, Trash2, Users, UserPlus, UserCog } from "lucide-react";
+import { Plus, Search, Edit2, Trash2, Users, UserPlus, UserCog, Filter } from "lucide-react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -92,7 +92,7 @@ const UserManagement: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [activeTab, setActiveTab] = useState<string>("L0");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [acFilter, setAcFilter] = useState<string>("all");
+  const [acFilter, setAcFilter] = useState<string>("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -114,10 +114,9 @@ const UserManagement: React.FC = () => {
   });
 
   useEffect(() => {
-    // For BoothAgent tab, require AC selection before fetching (too many agents otherwise)
-    // L2 (ACI) and MLA tabs can show all users without AC filter
-    const requiresACSelection = activeTab === "BoothAgent";
-    if (requiresACSelection && acFilter === "all") {
+    // For L2, MLA, and BoothAgent tabs, require AC selection before fetching
+    const requiresACSelection = activeTab === "BoothAgent" || activeTab === "L2" || activeTab === "MLA";
+    if (requiresACSelection && !acFilter) {
       setUsers([]);
       setLoading(false);
       return;
@@ -191,7 +190,7 @@ const UserManagement: React.FC = () => {
       }
 
       // Add AC filter for BoothAgent, L2, and MLA tabs
-      if ((activeTab === "BoothAgent" || activeTab === "L2" || activeTab === "MLA") && acFilter !== "all") {
+      if ((activeTab === "BoothAgent" || activeTab === "L2" || activeTab === "MLA") && acFilter) {
         params.append("ac", acFilter);
       }
 
@@ -400,6 +399,21 @@ const UserManagement: React.FC = () => {
     const showAssignedAC = activeTab === "L2" || activeTab === "MLA" || activeTab === "BoothAgent";
     // Show Booth Number column only for Booth Agents
     const showBoothNumber = activeTab === "BoothAgent";
+    // Require AC selection for these tabs
+    const requiresACSelection = activeTab === "L2" || activeTab === "MLA" || activeTab === "BoothAgent";
+
+    // Show "Select Constituency" message when AC is required but not selected
+    if (requiresACSelection && !acFilter) {
+      return (
+        <div className="flex flex-col items-center justify-center p-8 text-center">
+          <Filter className="h-12 w-12 text-muted-foreground mb-4 opacity-50" />
+          <h3 className="text-lg font-semibold mb-2">Select a Constituency</h3>
+          <p className="text-muted-foreground">
+            Please select an Assembly Constituency from the dropdown above to view users.
+          </p>
+        </div>
+      );
+    }
 
     if (loading) {
       return (
@@ -413,7 +427,9 @@ const UserManagement: React.FC = () => {
       return (
         <div className="flex flex-col items-center justify-center p-8 text-center">
           <Users className="h-12 w-12 text-muted-foreground mb-4" />
-          <p className="text-muted-foreground">No users found</p>
+          <p className="text-muted-foreground">
+            {acFilter ? `No users found for AC ${acFilter}` : 'No users found'}
+          </p>
         </div>
       );
     }
@@ -806,10 +822,9 @@ const UserManagement: React.FC = () => {
                     }}
                   >
                     <SelectTrigger className="w-[280px]">
-                      <SelectValue placeholder="All Constituencies" />
+                      <SelectValue placeholder="Select Constituency" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Constituencies</SelectItem>
                       {CONSTITUENCIES.map((ac) => (
                         <SelectItem key={ac.number} value={ac.number.toString()}>
                           AC {ac.number} - {ac.name}
@@ -834,10 +849,9 @@ const UserManagement: React.FC = () => {
                     }}
                   >
                     <SelectTrigger className="w-[280px]">
-                      <SelectValue placeholder="All Constituencies" />
+                      <SelectValue placeholder="Select Constituency" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Constituencies</SelectItem>
                       {CONSTITUENCIES.map((ac) => (
                         <SelectItem key={ac.number} value={ac.number.toString()}>
                           AC {ac.number} - {ac.name}
@@ -862,10 +876,9 @@ const UserManagement: React.FC = () => {
                     }}
                   >
                     <SelectTrigger className="w-[280px]">
-                      <SelectValue placeholder="All Constituencies" />
+                      <SelectValue placeholder="Select Constituency" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Constituencies</SelectItem>
                       {CONSTITUENCIES.map((ac) => (
                         <SelectItem key={ac.number} value={ac.number.toString()}>
                           AC {ac.number} - {ac.name}

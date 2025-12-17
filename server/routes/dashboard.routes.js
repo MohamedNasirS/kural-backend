@@ -23,11 +23,14 @@ import { isAuthenticated, canAccessAC } from "../middleware/auth.js";
 import { getCache, setCache, cacheKeys, TTL } from "../utils/cache.js";
 import { AC_NAMES, normalizeLocation } from "../utils/universalAdapter.js";
 import { getPrecomputedStats, computeStatsForAC, savePrecomputedStats } from "../utils/precomputedStats.js";
+import { dashboardRateLimiter } from "../middleware/rateLimit.js";
+import { CACHE_CONFIG } from "../config/constants.js";
 
 const router = express.Router();
 
-// Apply authentication to all routes
+// Apply authentication and rate limiting to all routes
 router.use(isAuthenticated);
+router.use(dashboardRateLimiter);
 
 // Dashboard Statistics API - OPTIMIZED with pre-computed stats
 // This version reads from pre-computed stats collection instead of running heavy aggregations
@@ -56,7 +59,7 @@ router.get("/stats/:acId", async (req, res) => {
 
     // OPTIMIZATION: Try to get pre-computed stats first (fast path)
     // This avoids running heavy aggregations on every request
-    const precomputed = await getPrecomputedStats(acId, 10 * 60 * 1000); // 10 min max age
+    const precomputed = await getPrecomputedStats(acId, CACHE_CONFIG.precomputedStats); // 10 min max age
 
     if (precomputed && !precomputed.isStale) {
       // Return pre-computed stats (fast - single document read)

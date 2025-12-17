@@ -333,14 +333,13 @@ export const BoothManagement = () => {
             {/* AC Filter for Admin (L0) and ACIM (L1) users - L2 has fixed AC */}
             {(user?.role === 'L0' || user?.role === 'L1') && (
               <Select
-                value={selectedAC?.toString() || 'all'}
+                value={selectedAC?.toString() || ''}
                 onValueChange={handleACChange}
               >
                 <SelectTrigger className="w-[250px]">
-                  <SelectValue placeholder="Select AC to filter" />
+                  <SelectValue placeholder="Select Constituency" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Constituencies</SelectItem>
                   {CONSTITUENCIES.map(c => (
                     <SelectItem key={c.number} value={c.number.toString()}>
                       {c.number} - {c.name}

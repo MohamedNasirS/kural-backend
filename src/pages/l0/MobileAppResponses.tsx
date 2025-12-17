@@ -143,8 +143,8 @@ export const MobileAppResponses = () => {
   const [responses, setResponses] = useState<MobileAppResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  // Default to AC 111 for auto-show behavior
-  const [selectedAC, setSelectedAC] = useState<string>('111');
+  // Default to empty - user must select AC
+  const [selectedAC, setSelectedAC] = useState<string>('');
   const [selectedBooth, setSelectedBooth] = useState<string>('all');
   const [booths, setBooths] = useState<BoothOption[]>([]);
   const [loadingBooths, setLoadingBooths] = useState(false);
@@ -162,7 +162,7 @@ export const MobileAppResponses = () => {
 
   // Fetch booths when AC changes
   useEffect(() => {
-    if (selectedAC && selectedAC !== 'all') {
+    if (selectedAC) {
       fetchBooths(selectedAC);
     } else {
       setBooths([]);
@@ -174,7 +174,9 @@ export const MobileAppResponses = () => {
     try {
       setLoadingBooths(true);
       const response = await api.get(`/voters/${acId}/booths`);
-      setBooths(response.booths || []);
+      // Handle standardized API response format: { success, data: { booths } }
+      const data = response.data || response;
+      setBooths(data.booths || []);
     } catch (error) {
       console.error('Error fetching booths:', error);
       setBooths([]);
@@ -190,7 +192,7 @@ export const MobileAppResponses = () => {
         limit: ITEMS_PER_PAGE,
         cursor: reset ? null : cursor ?? null,
         search,
-        acId: acId && acId !== 'all' ? acId : null,
+        acId: acId || null,
         boothId: boothId && boothId !== 'all' ? boothId : null,
       });
 
@@ -222,12 +224,25 @@ export const MobileAppResponses = () => {
   }, [toast]);
 
   useEffect(() => {
-    void loadResponses({
-      reset: true,
-      search: undefined,
-      acId: selectedAC,
-      boothId: selectedBooth,
-    });
+    // Only load when AC is selected
+    if (selectedAC) {
+      void loadResponses({
+        reset: true,
+        search: undefined,
+        acId: selectedAC,
+        boothId: selectedBooth,
+      });
+    } else {
+      // Clear data when no AC selected
+      setResponses([]);
+      setPagination({
+        limit: ITEMS_PER_PAGE,
+        hasMore: false,
+        nextCursor: null,
+        total: 0,
+      });
+      setLoading(false);
+    }
   }, [loadResponses, selectedAC, selectedBooth]);
 
   const handleSearch = () => {
@@ -266,6 +281,7 @@ export const MobileAppResponses = () => {
   const handleACChange = (value: string) => {
     setSelectedAC(value);
     setSelectedBooth('all');
+    setBooths([]); // Clear booths until new ones are fetched
   };
 
   const handleBoothChange = (value: string) => {
@@ -419,7 +435,6 @@ export const MobileAppResponses = () => {
                     <SelectValue placeholder="Select AC" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Constituencies</SelectItem>
                     {CONSTITUENCIES.map((ac) => (
                       <SelectItem key={ac.number} value={String(ac.number)}>
                         {ac.number} - {ac.name}
@@ -430,13 +445,13 @@ export const MobileAppResponses = () => {
                 <Select
                   value={selectedBooth}
                   onValueChange={handleBoothChange}
-                  disabled={selectedAC === 'all' || loadingBooths}
+                  disabled={!selectedAC || loadingBooths}
                 >
                   <SelectTrigger className="w-full md:w-[300px]">
-                    <SelectValue placeholder={loadingBooths ? 'Loading booths...' : 'Select Booth'} />
+                    <SelectValue placeholder={!selectedAC ? 'Select AC first' : loadingBooths ? 'Loading booths...' : 'Select Booth'} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Booths</SelectItem>
+                    <SelectItem value="all">All Booths ({booths.length})</SelectItem>
                     {booths.map((booth) => (
                       <SelectItem key={booth.booth_id || booth.boothNo} value={booth.booth_id || String(booth.boothNo)}>
                         {booth.boothName || `Booth ${booth.boothNo}`} ({booth.booth_id?.split('-')[0] || `BOOTH${booth.boothNo}`})

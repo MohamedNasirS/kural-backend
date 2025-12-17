@@ -18,7 +18,8 @@ import {
   Radio
 } from "lucide-react";
 import { StatCard } from "@/components/StatCard";
-import { LineChart, Line, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { BeautifulDonutChart } from '@/components/charts';
 
 // Mock comprehensive data aggregated from all levels
 const overallStats = {
@@ -182,25 +183,16 @@ export const WarRoom = () => {
                   <Target className="h-5 w-5 text-primary" />
                   Swing Voter Analysis
                 </h3>
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={swingVoterData}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                      outerRadius={100}
-                      fill="#8884d8"
-                      dataKey="value"
-                    >
-                      {swingVoterData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
+                <BeautifulDonutChart
+                  data={swingVoterData.map((item, idx) => ({
+                    name: item.name,
+                    value: item.value,
+                    color: COLORS[idx % COLORS.length],
+                  }))}
+                  height={300}
+                  valueLabel="Voters"
+                  showMoreThreshold={5}
+                />
               </Card>
             </div>
 

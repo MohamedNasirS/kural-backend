@@ -79,7 +79,7 @@ export default function ActivityLogs() {
   const [activities, setActivities] = useState<BoothAgentActivity[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedAC, setSelectedAC] = useState<string>('all');
+  const [selectedAC, setSelectedAC] = useState<string>('');
   const [selectedBooth, setSelectedBooth] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [booths, setBooths] = useState<BoothOption[]>([]);
@@ -89,7 +89,7 @@ export default function ActivityLogs() {
 
   // Fetch booths when AC changes
   useEffect(() => {
-    if (selectedAC && selectedAC !== 'all') {
+    if (selectedAC) {
       fetchBooths(selectedAC);
     } else {
       setBooths([]);
@@ -97,16 +97,25 @@ export default function ActivityLogs() {
     }
   }, [selectedAC]);
 
-  // Fetch activities when filters change
+  // Fetch activities when filters change - only when AC is selected
   useEffect(() => {
-    fetchActivities();
+    if (selectedAC) {
+      fetchActivities();
+    } else {
+      // Clear data when no AC selected
+      setActivities([]);
+      setTotal(0);
+      setLoading(false);
+    }
   }, [selectedAC, selectedBooth, selectedStatus]);
 
   const fetchBooths = async (acId: string) => {
     try {
       setLoadingBooths(true);
       const response = await api.get(`/voters/${acId}/booths`);
-      setBooths(response.booths || []);
+      // Handle standardized API response format: { success, data: { booths } }
+      const data = response.data || response;
+      setBooths(data.booths || []);
     } catch (error) {
       console.error('Error fetching booths:', error);
       setBooths([]);
@@ -120,7 +129,7 @@ export default function ActivityLogs() {
       setLoading(true);
 
       const params = new URLSearchParams();
-      if (selectedAC && selectedAC !== 'all') {
+      if (selectedAC) {
         params.append('acId', selectedAC);
       }
       if (selectedBooth && selectedBooth !== 'all') {
@@ -271,7 +280,6 @@ export default function ActivityLogs() {
                   <SelectValue placeholder="Select AC" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Constituencies</SelectItem>
                   {CONSTITUENCIES.map((ac) => (
                     <SelectItem key={ac.number} value={String(ac.number)}>
                       {ac.number} - {ac.name}
@@ -284,7 +292,7 @@ export default function ActivityLogs() {
               <Select
                 value={selectedBooth}
                 onValueChange={setSelectedBooth}
-                disabled={selectedAC === 'all' || loadingBooths}
+                disabled={!selectedAC || loadingBooths}
               >
                 <SelectTrigger className="w-full md:w-[280px]">
                   <Building2 className="h-4 w-4 mr-2" />
@@ -330,7 +338,15 @@ export default function ActivityLogs() {
 
         {/* Activities Table */}
         <Card className="p-0 overflow-hidden">
-          {loading ? (
+          {!selectedAC ? (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <Filter className="h-12 w-12 text-muted-foreground mb-2 opacity-50" />
+              <h3 className="text-lg font-semibold mb-2">Select a Constituency</h3>
+              <p className="text-muted-foreground">
+                Please select an Assembly Constituency from the dropdown above to view activity logs.
+              </p>
+            </div>
+          ) : loading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
               <p className="ml-3 text-muted-foreground">Loading activities...</p>
@@ -339,7 +355,7 @@ export default function ActivityLogs() {
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <Activity className="h-12 w-12 text-muted-foreground mb-2 opacity-50" />
               <p className="text-muted-foreground">
-                {searchQuery || selectedBooth !== 'all' || selectedStatus !== 'all' || selectedAC !== 'all'
+                {searchQuery || selectedBooth !== 'all' || selectedStatus !== 'all'
                   ? 'No activities match the current filters.'
                   : 'No booth agent activities found.'}
               </p>

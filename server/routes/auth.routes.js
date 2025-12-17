@@ -4,6 +4,15 @@ import { connectToDatabase } from "../config/database.js";
 import { roleMap } from "../utils/helpers.js";
 import { isProduction, SESSION_COOKIE_SAMESITE, SESSION_COOKIE_DOMAIN } from "../config/index.js";
 import { loginRateLimiter, resetRateLimit } from "../middleware/rateLimit.js";
+import {
+  sendSuccess,
+  sendBadRequest,
+  sendUnauthorized,
+  sendForbidden,
+  sendNotFound,
+  sendServerError
+} from "../utils/responseHelpers.js";
+import { MESSAGES } from "../config/constants.js";
 
 const router = express.Router();
 
@@ -13,9 +22,7 @@ router.post("/login", loginRateLimiter, async (req, res) => {
     const { identifier, password } = req.body ?? {};
 
     if (!identifier || !password) {
-      return res.status(400).json({
-        message: "Identifier and password are required",
-      });
+      return sendBadRequest(res, "Identifier and password are required");
     }
 
     try {
@@ -23,10 +30,7 @@ router.post("/login", loginRateLimiter, async (req, res) => {
     } catch (dbError) {
       console.error("Database connection error:", dbError);
       console.error("Database connection error stack:", dbError.stack);
-      return res.status(500).json({
-        message: "Database connection failed",
-        error: process.env.NODE_ENV === "development" ? dbError.message : undefined
-      });
+      return sendServerError(res, "Database connection failed", dbError);
     }
 
     const trimmedIdentifier = String(identifier).trim();
@@ -102,7 +106,7 @@ router.post("/login", loginRateLimiter, async (req, res) => {
         identifierType: normalizedIdentifier.includes('@') ? 'email' : 'phone',
         lookupConditions: lookupConditions.length
       });
-      return res.status(401).json({ message: "Invalid credentials" });
+      return sendUnauthorized(res, MESSAGES.auth.invalidCredentials);
     }
 
     // Log user found (sanitized - no sensitive data)
@@ -118,10 +122,7 @@ router.post("/login", loginRateLimiter, async (req, res) => {
     } catch (passwordError) {
       console.error("Password verification error:", passwordError);
       console.error("Password verification error stack:", passwordError.stack);
-      return res.status(500).json({
-        message: "Error verifying password",
-        error: process.env.NODE_ENV === "development" ? passwordError.message : undefined
-      });
+      return sendServerError(res, "Error verifying password", passwordError);
     }
 
     if (!isPasswordValid) {
@@ -129,7 +130,7 @@ router.post("/login", loginRateLimiter, async (req, res) => {
       console.warn("Login failed: invalid password", {
         userId: user._id.toString()
       });
-      return res.status(401).json({ message: "Invalid credentials" });
+      return sendUnauthorized(res, MESSAGES.auth.invalidCredentials);
     }
 
     console.log("Password verified successfully");
@@ -141,7 +142,7 @@ router.post("/login", loginRateLimiter, async (req, res) => {
         userRole: user.role,
         availableRoles: Array.from(roleMap.keys())
       });
-      return res.status(403).json({ message: "Role is not authorised" });
+      return sendForbidden(res, "Role is not authorised");
     }
 
     console.log("Role mapped successfully:", mappedRole);
@@ -175,7 +176,7 @@ router.post("/login", loginRateLimiter, async (req, res) => {
       });
     } catch (sessionError) {
       console.error("Failed to save session:", sessionError);
-      return res.status(500).json({ message: "Failed to create session" });
+      return sendServerError(res, "Failed to create session", sessionError);
     }
 
     // Log session creation (only in development)
@@ -185,17 +186,11 @@ router.post("/login", loginRateLimiter, async (req, res) => {
       console.log('Login successful - Cookie headers:', res.getHeader('Set-Cookie'));
     }
 
-    return res.json({
-      user: userSession,
-    });
+    return sendSuccess(res, { user: userSession }, MESSAGES.auth.loginSuccess);
   } catch (error) {
     console.error("Login error", error);
     console.error("Login error stack:", error.stack);
-    return res.status(500).json({
-      message: "Internal server error",
-      error: process.env.NODE_ENV === "development" ? error.message : undefined,
-      stack: process.env.NODE_ENV === "development" ? error.stack : undefined
-    });
+    return sendServerError(res, MESSAGES.error.serverError, error);
   }
 });
 
@@ -203,7 +198,7 @@ router.post("/login", loginRateLimiter, async (req, res) => {
 router.post("/logout", (req, res) => {
   req.session.destroy((err) => {
     if (err) {
-      return res.status(500).json({ message: "Failed to logout" });
+      return sendServerError(res, "Failed to logout", err);
     }
     // Clear cookie with same settings as when it was set
     res.clearCookie("kural.sid", {
@@ -213,7 +208,7 @@ router.post("/logout", (req, res) => {
       sameSite: SESSION_COOKIE_SAMESITE,
       domain: SESSION_COOKIE_DOMAIN || (isProduction ? '.kuralapp.in' : undefined),
     });
-    return res.json({ message: "Logged out successfully" });
+    return sendSuccess(res, null, MESSAGES.auth.logoutSuccess);
   });
 });
 
@@ -224,7 +219,7 @@ router.get("/me", async (req, res) => {
     if (process.env.NODE_ENV === 'development') {
       console.log('Auth check - No session object found');
     }
-    return res.status(401).json({ message: "Not authenticated" });
+    return sendUnauthorized(res, MESSAGES.error.unauthorized);
   }
 
   // Debug logging (only in development)
@@ -246,7 +241,7 @@ router.get("/me", async (req, res) => {
         req.session.destroy((err) => {
           if (err) console.error('Error destroying session:', err);
         });
-        return res.status(401).json({ message: "User not found" });
+        return sendUnauthorized(res, "User not found");
       }
 
       // Check if user is still active
@@ -254,7 +249,7 @@ router.get("/me", async (req, res) => {
         req.session.destroy((err) => {
           if (err) console.error('Error destroying session:', err);
         });
-        return res.status(401).json({ message: "User account is inactive" });
+        return sendUnauthorized(res, MESSAGES.auth.accountInactive);
       }
 
       // Update session with latest user data (in case role or assignedAC changed)
@@ -263,7 +258,7 @@ router.get("/me", async (req, res) => {
         req.session.destroy((err) => {
           if (err) console.error('Error destroying session:', err);
         });
-        return res.status(403).json({ message: "Role is not authorised" });
+        return sendForbidden(res, "Role is not authorised");
       }
 
       const userSession = {
@@ -288,20 +283,16 @@ router.get("/me", async (req, res) => {
         });
       }
 
-      return res.json({ user: userSession });
+      return sendSuccess(res, { user: userSession });
     } catch (error) {
       console.error('Error verifying user session:', error);
       console.error('Error stack:', error.stack);
       // On error, return proper error response in development
       if (process.env.NODE_ENV === "development") {
-        return res.status(500).json({
-          message: "Error verifying session",
-          error: error.message,
-          stack: error.stack
-        });
+        return sendServerError(res, "Error verifying session", error);
       }
       // In production, still return the session user if it exists
-      return res.json({ user: req.session.user });
+      return sendSuccess(res, { user: req.session.user });
     }
   }
 
@@ -311,7 +302,7 @@ router.get("/me", async (req, res) => {
     console.log('Auth check - Session ID:', req.sessionID);
     console.log('Auth check - Has cookies:', !!req.headers.cookie);
   }
-  return res.status(401).json({ message: "Not authenticated" });
+  return sendUnauthorized(res, MESSAGES.error.unauthorized);
 });
 
 // Diagnostic endpoint to check session/cookie status
@@ -319,10 +310,10 @@ router.get("/me", async (req, res) => {
 router.get("/debug", (req, res) => {
   // Block in production to prevent information disclosure
   if (isProduction) {
-    return res.status(404).json({ message: "Not found" });
+    return sendNotFound(res, MESSAGES.error.notFound);
   }
 
-  res.json({
+  return sendSuccess(res, {
     hasSession: !!req.session,
     hasSessionUser: !!(req.session && req.session.user),
     sessionId: req.sessionID,
