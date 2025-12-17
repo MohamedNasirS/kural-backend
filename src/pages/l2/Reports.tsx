@@ -11,9 +11,6 @@ import { Progress } from '@/components/ui/progress';
 import {
   BarChart,
   Bar,
-  PieChart,
-  Pie,
-  Cell,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -21,6 +18,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts';
+import { BeautifulDonutChart } from '@/components/charts';
 import API_BASE_URL from '@/lib/api';
 
 interface BoothReport {
@@ -59,7 +57,6 @@ interface DemographicsData {
   surveyStatus: { surveyed: number; notSurveyed: number };
 }
 
-const COLORS = ['#3B82F6', '#EC4899', '#22C55E', '#EAB308', '#8B5CF6', '#F97316'];
 const AGE_COLORS = ['#60A5FA', '#34D399', '#FBBF24', '#F87171', '#A78BFA', '#FB923C'];
 
 export const Reports = () => {
@@ -216,29 +213,6 @@ export const Reports = () => {
 
   const acName = stats?.acName || user?.aciName || 'Assembly Constituency';
 
-  // Custom label renderer that avoids overlap
-  const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }: any) => {
-    const RADIAN = Math.PI / 180;
-    const radius = outerRadius + 30;
-    const x = cx + radius * Math.cos(-midAngle * RADIAN);
-    const y = cy + radius * Math.sin(-midAngle * RADIAN);
-
-    if (percent < 0.05) return null; // Don't show labels for tiny slices
-
-    return (
-      <text
-        x={x}
-        y={y}
-        fill="#666"
-        textAnchor={x > cx ? 'start' : 'end'}
-        dominantBaseline="central"
-        fontSize={12}
-      >
-        {`${name}: ${(percent * 100).toFixed(0)}%`}
-      </text>
-    );
-  };
-
   if (loading) {
     return (
       <DashboardLayout>
@@ -314,26 +288,13 @@ export const Reports = () => {
                   <PieChartIcon className="h-5 w-5 text-primary" />
                   Survey Completion Status
                 </h3>
-                <ResponsiveContainer width="100%" height={280}>
-                  <PieChart>
-                    <Pie
-                      data={surveyStatusData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={90}
-                      paddingAngle={5}
-                      dataKey="value"
-                      labelLine={false}
-                    >
-                      {surveyStatusData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(value: number) => value.toLocaleString()} />
-                    <Legend verticalAlign="bottom" height={36} />
-                  </PieChart>
-                </ResponsiveContainer>
+                <BeautifulDonutChart
+                  data={surveyStatusData}
+                  height={280}
+                  valueLabel="Voters"
+                  showMoreThreshold={4}
+                  disableOthersGrouping={true}
+                />
                 <div className="mt-4 grid grid-cols-2 gap-4 text-center">
                   <div className="p-3 bg-green-500/10 rounded-lg">
                     <p className="text-2xl font-bold text-green-600">{totalSurveys.toLocaleString()}</p>
@@ -352,26 +313,13 @@ export const Reports = () => {
                   <Users className="h-5 w-5 text-primary" />
                   Gender Distribution
                 </h3>
-                <ResponsiveContainer width="100%" height={280}>
-                  <PieChart>
-                    <Pie
-                      data={genderDistributionData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={90}
-                      paddingAngle={5}
-                      dataKey="value"
-                      labelLine={false}
-                    >
-                      {genderDistributionData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(value: number) => value.toLocaleString()} />
-                    <Legend verticalAlign="bottom" height={36} />
-                  </PieChart>
-                </ResponsiveContainer>
+                <BeautifulDonutChart
+                  data={genderDistributionData}
+                  height={280}
+                  valueLabel="Voters"
+                  showMoreThreshold={4}
+                  disableOthersGrouping={true}
+                />
                 <div className="mt-4 grid grid-cols-2 gap-4 text-center">
                   <div className="p-3 bg-blue-500/10 rounded-lg">
                     <p className="text-2xl font-bold text-blue-600">{totalMale.toLocaleString()}</p>

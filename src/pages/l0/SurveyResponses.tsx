@@ -3,6 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Table,
   TableBody,
@@ -13,9 +14,10 @@ import {
 } from '@/components/ui/table';
 import { useToast } from '@/components/ui/use-toast';
 import { api } from '@/lib/api';
-import { fetchSurvey, Survey } from '@/lib/surveys';
-import { useState, useEffect } from 'react';
-import { Search, Download, RefreshCw, Eye, FileText, User, Calendar, CheckCircle2, Hash, Building2, Filter, MapPin } from 'lucide-react';
+import { fetchSurvey, fetchSurveys, Survey } from '@/lib/surveys';
+import { useState, useEffect, useMemo } from 'react';
+import { Search, Download, RefreshCw, Eye, FileText, User, Calendar, CheckCircle2, Hash, Building2, Filter, MapPin, BarChart3, List, Loader2 } from 'lucide-react';
+import { BeautifulDonutChart } from '@/components/charts';
 import {
   Select,
   SelectContent,
@@ -54,6 +56,25 @@ interface Booth {
   ac_id: number;
 }
 
+// Helper to check if a value is NA/empty
+const isNAValue = (value: unknown): boolean => {
+  if (value === null || value === undefined) return true;
+  if (typeof value === 'string' && (value.trim() === '' || value.toLowerCase() === 'na' || value.toLowerCase() === 'n/a')) return true;
+  return false;
+};
+
+// Answer distribution chart data type
+interface AnswerDistribution {
+  questionId: string;
+  prompt: string;
+  data: { name: string; value: number; color?: string }[];
+  totalResponses: number;
+  naCount: number;
+}
+
+// Chart colors
+const CHART_COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#14b8a6'];
+
 export const SurveyResponses = () => {
   const { toast } = useToast();
   const [responses, setResponses] = useState<NormalizedSurveyResponse[]>([]);
@@ -74,6 +95,68 @@ export const SurveyResponses = () => {
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
   const [surveyQuestions, setSurveyQuestions] = useState<Survey | null>(null);
   const [loadingSurvey, setLoadingSurvey] = useState(false);
+  const [surveyForms, setSurveyForms] = useState<Array<{ id: string; name: string }>>([]);
+  const [loadingSurveyForms, setLoadingSurveyForms] = useState(false);
+  const [activeTab, setActiveTab] = useState<string>('list');
+
+  // Compute answer distributions for charts
+  const answerDistributions = useMemo((): AnswerDistribution[] => {
+    const questionMap = new Map<string, { prompt: string; answers: Map<string, number>; naCount: number }>();
+
+    responses.forEach((response) => {
+      if (!response.answers) return;
+      response.answers.forEach((answer: any) => {
+        const key = answer.questionId || answer.masterQuestionId || answer.prompt || answer.question;
+        const prompt = answer.questionText || answer.prompt || answer.question || key;
+        if (!key) return;
+
+        if (!questionMap.has(key)) {
+          questionMap.set(key, { prompt, answers: new Map(), naCount: 0 });
+        }
+        const q = questionMap.get(key)!;
+        if (answer.questionText && q.prompt === key) {
+          q.prompt = answer.questionText;
+        }
+
+        const answerValue = answer.answerText ?? answer.value ?? answer.answer ?? answer.response;
+        const answerStr = isNAValue(answerValue) ? '__NA__' : String(answerValue);
+        if (answerStr === '__NA__') {
+          q.naCount++;
+        } else {
+          q.answers.set(answerStr, (q.answers.get(answerStr) || 0) + 1);
+        }
+      });
+    });
+
+    const distributions: AnswerDistribution[] = [];
+    questionMap.forEach((value, questionId) => {
+      const totalWithData = Array.from(value.answers.values()).reduce((a, b) => a + b, 0);
+      const total = totalWithData + value.naCount;
+      const data: { name: string; value: number; color?: string }[] = [];
+
+      let colorIdx = 0;
+      value.answers.forEach((count, answerValue) => {
+        data.push({
+          name: answerValue.length > 30 ? answerValue.slice(0, 30) + '...' : answerValue,
+          value: count,
+          color: CHART_COLORS[colorIdx % CHART_COLORS.length],
+        });
+        colorIdx++;
+      });
+
+      data.sort((a, b) => b.value - a.value);
+
+      distributions.push({
+        questionId,
+        prompt: value.prompt,
+        data,
+        totalResponses: total,
+        naCount: value.naCount,
+      });
+    });
+
+    return distributions;
+  }, [responses]);
 
   useEffect(() => {
     // Require AC selection before fetching responses
@@ -85,15 +168,38 @@ export const SurveyResponses = () => {
     fetchResponses();
   }, [pagination.page, acFilter, boothFilter, surveyFilter]);
 
-  // Fetch booths when constituency changes
+  // Fetch booths and survey forms when constituency changes
   useEffect(() => {
     if (acFilter) {
       fetchBoothsForAC(parseInt(acFilter));
+      fetchSurveyFormsForAC(parseInt(acFilter));
     } else {
       setBooths([]);
       setBoothFilter('all');
+      setSurveyForms([]);
+      setSurveyFilter('all');
     }
   }, [acFilter]);
+
+  const fetchSurveyFormsForAC = async (acId: number) => {
+    try {
+      setLoadingSurveyForms(true);
+      const surveys = await fetchSurveys({ assignedAC: acId });
+      setSurveyForms(
+        surveys
+          .filter((survey) => survey.status === 'Active')
+          .map((survey) => ({
+            id: survey.id,
+            name: survey.title,
+          })),
+      );
+    } catch (error: any) {
+      console.error('Error fetching survey forms:', error);
+      setSurveyForms([]);
+    } finally {
+      setLoadingSurveyForms(false);
+    }
+  };
 
   const fetchBoothsForAC = async (acId: number) => {
     try {
@@ -306,33 +412,97 @@ export const SurveyResponses = () => {
                 <SelectContent>
                   <SelectItem value="all">All Booths</SelectItem>
                   {booths.map((booth) => (
-                    <SelectItem key={booth._id} value={booth.boothName || booth.boothCode}>
-                      {booth.boothName || booth.boothCode} ({booth.boothCode?.split('-')[0] || 'N/A'})
+                    <SelectItem key={booth._id} value={booth.boothCode || booth._id}>
+                      {booth.boothName || booth.boothCode} ({booth.boothCode})
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <Select value={surveyFilter} onValueChange={setSurveyFilter}>
+              <Select
+                value={surveyFilter}
+                onValueChange={(value) => {
+                  setSurveyFilter(value);
+                  setPagination(prev => ({ ...prev, page: 1 }));
+                }}
+                disabled={!acFilter || loadingSurveyForms}
+              >
                 <SelectTrigger>
-                  <SelectValue placeholder="Filter by Survey" />
+                  <SelectValue placeholder={!acFilter ? 'Select AC First' : loadingSurveyForms ? 'Loading...' : 'Filter by Survey'} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Surveys</SelectItem>
-                  {/* Add survey options dynamically if needed */}
+                  {surveyForms.map((form) => (
+                    <SelectItem key={form.id} value={form.id}>
+                      {form.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
 
-            {/* Table */}
-            {loading ? (
-              <TableSkeleton />
-            ) : responses.length === 0 ? (
-              <div className="text-center py-8">
-                <p className="text-muted-foreground">No survey responses found</p>
-              </div>
-            ) : (
-              <>
-                <div className="border rounded-lg">
+            {/* Tabs for List and Analytics */}
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-4">
+              <TabsList className="grid w-full max-w-md grid-cols-2">
+                <TabsTrigger value="list" className="flex items-center gap-2">
+                  <List className="h-4 w-4" />
+                  Responses
+                </TabsTrigger>
+                <TabsTrigger value="analytics" className="flex items-center gap-2">
+                  <BarChart3 className="h-4 w-4" />
+                  Analytics ({answerDistributions.length})
+                </TabsTrigger>
+              </TabsList>
+
+              {/* Analytics View */}
+              <TabsContent value="analytics" className="mt-4">
+                {loading && responses.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <p className="text-muted-foreground">Loading response data...</p>
+                  </div>
+                ) : answerDistributions.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+                    <BarChart3 className="h-10 w-10 text-muted-foreground/50" />
+                    <p className="font-medium">No data for analytics</p>
+                    <p className="text-sm text-muted-foreground">
+                      Select a constituency and apply filters to view answer distributions.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {answerDistributions.map((dist) => (
+                      <Card key={dist.questionId} className="p-4">
+                        <h4 className="font-semibold text-sm mb-2 line-clamp-2">{dist.prompt}</h4>
+                        <p className="text-xs text-muted-foreground mb-3">
+                          {dist.totalResponses} responses{dist.naCount > 0 && ` (${dist.naCount} N/A)`}
+                        </p>
+                        {dist.data.length === 0 ? (
+                          <p className="text-sm text-muted-foreground text-center py-8">No data available</p>
+                        ) : (
+                          <BeautifulDonutChart
+                            data={dist.data}
+                            height={220}
+                            valueLabel="Responses"
+                            showMoreThreshold={6}
+                          />
+                        )}
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* List View */}
+              <TabsContent value="list" className="mt-4">
+                {loading ? (
+                  <TableSkeleton />
+                ) : responses.length === 0 ? (
+                  <div className="text-center py-8">
+                    <p className="text-muted-foreground">No survey responses found</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="border rounded-lg">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -434,6 +604,8 @@ export const SurveyResponses = () => {
                 </div>
               </>
             )}
+              </TabsContent>
+            </Tabs>
           </div>
         </Card>
 

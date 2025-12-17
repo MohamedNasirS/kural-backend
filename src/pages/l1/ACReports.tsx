@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button';
 import { ExportButton } from '@/components/ExportButton';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Users, Home, FileCheck, TrendingUp, BarChart3, Loader2 } from 'lucide-react';
-import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { BeautifulDonutChart } from '@/components/charts';
 import { useState, useEffect } from 'react';
 import API_BASE_URL from '@/lib/api';
 
@@ -93,8 +94,8 @@ export const ACReports = () => {
 
   // Response distribution pie chart
   const responseDistribution = [
-    { name: 'Completed', value: totalSurveys, color: 'hsl(var(--success))' },
-    { name: 'Pending', value: Math.max(0, totalVoters - totalSurveys), color: 'hsl(var(--muted))' },
+    { name: 'Completed', value: totalSurveys, color: '#22C55E' },
+    { name: 'Pending', value: Math.max(0, totalVoters - totalSurveys), color: '#EAB308' },
   ];
 
   // Prepare data for export
@@ -177,25 +178,13 @@ export const ACReports = () => {
 
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-4">Survey Response Distribution</h3>
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={responseDistribution}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                  outerRadius={100}
-                  fill="#8884d8"
-                  dataKey="value"
-                >
-                  {responseDistribution.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
+            <BeautifulDonutChart
+              data={responseDistribution}
+              height={300}
+              valueLabel="Voters"
+              showMoreThreshold={4}
+              disableOthersGrouping={true}
+            />
           </Card>
         </div>
 

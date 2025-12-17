@@ -167,43 +167,43 @@ router.get("/", async (req, res) => {
       }
     }
 
-    // Filter by booth - use boothname (primary), booth_id, or legacy booth field
+    // Filter by booth - prioritize booth_id match, then boothname, then legacy booth field
     if (booth && booth !== 'all') {
-      console.log(`Booth filter requested: "${booth}"`);
-      if (boothNamesFromAC.length > 0) {
-        if (boothNamesFromAC.includes(booth)) {
-          query.boothname = booth;
-          console.log(`Exact booth match found: "${booth}"`);
-        } else {
-          const matchingBoothNames = boothNamesFromAC.filter(name =>
-            name && name.toLowerCase().includes(booth.toLowerCase())
-          );
-          if (matchingBoothNames.length > 0) {
-            query.boothname = { $in: matchingBoothNames };
-            console.log(`Partial booth match found ${matchingBoothNames.length} booths`);
-          } else {
-            // Try matching on multiple booth fields
-            query.$or = [
-              { boothname: { $regex: booth, $options: 'i' } },
-              { booth_id: { $regex: booth, $options: 'i' } },
-              { booth: { $regex: booth, $options: 'i' } }
-            ];
-            console.log(`Using regex booth match for: "${booth}"`);
-          }
-        }
-      } else {
-        // When no AC context, search across all booth field variants
-        query.$or = [
-          { boothname: { $regex: booth, $options: 'i' } },
-          { booth_id: booth },
-          { booth: { $regex: booth, $options: 'i' } },
-          { boothCode: booth }
-        ];
-      }
+      console.log(`[L0 Survey] Booth filter requested: "${booth}"`);
+      // Build comprehensive $or query to match any booth field variant
+      const boothFilters = [
+        { booth_id: booth },                    // Exact booth_id match (primary)
+        { booth_id: { $regex: booth, $options: 'i' } }, // Partial booth_id match
+        { boothname: booth },                   // Exact boothname match
+        { boothname: { $regex: booth, $options: 'i' } }, // Partial boothname match
+        { booth: booth },                       // Legacy exact booth match
+        { booth: { $regex: booth, $options: 'i' } },    // Legacy partial booth match
+        { boothCode: booth }                    // Legacy boothCode match
+      ];
+      query.$or = boothFilters;
+      console.log(`[L0 Survey] Using booth filter with multiple field variants`);
     }
 
     if (survey && survey !== 'all') {
-      const surveyFilter = { $or: [{ surveyId: survey }, { formId: survey }] };
+      console.log(`[L0 SurveyResponses] Filtering by survey form: "${survey}"`);
+      const surveyIdFilters = [
+        { surveyId: survey },
+        { formId: survey },
+        { form_id: survey },
+        { survey_id: survey }
+      ];
+      // Also try with ObjectId if it's a valid ObjectId string
+      if (mongoose.Types.ObjectId.isValid(survey)) {
+        const surveyObjId = new mongoose.Types.ObjectId(survey);
+        surveyIdFilters.push(
+          { surveyId: surveyObjId },
+          { formId: surveyObjId },
+          { form_id: surveyObjId },
+          { survey_id: surveyObjId }
+        );
+      }
+      console.log(`[L0 SurveyResponses] Survey filter with ${surveyIdFilters.length} conditions`);
+      const surveyFilter = { $or: surveyIdFilters };
       if (query.$or) {
         query.$and = [{ $or: query.$or }, surveyFilter];
         delete query.$or;
@@ -349,23 +349,44 @@ router.get("/:acId", async (req, res) => {
     const query = {};
     const conditions = [];
 
-    // Filter by booth - use boothname (primary), booth_id, or legacy booth field
+    // Filter by booth - prioritize booth_id match, then boothname, then legacy booth field
     if (booth && booth !== 'all') {
+      console.log(`[L1 Survey] Booth filter requested: "${booth}"`);
       conditions.push({
         $or: [
-          { boothname: { $regex: booth, $options: 'i' } },
-          { booth_id: { $regex: booth, $options: 'i' } },
-          { booth: { $regex: booth, $options: 'i' } },
-          { boothCode: booth }
+          { booth_id: booth },                    // Exact booth_id match (primary)
+          { booth_id: { $regex: booth, $options: 'i' } }, // Partial booth_id match
+          { boothname: booth },                   // Exact boothname match
+          { boothname: { $regex: booth, $options: 'i' } }, // Partial boothname match
+          { booth: booth },                       // Legacy exact booth match
+          { booth: { $regex: booth, $options: 'i' } },    // Legacy partial booth match
+          { boothCode: booth }                    // Legacy boothCode match
         ]
       });
     }
 
-    // Filter by survey form
+    // Filter by survey form - handle all possible field names and ObjectId vs string
     if (survey && survey !== 'all') {
-      conditions.push({
-        $or: [{ surveyId: survey }, { formId: survey }]
-      });
+      console.log(`[L1 SurveyResponses] Filtering by survey: "${survey}"`);
+      const surveyIdFilters = [
+        { surveyId: survey },
+        { formId: survey },
+        { form_id: survey },
+        { survey_id: survey }
+      ];
+      // Also try with ObjectId if it's a valid ObjectId string
+      if (mongoose.Types.ObjectId.isValid(survey)) {
+        const surveyObjId = new mongoose.Types.ObjectId(survey);
+        console.log(`[L1 SurveyResponses] Valid ObjectId, adding ObjectId filters`);
+        surveyIdFilters.push(
+          { surveyId: surveyObjId },
+          { formId: surveyObjId },
+          { form_id: surveyObjId },
+          { survey_id: surveyObjId }
+        );
+      }
+      conditions.push({ $or: surveyIdFilters });
+      console.log(`[L1 SurveyResponses] Survey filter with ${surveyIdFilters.length} conditions`);
     }
 
     // Search by voter name or voter ID
@@ -387,6 +408,8 @@ router.get("/:acId", async (req, res) => {
       query.$and = conditions;
     }
 
+    console.log(`[L1 SurveyResponses] Final query for AC ${acId}:`, JSON.stringify(query, null, 2));
+
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const limitNum = parseInt(limit);
 
@@ -398,6 +421,7 @@ router.get("/:acId", async (req, res) => {
     });
 
     const totalResponses = await countSurveyResponses(acId, query);
+    console.log(`[L1 SurveyResponses] Found ${responses.length} responses, total: ${totalResponses}`);
 
     // Batch fetch all survey forms ONCE (fixes N+1 query problem)
     const normalizedResponses = responses.map(r => normalizeSurveyResponse(r, { enrichAc: true, enrichBooth: true }));

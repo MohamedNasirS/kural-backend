@@ -14,8 +14,9 @@ import { ALL_AC_IDS } from './voterCollection.js';
 
 // Survey Response schema - matches the actual database structure
 // Booth fields aligned with voters collection: booth_id, boothname, boothno
+// NOTE: formId is Mixed type because some records store it as String, others as ObjectId
 const surveyResponseSchema = new mongoose.Schema({
-  formId: { type: mongoose.Schema.Types.ObjectId, ref: 'Survey' },
+  formId: mongoose.Schema.Types.Mixed,
   respondentId: String,
   respondentName: String,
   respondentMobile: String,

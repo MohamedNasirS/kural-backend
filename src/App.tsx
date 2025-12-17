@@ -181,7 +181,7 @@ const AppRoutes = () => {
       <Route path="/l1/ac/:acNumber" element={<ProtectedRoute allowedRoles={['L1']}><LazyRoute pageName="AC Dashboard"><ACDetailedDashboard /></LazyRoute></ProtectedRoute>} />
       <Route path="/l1/ac/:acNumber/voters" element={<ProtectedRoute allowedRoles={['L1']}><LazyRoute pageName="AC Voters"><ACVoterManager /></LazyRoute></ProtectedRoute>} />
       <Route path="/l1/ac/:acNumber/families" element={<ProtectedRoute allowedRoles={['L1']}><LazyRoute pageName="AC Families"><ACFamilyManager /></LazyRoute></ProtectedRoute>} />
-      <Route path="/l1/ac/:acNumber/surveys" element={<ProtectedRoute allowedRoles={['L1']}><LazyRoute pageName="AC Surveys"><ACSurveyManager /></LazyRoute></ProtectedRoute>} />
+      <Route path="/l1/survey-manager" element={<ProtectedRoute allowedRoles={['L1']}><LazyRoute pageName="Survey Manager"><ACSurveyManager /></LazyRoute></ProtectedRoute>} />
       <Route path="/l1/ac/:acNumber/reports" element={<ProtectedRoute allowedRoles={['L1']}><LazyRoute pageName="AC Reports"><ACReports /></LazyRoute></ProtectedRoute>} />
       <Route path="/l1/analytics" element={<ProtectedRoute allowedRoles={['L1']}><LazyRoute pageName="Global Analytics"><GlobalAnalytics /></LazyRoute></ProtectedRoute>} />
       <Route path="/l1/ac-analytics" element={<ProtectedRoute allowedRoles={['L1']}><LazyRoute pageName="AC Analytics"><ACAnalyticsDashboard /></LazyRoute></ProtectedRoute>} />

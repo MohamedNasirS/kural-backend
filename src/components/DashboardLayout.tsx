@@ -127,14 +127,13 @@ const AppSidebar = () => {
         // AC-specific items (only show when an AC is selected)
         const acSpecificItems = selectedAC ? [
           { icon: LayoutDashboard, label: `AC ${selectedAC} Dashboard`, path: `/l1/ac/${selectedAC}` },
-          { icon: ClipboardList, label: 'Surveys', path: `/l1/ac/${selectedAC}/surveys` },
           { icon: FileText, label: 'Reports', path: `/l1/ac/${selectedAC}/reports` },
         ] : [];
 
         // Management items (always visible)
         const managementItems = [
           { icon: FileText, label: 'Survey Forms', path: '/l1/surveys' },
-          { icon: Activity, label: 'Survey Manager', path: '/l1/live-surveys' },
+          { icon: Activity, label: 'Survey Manager', path: '/l1/survey-manager' },
           { icon: MapPin, label: 'Live Booth Updates', path: '/l1/live-booth-updates' },
           { icon: UserCog, label: 'User Management', path: '/l1/moderators' },
           { icon: Home, label: 'Booth Management', path: '/shared/booth-management' },
