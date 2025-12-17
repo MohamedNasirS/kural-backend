@@ -6,9 +6,10 @@
  * - Clean grid lines
  * - Dark tooltip
  * - Gradient fills (optional)
- * - Responsive design
+ * - Responsive design with mobile optimizations
  */
 
+import { useState, useEffect } from 'react';
 import {
   BarChart,
   Bar,
@@ -20,6 +21,24 @@ import {
   Cell,
   Legend,
 } from 'recharts';
+
+// Custom hook to detect if viewport is mobile
+function useIsMobile(breakpoint = 640) {
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== 'undefined' ? window.innerWidth < breakpoint : false
+  );
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < breakpoint);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [breakpoint]);
+
+  return isMobile;
+}
 
 interface DataItem {
   name: string;
@@ -103,6 +122,7 @@ export function BeautifulBarChart({
   conditionalColors = DEFAULT_CONDITIONAL_COLORS,
 }: BeautifulBarChartProps) {
   const isVertical = layout === 'vertical';
+  const isMobile = useIsMobile(640);
 
   // Determine bar color for each item
   const getBarColor = (item: DataItem, index: number) => {
@@ -112,23 +132,47 @@ export function BeautifulBarChart({
     return barColor;
   };
 
+  // Responsive height
+  const responsiveHeight = isMobile ? Math.min(height, 220) : height;
+
+  // Shorten/format labels for cleaner display
+  const formatLabel = (label: string) => {
+    if (isMobile) {
+      // Very short labels for mobile
+      return label
+        .replace('Lost by ', 'L:')
+        .replace('Won by ', 'W:')
+        .replace(' voters', '')
+        .replace('< ', '<')
+        .replace('> ', '>');
+    }
+    // For desktop, keep labels concise but readable
+    return label
+      .replace('Lost by ', 'Lost: ')
+      .replace('Won by ', 'Won: ')
+      .replace(' voters', '');
+  };
+
+  // Process data for display
+  const processedData = data.map(item => ({ ...item, name: formatLabel(item.name) }));
+
   return (
     <div className="w-full">
       {(title || subtitle) && (
         <div className="mb-3">
-          {title && <h3 className="text-sm font-semibold">{title}</h3>}
-          {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
+          {title && <h3 className={`${isMobile ? 'text-xs' : 'text-sm'} font-semibold`}>{title}</h3>}
+          {subtitle && <p className={`${isMobile ? 'text-[10px]' : 'text-xs'} text-muted-foreground`}>{subtitle}</p>}
         </div>
       )}
 
-      <ResponsiveContainer width="100%" height={height}>
+      <ResponsiveContainer width="100%" height={responsiveHeight}>
         <BarChart
-          data={data}
+          data={processedData}
           layout={isVertical ? 'vertical' : 'horizontal'}
           margin={
             isVertical
-              ? { top: 5, right: 30, left: 5, bottom: 5 }
-              : { top: 5, right: 20, left: 0, bottom: 5 }
+              ? { top: 5, right: isMobile ? 15 : 30, left: 0, bottom: 5 }
+              : { top: 5, right: isMobile ? 10 : 20, left: 0, bottom: 5 }
           }
         >
           {showGrid && (
@@ -142,29 +186,39 @@ export function BeautifulBarChart({
 
           {isVertical ? (
             <>
-              <XAxis type="number" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+              <XAxis
+                type="number"
+                tick={{ fontSize: isMobile ? 9 : 11 }}
+                tickLine={false}
+                axisLine={false}
+              />
               <YAxis
                 dataKey="name"
                 type="category"
-                tick={{ fontSize: 10 }}
+                tick={{ fontSize: isMobile ? 9 : 11 }}
                 tickLine={false}
                 axisLine={false}
-                width={90}
+                width={isMobile ? 50 : 85}
               />
             </>
           ) : (
             <>
               <XAxis
                 dataKey="name"
-                tick={{ fontSize: 11 }}
+                tick={{ fontSize: isMobile ? 9 : 11 }}
                 tickLine={false}
                 axisLine={false}
                 interval={0}
-                angle={data.length > 6 ? -45 : 0}
-                textAnchor={data.length > 6 ? 'end' : 'middle'}
-                height={data.length > 6 ? 60 : 30}
+                angle={processedData.length > 4 || isMobile ? -45 : 0}
+                textAnchor={processedData.length > 4 || isMobile ? 'end' : 'middle'}
+                height={processedData.length > 4 || isMobile ? 50 : 30}
               />
-              <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={40} />
+              <YAxis
+                tick={{ fontSize: isMobile ? 9 : 11 }}
+                tickLine={false}
+                axisLine={false}
+                width={isMobile ? 30 : 40}
+              />
             </>
           )}
 
@@ -175,10 +229,10 @@ export function BeautifulBarChart({
 
           <Bar
             dataKey="value"
-            radius={isVertical ? [0, 6, 6, 0] : [6, 6, 0, 0]}
-            maxBarSize={50}
+            radius={isVertical ? [0, 4, 4, 0] : [4, 4, 0, 0]}
+            maxBarSize={isMobile ? 35 : 50}
           >
-            {data.map((item, index) => (
+            {processedData.map((item, index) => (
               <Cell key={`cell-${index}`} fill={getBarColor(item, index)} />
             ))}
           </Bar>

@@ -51,22 +51,31 @@ export const SEMANTIC_COLORS = {
   primary: '#4f46e5',  // Indigo
 } as const;
 
-// Party-specific colors (for election data)
+// Party-specific colors (for election data) - Official party colors
 export const PARTY_COLORS: Record<string, string> = {
-  AIADMK: '#10b981',   // Green (Two Leaves)
-  DMK: '#ef4444',      // Red
-  BJP: '#f97316',      // Orange
-  INC: '#3b82f6',      // Blue
-  NTK: '#8b5cf6',      // Violet
-  PMK: '#eab308',      // Yellow
-  DMDK: '#ec4899',     // Pink
-  MNM: '#ec4899',      // Pink
-  CPM: '#dc2626',      // Dark Red
-  CPI: '#b91c1c',      // Darker Red
+  // Major Tamil Nadu parties
+  DMK: '#E11D1D',      // Red (official DMK flag color)
+  AIADMK: '#00A650',   // Green (Two Leaves symbol)
+  ADMK: '#00A650',     // Green (alternate name)
+  BJP: '#FF6B00',      // Saffron/Orange (official BJP color)
+  TVK: '#8B1A4A',      // Maroon (Tamizhaga Vetri Kazhagam)
+  NTK: '#C41E3A',      // Cardinal Red (Naam Tamilar Katchi - tiger red)
+  PMK: '#FFD700',      // Mango Yellow (Pattali Makkal Katchi)
+  DMDK: '#FFCC00',     // Golden Yellow (Desiya Murpokku Dravida Kazhagam)
+
+  // National parties
+  INC: '#00BFFF',      // Congress Blue/Cyan
+  CONGRESS: '#00BFFF', // Congress Blue/Cyan (alternate name)
+  CPM: '#CC0000',      // Communist Red (darker)
+  CPI: '#990000',      // Communist Red (darkest)
+
+  // Others
+  MNM: '#6366f1',      // Indigo (Makkal Needhi Maiam)
+  AMMK: '#14b8a6',     // Teal (Amma Makkal Munnetra Kazhagam)
   NOTA: '#6b7280',     // Gray
   IND: '#9ca3af',      // Light Gray (Independent)
-  AMMK: '#14b8a6',     // Teal
   Others: '#9ca3af',   // Gray
+  general: '#94a3b8',  // Slate gray
 };
 
 // Social media sentiment colors
@@ -76,14 +85,20 @@ export const SOCIAL_SENTIMENT_COLORS = {
   negative: '#ef4444',
 };
 
-// Share of voice colors (for competitor analysis)
+// Share of voice colors (for competitor analysis) - Official party colors
 export const SHARE_OF_VOICE_COLORS = [
-  '#3b82f6', // Blue
-  '#ef4444', // Red
-  '#f59e0b', // Amber
-  '#10b981', // Green
-  '#8b5cf6', // Violet
-  '#f97316', // Orange
+  '#E11D1D', // DMK - Red
+  '#00A650', // ADMK/AIADMK - Green (Two Leaves)
+  '#8B1A4A', // TVK - Maroon
+  '#C41E3A', // NTK - Cardinal Red
+  '#FF6B00', // BJP - Saffron/Orange
+  '#00BFFF', // CONGRESS - Cyan/Blue
+  '#FFD700', // PMK - Mango Yellow
+  '#FFCC00', // DMDK - Golden Yellow
+  '#94a3b8', // general - Slate gray
+  '#6366f1', // Others - Indigo
+  '#14b8a6', // Teal
+  '#a855f7', // Purple
 ];
 
 // ECharts tooltip configuration (consistent styling)

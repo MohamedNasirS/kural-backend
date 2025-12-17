@@ -7,9 +7,10 @@
  * - Dark tooltip
  * - Customizable dots
  * - Multi-line support
- * - Responsive design
+ * - Responsive design with mobile optimizations
  */
 
+import { useState, useEffect } from 'react';
 import {
   LineChart,
   Line,
@@ -20,6 +21,24 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
+
+// Custom hook to detect if viewport is mobile
+function useIsMobile(breakpoint = 640) {
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== 'undefined' ? window.innerWidth < breakpoint : false
+  );
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < breakpoint);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [breakpoint]);
+
+  return isMobile;
+}
 
 interface LineConfig {
   dataKey: string;
@@ -99,17 +118,22 @@ export function BeautifulLineChart({
   formatTooltipValue,
   formatXAxisLabel,
 }: BeautifulLineChartProps) {
+  const isMobile = useIsMobile(640);
+
+  // Responsive height
+  const responsiveHeight = isMobile ? Math.min(height, 200) : height;
+
   return (
     <div className="w-full">
       {(title || subtitle) && (
         <div className="mb-3">
-          {title && <h3 className="text-sm font-semibold">{title}</h3>}
-          {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
+          {title && <h3 className={`${isMobile ? 'text-xs' : 'text-sm'} font-semibold`}>{title}</h3>}
+          {subtitle && <p className={`${isMobile ? 'text-[10px]' : 'text-xs'} text-muted-foreground`}>{subtitle}</p>}
         </div>
       )}
 
-      <ResponsiveContainer width="100%" height={height}>
-        <LineChart data={data} margin={{ top: 5, right: 15, left: 5, bottom: 5 }}>
+      <ResponsiveContainer width="100%" height={responsiveHeight}>
+        <LineChart data={data} margin={{ top: 5, right: isMobile ? 10 : 15, left: isMobile ? 0 : 5, bottom: 5 }}>
           {showGrid && (
             <CartesianGrid
               strokeDasharray="3 3"
@@ -120,7 +144,7 @@ export function BeautifulLineChart({
 
           <XAxis
             dataKey={xAxisKey}
-            tick={{ fontSize: 11 }}
+            tick={{ fontSize: isMobile ? 9 : 11 }}
             tickLine={false}
             axisLine={false}
             tickFormatter={formatXAxisLabel}
@@ -128,17 +152,17 @@ export function BeautifulLineChart({
 
           <YAxis
             domain={yAxisDomain}
-            tick={{ fontSize: 11 }}
+            tick={{ fontSize: isMobile ? 9 : 11 }}
             tickLine={false}
             axisLine={false}
-            width={40}
+            width={isMobile ? 30 : 40}
             label={
               yAxisLabel
                 ? {
                     value: yAxisLabel,
                     angle: -90,
                     position: 'insideLeft',
-                    style: { fontSize: 10, fill: 'hsl(var(--muted-foreground))' },
+                    style: { fontSize: isMobile ? 8 : 10, fill: 'hsl(var(--muted-foreground))' },
                   }
                 : undefined
             }
@@ -158,10 +182,10 @@ export function BeautifulLineChart({
               dataKey={line.dataKey}
               name={line.name || line.dataKey}
               stroke={line.color}
-              strokeWidth={line.strokeWidth || 2}
+              strokeWidth={isMobile ? Math.max(1, (line.strokeWidth || 2) - 0.5) : (line.strokeWidth || 2)}
               strokeDasharray={line.dashed ? '5 5' : undefined}
-              dot={{ fill: line.color, strokeWidth: 2, r: 4 }}
-              activeDot={{ r: 6, fill: line.color, stroke: '#fff', strokeWidth: 2 }}
+              dot={{ fill: line.color, strokeWidth: isMobile ? 1 : 2, r: isMobile ? 2 : 4 }}
+              activeDot={{ r: isMobile ? 4 : 6, fill: line.color, stroke: '#fff', strokeWidth: 2 }}
             />
           ))}
         </LineChart>

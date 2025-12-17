@@ -30,6 +30,11 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { BeautifulDonutChart } from '@/components/charts';
+import {
+  SOCIAL_SENTIMENT_COLORS,
+  SHARE_OF_VOICE_COLORS,
+  PARTY_COLORS,
+} from '@/lib/chartColors';
 
 // Social Media Analytics interfaces (production API format)
 interface ShareOfVoiceData {
@@ -54,14 +59,6 @@ interface SentimentBreakdownData {
     total: number;
   };
 }
-
-const SOCIAL_SENTIMENT_COLORS = {
-  positive: '#22c55e',
-  neutral: '#6b7280',
-  negative: '#ef4444',
-};
-
-const SHARE_OF_VOICE_COLORS = ['#3b82f6', '#ef4444', '#f59e0b', '#10b981', '#8b5cf6', '#f97316'];
 
 export default function MLASocialMedia() {
   const { user } = useAuth();
@@ -179,7 +176,10 @@ export default function MLASocialMedia() {
                     data={shareOfVoice.data.items.map((item, idx) => ({
                       name: item.competitor_name,
                       value: item.mention_count,
-                      color: SHARE_OF_VOICE_COLORS[idx % SHARE_OF_VOICE_COLORS.length],
+                      // Use party-specific color if available, otherwise use index-based color
+                      color: PARTY_COLORS[item.competitor_name.toUpperCase()] ||
+                             PARTY_COLORS[item.competitor_name] ||
+                             SHARE_OF_VOICE_COLORS[idx % SHARE_OF_VOICE_COLORS.length],
                     }))}
                     height={280}
                     valueLabel="Mentions"
@@ -209,6 +209,7 @@ export default function MLASocialMedia() {
                     valueLabel="Mentions"
                     subtitle={`Total mentions: ${socialSentiment.data.total.toLocaleString()}`}
                     showMoreThreshold={3}
+                    disableOthersGrouping={true}
                   />
                 </CardContent>
               </Card>
@@ -237,7 +238,11 @@ export default function MLASocialMedia() {
                           <div className="flex items-center gap-2">
                             <div
                               className="w-3 h-3 rounded-full"
-                              style={{ backgroundColor: SHARE_OF_VOICE_COLORS[idx % SHARE_OF_VOICE_COLORS.length] }}
+                              style={{
+                                backgroundColor: PARTY_COLORS[item.competitor_name.toUpperCase()] ||
+                                                 PARTY_COLORS[item.competitor_name] ||
+                                                 SHARE_OF_VOICE_COLORS[idx % SHARE_OF_VOICE_COLORS.length]
+                              }}
                             />
                             {item.competitor_name}
                           </div>

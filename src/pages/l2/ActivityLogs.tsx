@@ -35,11 +35,30 @@ import {
   Activity,
   Building2,
   Users,
-  ExternalLink
+  ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  FileText,
+  Smartphone,
+  CheckCircle2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { CONSTITUENCIES } from '@/constants/constituencies';
 import { useBooths, getBoothLabel } from '@/hooks/use-booths';
+
+// Event interface for individual activities within a session
+interface AgentEvent {
+  _id?: string;
+  eventType: string;
+  eventData?: {
+    surveyId?: string;
+    voterId?: string;
+    voterName?: string;
+    questionCount?: number;
+    [key: string]: any;
+  };
+  timestamp: string;
+}
 
 interface BoothAgentActivity {
   _id: string;
@@ -62,6 +81,17 @@ interface BoothAgentActivity {
     type: string;
     coordinates: number[];
   };
+  // New fields from mobile app schema
+  events?: AgentEvent[];
+  deviceInfo?: {
+    platform?: string;
+    version?: string;
+    model?: string;
+  };
+  appVersion?: string;
+  surveyCount?: number;
+  voterInteractions?: number;
+  lastActivityTime?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -79,6 +109,7 @@ export default function ActivityLogs() {
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [total, setTotal] = useState(0);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
+  const [expandedRow, setExpandedRow] = useState<string | null>(null);
 
   // Use centralized booth fetching hook
   const { booths, loading: loadingBooths, fetchBooths } = useBooths();
@@ -185,6 +216,22 @@ export default function ActivityLogs() {
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return `${hours}h ${mins}m`;
+  };
+
+  // Format event type for display
+  const formatEventType = (eventType: string) => {
+    const typeMap: Record<string, { label: string; color: string; icon: typeof FileText }> = {
+      'survey.submit.success': { label: 'Survey Submitted', color: 'bg-green-100 text-green-700', icon: CheckCircle2 },
+      'survey.start': { label: 'Survey Started', color: 'bg-blue-100 text-blue-700', icon: FileText },
+      'voter.view': { label: 'Voter Viewed', color: 'bg-purple-100 text-purple-700', icon: User },
+      'booth.checkin': { label: 'Booth Check-in', color: 'bg-amber-100 text-amber-700', icon: Building2 },
+    };
+    return typeMap[eventType] || { label: eventType, color: 'bg-gray-100 text-gray-700', icon: Activity };
+  };
+
+  // Toggle row expansion
+  const toggleExpand = (activityId: string) => {
+    setExpandedRow(expandedRow === activityId ? null : activityId);
   };
 
   return (
@@ -328,99 +375,185 @@ export default function ActivityLogs() {
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/50">
+                    <TableHead className="font-semibold w-8"></TableHead>
                     <TableHead className="font-semibold">Agent</TableHead>
                     <TableHead className="font-semibold">Booth</TableHead>
                     <TableHead className="font-semibold">Login</TableHead>
-                    <TableHead className="font-semibold">Logout</TableHead>
+                    <TableHead className="font-semibold">Events</TableHead>
                     <TableHead className="font-semibold">Duration</TableHead>
                     <TableHead className="font-semibold">Status</TableHead>
                     <TableHead className="font-semibold">Location</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredActivities.map((activity) => (
-                    <TableRow key={activity._id || activity.id} className="hover:bg-muted/30">
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center">
-                            <User className="h-4 w-4 text-primary" />
-                          </div>
-                          <div>
-                            <div className="font-medium">{activity.userName || '—'}</div>
-                            {activity.userPhone && (
-                              <div className="text-xs text-muted-foreground flex items-center gap-1">
-                                <Phone className="h-3 w-3" />
-                                {activity.userPhone}
-                              </div>
+                  {filteredActivities.map((activity) => {
+                    const isExpanded = expandedRow === activity._id;
+                    const hasEvents = activity.events && activity.events.length > 0;
+                    return (
+                      <>
+                        <TableRow
+                          key={activity._id || activity.id}
+                          className={`hover:bg-muted/30 ${hasEvents ? 'cursor-pointer' : ''} ${isExpanded ? 'bg-muted/20' : ''}`}
+                          onClick={() => hasEvents && toggleExpand(activity._id)}
+                        >
+                          <TableCell className="w-8">
+                            {hasEvents && (
+                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
+                                {isExpanded ? (
+                                  <ChevronUp className="h-4 w-4" />
+                                ) : (
+                                  <ChevronDown className="h-4 w-4" />
+                                )}
+                              </Button>
                             )}
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="max-w-[200px]">
-                          <div className="font-medium truncate" title={activity.boothname}>
-                            {activity.boothno || activity.booth_id || '—'}
-                          </div>
-                          {activity.boothname && (
-                            <div className="text-xs text-muted-foreground truncate" title={activity.boothname}>
-                              {activity.boothname}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-3">
+                              <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center">
+                                <User className="h-4 w-4 text-primary" />
+                              </div>
+                              <div>
+                                <div className="font-medium">{activity.userName || '—'}</div>
+                                {activity.userPhone && (
+                                  <div className="text-xs text-muted-foreground flex items-center gap-1">
+                                    <Phone className="h-3 w-3" />
+                                    {activity.userPhone}
+                                  </div>
+                                )}
+                                {activity.deviceInfo && (
+                                  <div className="text-xs text-muted-foreground flex items-center gap-1">
+                                    <Smartphone className="h-3 w-3" />
+                                    {activity.deviceInfo.model} ({activity.appVersion || 'v?'})
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <LogIn className="h-3 w-3 text-green-500" />
-                          <span className="text-sm">
-                            {activity.loginTime
-                              ? format(new Date(activity.loginTime), 'MMM dd, HH:mm')
-                              : '—'}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          {activity.logoutTime ? (
-                            <>
-                              <LogOut className="h-3 w-3 text-red-500" />
+                          </TableCell>
+                          <TableCell>
+                            <div className="max-w-[200px]">
+                              <div className="font-medium truncate" title={activity.boothname}>
+                                {activity.boothno || activity.booth_id || '—'}
+                              </div>
+                              {activity.boothname && (
+                                <div className="text-xs text-muted-foreground truncate" title={activity.boothname}>
+                                  {activity.boothname}
+                                </div>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <LogIn className="h-3 w-3 text-green-500" />
                               <span className="text-sm">
-                                {format(new Date(activity.logoutTime), 'MMM dd, HH:mm')}
+                                {activity.loginTime
+                                  ? format(new Date(activity.loginTime), 'MMM dd, HH:mm')
+                                  : '—'}
                               </span>
-                            </>
-                          ) : (
-                            <span className="text-muted-foreground text-sm">—</span>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1">
-                          <Clock className="h-3 w-3 text-muted-foreground" />
-                          <span className="text-sm font-medium">
-                            {formatDuration(activity.timeSpentMinutes)}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        {getStatusBadge(activity.status)}
-                      </TableCell>
-                      <TableCell>
-                        {activity.location && activity.location.coordinates?.length >= 2 ? (
-                          <a
-                            href={`https://www.google.com/maps?q=${activity.location.coordinates[1]},${activity.location.coordinates[0]}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-1 text-xs text-primary hover:underline"
-                          >
-                            <MapPin className="h-3 w-3" />
-                            View
-                            <ExternalLink className="h-3 w-3" />
-                          </a>
-                        ) : (
-                          <span className="text-muted-foreground text-xs">No location</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {hasEvents ? (
+                              <Badge variant="secondary" className="bg-blue-100 text-blue-700 hover:bg-blue-200">
+                                <FileText className="h-3 w-3 mr-1" />
+                                {activity.events!.length} events
+                              </Badge>
+                            ) : (
+                              <span className="text-muted-foreground text-xs">No events</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              <Clock className="h-3 w-3 text-muted-foreground" />
+                              <span className="text-sm font-medium">
+                                {formatDuration(activity.timeSpentMinutes)}
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {getStatusBadge(activity.status)}
+                          </TableCell>
+                          <TableCell>
+                            {activity.location && activity.location.coordinates?.length >= 2 ? (
+                              <a
+                                href={`https://www.google.com/maps?q=${activity.location.coordinates[1]},${activity.location.coordinates[0]}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1 text-xs text-primary hover:underline"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <MapPin className="h-3 w-3" />
+                                View
+                                <ExternalLink className="h-3 w-3" />
+                              </a>
+                            ) : (
+                              <span className="text-muted-foreground text-xs">No location</span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                        {/* Expanded Events Row */}
+                        {isExpanded && hasEvents && (
+                          <TableRow key={`${activity._id}-events`} className="bg-muted/10">
+                            <TableCell colSpan={8} className="p-0">
+                              <div className="p-4 border-l-4 border-primary">
+                                <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                                  <Activity className="h-4 w-4 text-primary" />
+                                  Activity Events ({activity.events!.length})
+                                </h4>
+                                <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                                  {activity.events!
+                                    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+                                    .map((event, idx) => {
+                                      const eventStyle = formatEventType(event.eventType);
+                                      const EventIcon = eventStyle.icon;
+                                      return (
+                                        <div
+                                          key={event._id || idx}
+                                          className="flex items-start gap-3 p-3 bg-background rounded-lg border"
+                                        >
+                                          <div className={`p-2 rounded-lg ${eventStyle.color}`}>
+                                            <EventIcon className="h-4 w-4" />
+                                          </div>
+                                          <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                              <Badge variant="outline" className={eventStyle.color}>
+                                                {eventStyle.label}
+                                              </Badge>
+                                              <span className="text-xs text-muted-foreground">
+                                                {format(new Date(event.timestamp), 'MMM dd, HH:mm:ss')}
+                                              </span>
+                                            </div>
+                                            {event.eventData && (
+                                              <div className="mt-2 text-sm">
+                                                {event.eventData.voterName && (
+                                                  <div className="flex items-center gap-2">
+                                                    <User className="h-3 w-3 text-muted-foreground" />
+                                                    <span className="font-medium">{event.eventData.voterName}</span>
+                                                    {event.eventData.voterId && (
+                                                      <span className="text-xs text-muted-foreground">
+                                                        ({event.eventData.voterId})
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                )}
+                                                {event.eventData.questionCount !== undefined && (
+                                                  <div className="text-xs text-muted-foreground mt-1">
+                                                    Questions answered: {event.eventData.questionCount}
+                                                  </div>
+                                                )}
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                </div>
+                              </div>
+                            </TableCell>
+                          </TableRow>
                         )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                      </>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>

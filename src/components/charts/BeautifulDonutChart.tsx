@@ -8,9 +8,10 @@
  * - Dark tooltip with mentions and share
  * - Clean legend at bottom with colored squares
  * - "Show X more" expandable button
+ * - Responsive design: hides polyline labels on mobile, shows only legend
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   PieChart,
   Pie,
@@ -19,6 +20,24 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { ChevronDown, ChevronUp } from 'lucide-react';
+
+// Custom hook to detect if viewport is mobile
+function useIsMobile(breakpoint = 640) {
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== 'undefined' ? window.innerWidth < breakpoint : false
+  );
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < breakpoint);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [breakpoint]);
+
+  return isMobile;
+}
 
 interface DataItem {
   name: string;
@@ -34,6 +53,7 @@ interface BeautifulDonutChartProps {
   showMoreThreshold?: number;
   valueLabel?: string;
   colors?: string[];
+  disableOthersGrouping?: boolean; // Disable automatic grouping of small items into "Others"
 }
 
 // Vibrant color palette matching the reference
@@ -53,6 +73,7 @@ const DEFAULT_COLORS = [
 const OTHERS_COLOR = '#94a3b8';
 
 // Custom label with polyline connecting lines - matching reference exactly
+// Only shows labels for segments >= 5% to avoid overlapping
 const renderCustomLabel = ({
   cx,
   cy,
@@ -60,8 +81,11 @@ const renderCustomLabel = ({
   outerRadius,
   percent,
   name,
+  index,
 }: any) => {
-  if (percent < 0.03) return null; // Don't show labels for very small slices
+  // Hide labels for very small slices (< 2%) to avoid overlapping
+  // Lowered from 5% to show labels for most segments like "Negative" sentiment
+  if (percent < 0.02) return null;
 
   const RADIAN = Math.PI / 180;
 
@@ -70,7 +94,8 @@ const renderCustomLabel = ({
   const startY = cy + (outerRadius + 8) * Math.sin(-midAngle * RADIAN);
 
   // Elbow point - extends outward then goes horizontal
-  const elbowRadius = outerRadius + 25;
+  // Vary the elbow radius slightly based on index to reduce overlaps
+  const elbowRadius = outerRadius + 25 + (index % 2) * 10;
   const elbowX = cx + elbowRadius * Math.cos(-midAngle * RADIAN);
   const elbowY = cy + elbowRadius * Math.sin(-midAngle * RADIAN);
 
@@ -99,7 +124,7 @@ const renderCustomLabel = ({
         y={endY - 7}
         textAnchor={textAnchor}
         dominantBaseline="middle"
-        style={{ fontSize: '13px', fontWeight: 700, fill: '#1e293b' }}
+        style={{ fontSize: '12px', fontWeight: 600, fill: '#1e293b' }}
       >
         {name}
       </text>
@@ -138,30 +163,70 @@ const CustomTooltip = ({ active, payload, valueLabel }: any) => {
 };
 
 // Custom legend with colored squares - matching reference
-const CustomLegend = ({ payload, showAll, onToggle, threshold }: any) => {
-  const displayItems = showAll ? payload : payload.slice(0, threshold);
+// On mobile, shows percentages since polyline labels are hidden
+const CustomLegend = ({ payload, showAll, onToggle, threshold, isMobile, total, hasOthers, othersExpanded, onOthersToggle }: any) => {
+  // Show all items when othersExpanded is true OR when showAll is true
+  const displayItems = (showAll || othersExpanded) ? payload : payload.slice(0, threshold);
   const hiddenCount = payload.length - threshold;
 
   return (
     <div className="flex flex-col items-center gap-3 mt-4">
-      {/* Legend items in a row */}
-      <div className="flex flex-wrap justify-center gap-x-5 gap-y-2">
-        {displayItems.map((entry: any, index: number) => (
-          <div key={`legend-${index}`} className="flex items-center gap-2">
+      {/* Legend items - show percentages on mobile */}
+      <div className={`flex flex-wrap justify-center ${isMobile ? 'gap-x-3 gap-y-2' : 'gap-x-5 gap-y-2'}`}>
+        {displayItems.map((entry: any, index: number) => {
+          const percentage = total > 0 ? ((entry.rawValue / total) * 100).toFixed(1) : '0';
+          const isOthersItem = entry.isOthers;
+
+          return (
             <div
-              className="w-3.5 h-3.5 rounded flex-shrink-0"
-              style={{ backgroundColor: entry.color }}
-            />
-            <span className="text-sm text-slate-600 font-medium">{entry.value}</span>
-          </div>
-        ))}
+              key={`legend-${index}`}
+              className={`flex items-center gap-1.5 ${isOthersItem ? 'cursor-pointer hover:bg-slate-100 px-2 py-1 rounded-md -mx-2 -my-1 transition-colors' : ''}`}
+              onClick={isOthersItem ? onOthersToggle : undefined}
+              title={isOthersItem ? (othersExpanded ? 'Click to collapse' : 'Click to expand') : undefined}
+            >
+              <div
+                className={`${isMobile ? 'w-3 h-3' : 'w-3.5 h-3.5'} rounded flex-shrink-0`}
+                style={{ backgroundColor: entry.color }}
+              />
+              <span className={`${isMobile ? 'text-xs' : 'text-sm'} text-slate-600 font-medium ${isOthersItem ? 'underline decoration-dotted underline-offset-2' : ''}`}>
+                {entry.value}
+                {isMobile && <span className="text-slate-400 ml-1">({percentage}%)</span>}
+              </span>
+              {isOthersItem && (
+                othersExpanded ? <ChevronUp className="w-3 h-3 text-slate-400" /> : <ChevronDown className="w-3 h-3 text-slate-400" />
+              )}
+            </div>
+          );
+        })}
       </div>
 
-      {/* Show more button - styled like reference */}
-      {hiddenCount > 0 && (
+      {/* Single button for Others expand/collapse - only show when not expanded */}
+      {hasOthers && !othersExpanded && (
+        <button
+          onClick={onOthersToggle}
+          className={`flex items-center gap-1.5 px-3 py-1.5 ${isMobile ? 'text-xs' : 'text-sm'} text-slate-600 hover:bg-slate-100 rounded-full border border-slate-200 transition-all font-medium`}
+        >
+          <ChevronDown className="w-3.5 h-3.5" />
+          Expand Others
+        </button>
+      )}
+
+      {/* Show collapse button when expanded */}
+      {hasOthers && othersExpanded && (
+        <button
+          onClick={onOthersToggle}
+          className={`flex items-center gap-1.5 px-3 py-1.5 ${isMobile ? 'text-xs' : 'text-sm'} text-slate-600 hover:bg-slate-100 rounded-full border border-slate-200 transition-all font-medium`}
+        >
+          <ChevronUp className="w-3.5 h-3.5" />
+          Collapse to Others
+        </button>
+      )}
+
+      {/* Show more button - only when there's NO "Others" group (to avoid duplicate buttons) */}
+      {hiddenCount > 0 && !hasOthers && (
         <button
           onClick={onToggle}
-          className="flex items-center gap-1.5 px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-full border border-slate-200 transition-all font-medium"
+          className={`flex items-center gap-1.5 px-4 py-2 ${isMobile ? 'text-xs' : 'text-sm'} text-blue-600 hover:bg-blue-50 rounded-full border border-slate-200 transition-all font-medium`}
         >
           {showAll ? (
             <>
@@ -188,8 +253,11 @@ export function BeautifulDonutChart({
   showMoreThreshold = 6,
   valueLabel = 'Mentions',
   colors = DEFAULT_COLORS,
+  disableOthersGrouping = false,
 }: BeautifulDonutChartProps) {
   const [showAllLegend, setShowAllLegend] = useState(false);
+  const [othersExpanded, setOthersExpanded] = useState(false);
+  const isMobile = useIsMobile(640);
 
   // Calculate total for percentage calculations
   const total = data.reduce((sum, item) => sum + item.value, 0);
@@ -201,49 +269,70 @@ export function BeautifulDonutChart({
     total,
   }));
 
-  // Group small items into "Others" if there are too many
-  const processedData = chartData.length > 10
-    ? [
-        ...chartData.slice(0, 9),
+  // Group items into "Others" based on showMoreThreshold when collapsed
+  // Skip grouping if disableOthersGrouping is true
+  let processedData = chartData;
+  let othersOriginalItems: any[] = [];
+
+  if (!disableOthersGrouping && chartData.length > showMoreThreshold) {
+    // Group items beyond threshold into "Others"
+    const mainItems = chartData.slice(0, showMoreThreshold);
+    const extraItems = chartData.slice(showMoreThreshold);
+    const extraValue = extraItems.reduce((sum, item) => sum + item.value, 0);
+
+    if (extraValue > 0) {
+      othersOriginalItems = extraItems;
+      processedData = [
+        ...mainItems,
         {
-          name: `Others (${chartData.length - 9})`,
-          value: chartData.slice(9).reduce((sum, item) => sum + item.value, 0),
+          name: `Others (${extraItems.length})`,
+          value: extraValue,
           color: OTHERS_COLOR,
           total,
+          isOthers: true,
         },
-      ]
-    : chartData;
+      ];
+    }
+  }
+
+  // When "Others" is expanded, show all original items instead of grouped
+  const displayData = othersExpanded && othersOriginalItems.length > 0
+    ? chartData // Show all original data
+    : processedData;
+
+  // Responsive chart height - smaller on mobile
+  const responsiveHeight = isMobile ? Math.min(height, 200) : height;
 
   return (
     <div className="w-full">
       {/* Title and subtitle */}
       {(title || subtitle) && (
         <div className="mb-3">
-          {title && <h3 className="text-base font-semibold text-slate-800">{title}</h3>}
-          {subtitle && <p className="text-sm text-slate-500">{subtitle}</p>}
+          {title && <h3 className={`${isMobile ? 'text-sm' : 'text-base'} font-semibold text-slate-800`}>{title}</h3>}
+          {subtitle && <p className={`${isMobile ? 'text-xs' : 'text-sm'} text-slate-500`}>{subtitle}</p>}
         </div>
       )}
 
-      <ResponsiveContainer width="100%" height={height}>
+      <ResponsiveContainer width="100%" height={responsiveHeight}>
         <PieChart>
           <Pie
-            data={processedData}
+            data={displayData}
             cx="50%"
-            cy="45%"
-            innerRadius="40%"
-            outerRadius="65%"
-            paddingAngle={4}
+            cy="50%"
+            innerRadius={isMobile ? "35%" : "40%"}
+            outerRadius={isMobile ? "75%" : "65%"}
+            paddingAngle={isMobile ? 2 : 4}
             dataKey="value"
-            label={renderCustomLabel}
+            label={isMobile ? false : renderCustomLabel}
             labelLine={false}
-            cornerRadius={6}
+            cornerRadius={isMobile ? 4 : 6}
           >
-            {processedData.map((entry, index) => (
+            {displayData.map((entry, index) => (
               <Cell
                 key={`cell-${index}`}
                 fill={entry.color}
                 stroke="#fff"
-                strokeWidth={3}
+                strokeWidth={isMobile ? 2 : 3}
               />
             ))}
           </Pie>
@@ -251,12 +340,22 @@ export function BeautifulDonutChart({
         </PieChart>
       </ResponsiveContainer>
 
-      {/* Custom Legend below the chart */}
+      {/* Custom Legend below the chart - shows percentages on mobile */}
       <CustomLegend
-        payload={processedData.map(item => ({ value: item.name, color: item.color }))}
+        payload={displayData.map(item => ({
+          value: item.name,
+          color: item.color,
+          rawValue: item.value,
+          isOthers: (item as any).isOthers
+        }))}
         showAll={showAllLegend}
         onToggle={() => setShowAllLegend(!showAllLegend)}
         threshold={showMoreThreshold}
+        isMobile={isMobile}
+        total={total}
+        hasOthers={othersOriginalItems.length > 0}
+        othersExpanded={othersExpanded}
+        onOthersToggle={() => setOthersExpanded(!othersExpanded)}
       />
     </div>
   );

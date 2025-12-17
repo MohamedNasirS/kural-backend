@@ -277,12 +277,12 @@ export default function MLADashboard() {
       {/* Header with Last Election Result */}
       <Card className={overview.lastElection.result === 'won' ? 'border-green-500' : 'border-red-500'}>
         <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2">
-            <span className={`text-2xl ${overview.lastElection.result === 'won' ? 'text-green-600' : 'text-red-600'}`}>
+          <CardTitle className="flex items-start sm:items-center gap-2 flex-wrap">
+            <span className={`text-xl sm:text-2xl ${overview.lastElection.result === 'won' ? 'text-green-600' : 'text-red-600'}`}>
               {overview.lastElection.result === 'won' ? '🟢' : '🔴'}
             </span>
-            <span>
-              {overview.lastElection.year} Election:{' '}
+            <span className="text-sm sm:text-base leading-tight">
+              Election:{' '}
               <span className={overview.lastElection.result === 'won' ? 'text-green-600' : 'text-red-600'}>
                 {overview.lastElection.result.toUpperCase()}
               </span>{' '}
@@ -291,7 +291,7 @@ export default function MLADashboard() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap gap-4 text-sm">
+          <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:gap-4 text-xs sm:text-sm">
             <div>
               <span className="text-gray-500">Our Party ({overview.lastElection.ourParty.name}):</span>{' '}
               <span className="font-semibold">{overview.lastElection.ourParty.voteSharePercent}%</span>
@@ -299,7 +299,7 @@ export default function MLADashboard() {
                 ({overview.lastElection.ourParty.votes.toLocaleString()} votes)
               </span>
             </div>
-            <div className="text-gray-400">vs</div>
+            <div className="text-gray-400 hidden sm:block">vs</div>
             <div>
               <span className="text-gray-500">{overview.lastElection.opponent.name}:</span>{' '}
               <span className="font-semibold">{overview.lastElection.opponent.voteSharePercent}%</span>
@@ -308,7 +308,7 @@ export default function MLADashboard() {
               </span>
             </div>
             {overview.predictedTurnout2026 && (
-              <div className="ml-auto">
+              <div className="sm:ml-auto">
                 <span className="text-gray-500">Predicted 2026 Turnout:</span>{' '}
                 <span className="font-semibold">{overview.predictedTurnout2026}%</span>
               </div>
@@ -318,41 +318,41 @@ export default function MLADashboard() {
       </Card>
 
       {/* Metric Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-4">
         <Card>
-          <CardContent className="pt-4">
-            <div className="text-2xl font-bold">{overview.stats.totalBooths}</div>
-            <div className="text-sm text-gray-500">Total Booths</div>
+          <CardContent className="pt-3 sm:pt-4 px-3 sm:px-6">
+            <div className="text-lg sm:text-2xl font-bold">{overview.stats.totalBooths}</div>
+            <div className="text-xs sm:text-sm text-gray-500">Total Booths</div>
           </CardContent>
         </Card>
         <Card>
-          <CardContent className="pt-4">
-            <div className="text-2xl font-bold">{overview.stats.totalVoters.toLocaleString()}</div>
-            <div className="text-sm text-gray-500">Total Voters</div>
+          <CardContent className="pt-3 sm:pt-4 px-3 sm:px-6">
+            <div className="text-lg sm:text-2xl font-bold">{overview.stats.totalVoters.toLocaleString()}</div>
+            <div className="text-xs sm:text-sm text-gray-500">Total Voters</div>
           </CardContent>
         </Card>
         <Card>
-          <CardContent className="pt-4">
-            <div className="text-2xl font-bold">{overview.stats.avgVotersPerBooth.toLocaleString()}</div>
-            <div className="text-sm text-gray-500">Avg Voters/Booth</div>
+          <CardContent className="pt-3 sm:pt-4 px-3 sm:px-6">
+            <div className="text-lg sm:text-2xl font-bold">{overview.stats.avgVotersPerBooth.toLocaleString()}</div>
+            <div className="text-xs sm:text-sm text-gray-500">Avg Voters/Booth</div>
           </CardContent>
         </Card>
         <Card className="bg-green-50 border-green-200">
-          <CardContent className="pt-4">
-            <div className="text-2xl font-bold text-green-600">{overview.boothSentiment.favorable.count}</div>
-            <div className="text-sm text-gray-500">Favorable ({overview.boothSentiment.favorable.percentage}%)</div>
+          <CardContent className="pt-3 sm:pt-4 px-3 sm:px-6">
+            <div className="text-lg sm:text-2xl font-bold text-green-600">{overview.boothSentiment.favorable.count}</div>
+            <div className="text-xs sm:text-sm text-gray-500">Favorable ({overview.boothSentiment.favorable.percentage}%)</div>
           </CardContent>
         </Card>
         <Card className="bg-red-50 border-red-200">
-          <CardContent className="pt-4">
-            <div className="text-2xl font-bold text-red-600">{overview.boothSentiment.negative.count}</div>
-            <div className="text-sm text-gray-500">Negative ({overview.boothSentiment.negative.percentage}%)</div>
+          <CardContent className="pt-3 sm:pt-4 px-3 sm:px-6">
+            <div className="text-lg sm:text-2xl font-bold text-red-600">{overview.boothSentiment.negative.count}</div>
+            <div className="text-xs sm:text-sm text-gray-500">Negative ({overview.boothSentiment.negative.percentage}%)</div>
           </CardContent>
         </Card>
         <Card className="bg-orange-50 border-orange-200">
-          <CardContent className="pt-4">
-            <div className="text-2xl font-bold text-orange-600">{overview.flippableBooths.count}</div>
-            <div className="text-sm text-gray-500">Flippable</div>
+          <CardContent className="pt-3 sm:pt-4 px-3 sm:px-6">
+            <div className="text-lg sm:text-2xl font-bold text-orange-600">{overview.flippableBooths.count}</div>
+            <div className="text-xs sm:text-sm text-gray-500">Flippable</div>
           </CardContent>
         </Card>
       </div>
@@ -371,6 +371,7 @@ export default function MLADashboard() {
               height={280}
               valueLabel="Booths"
               showMoreThreshold={4}
+              disableOthersGrouping={true}
             />
           </CardContent>
         </Card>
@@ -390,6 +391,7 @@ export default function MLADashboard() {
               height={280}
               valueLabel="Voters"
               showMoreThreshold={3}
+              disableOthersGrouping={true}
             />
           </CardContent>
         </Card>
@@ -443,10 +445,10 @@ export default function MLADashboard() {
       {historicalChartData.length > 0 && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-              <span className="text-base">Historical Vote Share Trends (2009-2021)</span>
+            <CardTitle className="flex flex-col gap-1">
+              <span className="text-sm sm:text-base">Historical Vote Share Trends (2009-2021)</span>
               {historicalData?.leadingSummary && (
-                <span className="text-xs sm:text-sm font-normal text-muted-foreground">{historicalData.leadingSummary}</span>
+                <span className="text-[10px] sm:text-xs font-normal text-muted-foreground leading-tight">{historicalData.leadingSummary}</span>
               )}
             </CardTitle>
           </CardHeader>
@@ -499,7 +501,10 @@ export default function MLADashboard() {
                     data={shareOfVoice.data.items.map((item, idx) => ({
                       name: item.competitor_name,
                       value: item.mention_count,
-                      color: SHARE_OF_VOICE_COLORS[idx % SHARE_OF_VOICE_COLORS.length],
+                      // Use party-specific color if available, otherwise use index-based color
+                      color: PARTY_COLORS[item.competitor_name.toUpperCase()] ||
+                             PARTY_COLORS[item.competitor_name] ||
+                             SHARE_OF_VOICE_COLORS[idx % SHARE_OF_VOICE_COLORS.length],
                     }))}
                     title="Share of Voice"
                     subtitle="Distribution of mentions across competitors"
@@ -524,6 +529,7 @@ export default function MLADashboard() {
                     height={280}
                     valueLabel="Mentions"
                     showMoreThreshold={3}
+                    disableOthersGrouping={true}
                   />
                 </div>
               )}
@@ -550,7 +556,11 @@ export default function MLADashboard() {
                             <div className="flex items-center gap-2">
                               <div
                                 className="w-3 h-3 rounded-full"
-                                style={{ backgroundColor: SHARE_OF_VOICE_COLORS[idx % SHARE_OF_VOICE_COLORS.length] }}
+                                style={{
+                                  backgroundColor: PARTY_COLORS[item.competitor_name.toUpperCase()] ||
+                                                   PARTY_COLORS[item.competitor_name] ||
+                                                   SHARE_OF_VOICE_COLORS[idx % SHARE_OF_VOICE_COLORS.length]
+                                }}
                               />
                               {item.competitor_name}
                             </div>
