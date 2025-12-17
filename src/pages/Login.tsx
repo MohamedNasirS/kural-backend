@@ -38,23 +38,23 @@ export const Login = () => {
   return (
     <div className="min-h-screen flex flex-col lg:flex-row">
       {/* Left Side - Branding */}
-      <div className="hidden lg:flex lg:w-1/2 bg-primary p-12 flex-col">
+      <div className="hidden lg:flex lg:w-1/2 bg-sidebar p-12 flex-col">
         <div className="mb-12">
           <img src={KuralFullLogo} alt="KuralApp" className="h-12 w-auto" />
         </div>
 
         <div className="space-y-6">
-          <h1 className="text-4xl font-bold text-white leading-tight">
+          <h1 className="text-4xl font-bold text-sidebar-foreground leading-tight">
             Campaign Intelligence
             <br />
             Platform
           </h1>
-          <p className="text-white/80 text-lg max-w-md">
+          <p className="text-sidebar-foreground/80 text-lg max-w-md">
             Manage voters, coordinate field teams, and make data-driven decisions for your constituency.
           </p>
         </div>
 
-        <p className="text-white/60 text-sm mt-auto">
+        <p className="text-sidebar-foreground/60 text-sm mt-auto">
           © {new Date().getFullYear()} KuralApp. All rights reserved.
         </p>
       </div>
