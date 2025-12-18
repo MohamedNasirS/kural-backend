@@ -76,9 +76,9 @@ export const FamilyDetailDrawer = ({ open, onClose, familyData, acId: propAcId }
       name: member.name,
       age: member.age,
       gender: member.gender,
-      booth: details?.family.booth || familyData?.booth || '',
-      boothNo: details?.family.boothNo || familyData?.boothNo || 0,
-      family: details?.family.headName || familyData?.family_head || '',
+      booth: details?.family?.booth || familyData?.booth || '',
+      boothNo: details?.family?.boothNo || familyData?.boothNo || 0,
+      family: details?.family?.headName || familyData?.family_head || '',
       phone: member.phone,
       surveyed: member.surveyed,
       voterID: member.voterID,
@@ -104,19 +104,22 @@ export const FamilyDetailDrawer = ({ open, onClose, familyData, acId: propAcId }
   }, [open, familyData]);
 
   const buildDetailsFromVoters = () => {
-    if (!familyData || !familyData.voters) return;
+    if (!familyData || !familyData.voters || !Array.isArray(familyData.voters)) return;
 
-    const voters = familyData.voters;
+    // Filter out any null/undefined voters
+    const voters = familyData.voters.filter((v: any) => v != null);
+    if (voters.length === 0) return;
+
     const acId = propAcId || user?.assignedAC || 119;
 
-    // Calculate demographics from voters
+    // Calculate demographics from voters with null checks
     const demographics = {
       totalMembers: voters.length,
-      male: voters.filter((v: any) => v.gender === 'Male').length,
-      female: voters.filter((v: any) => v.gender === 'Female').length,
-      surveyed: voters.filter((v: any) => v.surveyed === true).length,
-      pending: voters.filter((v: any) => v.surveyed !== true).length,
-      averageAge: Math.round(voters.reduce((sum: number, v: any) => sum + (v.age || 0), 0) / voters.length)
+      male: voters.filter((v: any) => v?.gender === 'Male').length,
+      female: voters.filter((v: any) => v?.gender === 'Female').length,
+      surveyed: voters.filter((v: any) => v?.surveyed === true).length,
+      pending: voters.filter((v: any) => v?.surveyed !== true).length,
+      averageAge: voters.length > 0 ? Math.round(voters.reduce((sum: number, v: any) => sum + (v?.age || 0), 0) / voters.length) : 0
     };
 
     // Format members from voters
@@ -229,16 +232,16 @@ export const FamilyDetailDrawer = ({ open, onClose, familyData, acId: propAcId }
             <Card className="p-4">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-semibold">Family Status</h3>
-                <Badge variant={details.demographics.surveyed === details.demographics.totalMembers ? 'default' : details.demographics.surveyed > 0 ? 'secondary' : 'destructive'}>
-                  {details.demographics.surveyed}/{details.demographics.totalMembers} Surveyed
+                <Badge variant={(details.demographics?.surveyed ?? 0) === (details.demographics?.totalMembers ?? 0) ? 'default' : (details.demographics?.surveyed ?? 0) > 0 ? 'secondary' : 'destructive'}>
+                  {details.demographics?.surveyed ?? 0}/{details.demographics?.totalMembers ?? 0} Surveyed
                 </Badge>
               </div>
               <div className="w-full bg-muted rounded-full h-3">
                 <div
                   className={`h-3 rounded-full transition-all ${
-                    details.demographics.surveyed === details.demographics.totalMembers ? 'bg-success' : details.demographics.surveyed > 0 ? 'bg-warning' : 'bg-destructive'
+                    (details.demographics?.surveyed ?? 0) === (details.demographics?.totalMembers ?? 0) ? 'bg-success' : (details.demographics?.surveyed ?? 0) > 0 ? 'bg-warning' : 'bg-destructive'
                   }`}
-                  style={{ width: `${(details.demographics.surveyed / details.demographics.totalMembers) * 100}%` }}
+                  style={{ width: `${(details.demographics?.totalMembers ?? 0) > 0 ? ((details.demographics?.surveyed ?? 0) / (details.demographics?.totalMembers ?? 1)) * 100 : 0}%` }}
                 />
               </div>
             </Card>
@@ -247,10 +250,10 @@ export const FamilyDetailDrawer = ({ open, onClose, familyData, acId: propAcId }
             <Card className="p-4">
               <h3 className="font-semibold mb-4 flex items-center gap-2">
                 <Users className="h-4 w-4" />
-                Family Members ({details.members.length})
+                Family Members ({details.members?.length ?? 0})
               </h3>
               <div className="space-y-3">
-                {details.members.map((member) => (
+                {(details.members ?? []).map((member) => (
                   <div
                     key={member.id}
                     className="flex items-center justify-between p-3 bg-muted rounded-lg cursor-pointer hover:bg-muted/80 transition-colors"
@@ -290,25 +293,25 @@ export const FamilyDetailDrawer = ({ open, onClose, familyData, acId: propAcId }
               <div className="grid grid-cols-2 gap-4">
                 <div className="p-3 bg-muted rounded-lg">
                   <p className="text-xs text-muted-foreground">Total Members</p>
-                  <p className="text-2xl font-bold text-primary">{details.demographics.totalMembers}</p>
+                  <p className="text-2xl font-bold text-primary">{details.demographics?.totalMembers ?? 0}</p>
                 </div>
                 <div className="p-3 bg-muted rounded-lg">
                   <p className="text-xs text-muted-foreground">Male / Female</p>
-                  <p className="text-lg font-bold">{details.demographics.male} / {details.demographics.female}</p>
+                  <p className="text-lg font-bold">{details.demographics?.male ?? 0} / {details.demographics?.female ?? 0}</p>
                 </div>
                 <div className="p-3 bg-muted rounded-lg">
                   <p className="text-xs text-muted-foreground flex items-center gap-1">
                     <CheckCircle className="h-3 w-3 text-success" />
                     Surveyed
                   </p>
-                  <p className="text-2xl font-bold text-success">{details.demographics.surveyed}</p>
+                  <p className="text-2xl font-bold text-success">{details.demographics?.surveyed ?? 0}</p>
                 </div>
                 <div className="p-3 bg-muted rounded-lg">
                   <p className="text-xs text-muted-foreground flex items-center gap-1">
                     <XCircle className="h-3 w-3 text-warning" />
                     Pending
                   </p>
-                  <p className="text-2xl font-bold text-warning">{details.demographics.pending}</p>
+                  <p className="text-2xl font-bold text-warning">{details.demographics?.pending ?? 0}</p>
                 </div>
               </div>
             </Card>
@@ -324,19 +327,19 @@ export const FamilyDetailDrawer = ({ open, onClose, familyData, acId: propAcId }
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Booth:</span>
-                  <span className="font-medium">{details.family.booth}</span>
+                  <span className="font-medium">{details.family?.booth ?? 'N/A'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Booth Number:</span>
-                  <span className="font-medium">{details.family.boothNo}</span>
+                  <span className="font-medium">{details.family?.boothNo ?? 'N/A'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">AC:</span>
-                  <span className="font-medium">{details.family.acName}</span>
+                  <span className="font-medium">{details.family?.acName ?? 'N/A'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Contact:</span>
-                  <span className="font-medium">{details.family.phone}</span>
+                  <span className="font-medium">{details.family?.phone ?? 'N/A'}</span>
                 </div>
               </div>
             </Card>

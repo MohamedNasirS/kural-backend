@@ -220,6 +220,31 @@ export async function countVoters(acId, query = {}) {
 }
 
 /**
+ * Count surveyed voters in a specific AC collection
+ * Uses aggregation to bypass Mongoose schema validation for mixed type 'surveyed' field
+ * The surveyed field can be boolean true, string "true", "yes", or "Yes"
+ * @param {number|string} acId - AC ID
+ * @returns {Promise<number>} Count of surveyed voters
+ */
+export async function countSurveyedVoters(acId) {
+  const VoterModel = getVoterModel(acId);
+  const result = await VoterModel.aggregate([
+    {
+      $match: {
+        $or: [
+          { surveyed: true },
+          { surveyed: 'true' },
+          { surveyed: 'yes' },
+          { surveyed: 'Yes' }
+        ]
+      }
+    },
+    { $count: 'total' }
+  ]);
+  return result[0]?.total || 0;
+}
+
+/**
  * Aggregate voters in a specific AC collection
  * @param {number|string} acId - AC ID
  * @param {Array} pipeline - Aggregation pipeline
@@ -483,6 +508,7 @@ export default {
   findVoterByIdAndUpdate,
   queryVoters,
   countVoters,
+  countSurveyedVoters,
   aggregateVoters,
   queryAllVoters,
   countAllVoters,

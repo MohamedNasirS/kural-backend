@@ -4,6 +4,7 @@ import { buildAcQuery } from "../utils/helpers.js";
 import {
   getVoterModel,
   countVoters,
+  countSurveyedVoters,
   aggregateVoters,
   findOneVoter,
 } from "../utils/voterCollection.js";
@@ -98,7 +99,9 @@ router.get("/stats/:acId", async (req, res) => {
     // Run aggregations (this is the slow path)
     const [totalMembers, surveysCompleted, familiesAggregation, boothsAggregation, boothStats] = await Promise.all([
       countVoters(acId, {}),
-      countVoters(acId, { surveyed: true }),
+      // Count surveyed voters using aggregation (bypasses schema validation)
+      // The surveyed field can be boolean true, string "true", "yes", or "Yes"
+      countSurveyedVoters(acId),
       aggregateVoters(acId, [
         { $match: { familyId: { $exists: true, $ne: null } } },
         { $group: { _id: "$familyId" } },

@@ -87,7 +87,7 @@ router.get("/:acId/booth-performance", async (req, res) => {
 
     const VoterModel = getVoterModel(acId);
 
-    // Single aggregation with $facet for booth stats + family counts
+    // Single aggregation with $facet for booth stats + family counts + surveyed voters
     const [result] = await VoterModel.aggregate([
       { $match: matchQuery },
       {
@@ -109,6 +109,15 @@ router.get("/:acId/booth-performance", async (req, res) => {
                 },
                 verified_voters: {
                   $sum: { $cond: ["$verified", 1, 0] }
+                },
+                // Count surveyed voters - handle boolean true, string "true", or "yes"/"Yes"
+                surveyed_voters: {
+                  $sum: { $cond: [{ $or: [
+                    { $eq: ["$surveyed", true] },
+                    { $eq: ["$surveyed", "true"] },
+                    { $eq: ["$surveyed", "yes"] },
+                    { $eq: ["$surveyed", "Yes"] }
+                  ]}, 1, 0] }
                 },
                 avg_age: { $avg: "$age" }
               }
@@ -136,23 +145,8 @@ router.get("/:acId/booth-performance", async (req, res) => {
     const boothPerformance = result.boothStats || [];
     const familyMap = new Map((result.familyCounts || []).map(f => [f._id, f.total_families]));
 
-    // Get survey completion data
-    let surveysByBooth = [];
-    try {
-      surveysByBooth = await aggregateSurveyResponses(acId, [
-        {
-          $group: {
-            _id: { $ifNull: ["$boothname", { $ifNull: ["$booth_id", "$booth"] }] },
-            surveys_completed: { $sum: 1 }
-          }
-        }
-      ]);
-    } catch (error) {
-      console.error("Error aggregating survey responses:", error);
-    }
-
-    const surveyMap = new Map(surveysByBooth.map(s => [s._id, s.surveys_completed]));
-
+    // Use surveyed_voters from the aggregation (consistent with precomputed stats)
+    // This counts voters with surveyed: true/true/"yes", not survey response documents
     const response = {
       reports: boothPerformance.map(booth => ({
         booth: booth._id.boothname || `Booth ${booth._id.boothno}`,
@@ -164,10 +158,10 @@ router.get("/:acId/booth-performance", async (req, res) => {
         male_voters: booth.male_voters,
         female_voters: booth.female_voters,
         verified_voters: booth.verified_voters,
-        surveys_completed: surveyMap.get(booth._id.boothname) || surveyMap.get(booth._id.booth_id) || 0,
+        surveys_completed: booth.surveyed_voters || 0,
         avg_age: Math.round(booth.avg_age || 0),
         completion_rate: booth.total_voters > 0
-          ? Math.round(((surveyMap.get(booth._id.boothname) || surveyMap.get(booth._id.booth_id) || 0) / booth.total_voters) * 100)
+          ? Math.round((booth.surveyed_voters || 0) / booth.total_voters * 100)
           : 0
       })),
       _source: 'aggregation'
@@ -285,9 +279,17 @@ router.get("/:acId/demographics", async (req, res) => {
       female: result.genderDistribution.find(g => g._id === "Female")?.count || 0
     };
 
+    // Handle surveyed field that could be boolean true, string "true", or "yes"
+    const surveyedCount = result.surveyStatus
+      .filter(s => s._id === true || s._id === 'true' || s._id === 'yes' || s._id === 'Yes')
+      .reduce((sum, s) => sum + (s.count || 0), 0);
+    const notSurveyedCount = result.surveyStatus
+      .filter(s => s._id === false || s._id === 'false' || s._id === 'no' || s._id === 'No' || s._id === null || s._id === undefined)
+      .reduce((sum, s) => sum + (s.count || 0), 0);
+
     const surveyData = {
-      surveyed: result.surveyStatus.find(s => s._id === true)?.count || 0,
-      notSurveyed: result.surveyStatus.find(s => s._id === false || s._id === null)?.count || 0
+      surveyed: surveyedCount,
+      notSurveyed: notSurveyedCount
     };
 
     const response = {

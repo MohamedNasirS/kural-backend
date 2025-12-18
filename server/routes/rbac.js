@@ -1188,9 +1188,9 @@ router.delete("/users/:userId", isAuthenticated, async (req, res) => {
  */
 router.get("/booths", isAuthenticated, canManageBooths, validateACAccess, async (req, res) => {
   try {
-    const { ac, search, source, page = 1, limit = 100 } = req.query;
+    const { ac, search, source, page = 1, limit = 500 } = req.query;
     const pageNum = parseInt(page) || 1;
-    const limitNum = parseInt(limit) || 100;
+    const limitNum = parseInt(limit) || 500;
 
     // Validate AC filter for L1/L2 users
     if (ac) {

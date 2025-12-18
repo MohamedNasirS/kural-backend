@@ -15,7 +15,7 @@
  */
 
 import mongoose from 'mongoose';
-import { getVoterModel, ALL_AC_IDS, countVoters, aggregateVoters } from './voterCollection.js';
+import { getVoterModel, ALL_AC_IDS, countVoters, countSurveyedVoters, aggregateVoters } from './voterCollection.js';
 
 // Schema for pre-computed stats
 const precomputedStatsSchema = new mongoose.Schema({
@@ -29,7 +29,14 @@ const precomputedStatsSchema = new mongoose.Schema({
     boothNo: mongoose.Schema.Types.Mixed, // Can be String or Number depending on data
     boothName: String,
     boothId: String,
-    voters: Number
+    voters: Number,
+    // Demographics for reports endpoint
+    maleVoters: { type: Number, default: 0 },
+    femaleVoters: { type: Number, default: 0 },
+    verifiedVoters: { type: Number, default: 0 },
+    surveyedVoters: { type: Number, default: 0 },
+    avgAge: { type: Number, default: 0 },
+    familyCount: { type: Number, default: 0 }
   }],
   computedAt: { type: Date, default: Date.now },
   computeDurationMs: Number
@@ -84,8 +91,9 @@ export async function computeStatsForAC(acId) {
       // 1. Count total voters
       countVoters(acId, {}),
 
-      // 2. Count surveyed voters
-      countVoters(acId, { surveyed: true }),
+      // 2. Count surveyed voters using aggregation (bypasses schema validation)
+      // The surveyed field can be boolean true, string "true", "yes", or "Yes"
+      countSurveyedVoters(acId),
 
       // 3. Count unique families
       aggregateVoters(acId, [
@@ -114,7 +122,13 @@ export async function computeStatsForAC(acId) {
             maleVoters: { $sum: { $cond: [{ $eq: ["$gender", "Male"] }, 1, 0] } },
             femaleVoters: { $sum: { $cond: [{ $eq: ["$gender", "Female"] }, 1, 0] } },
             verifiedVoters: { $sum: { $cond: ["$verified", 1, 0] } },
-            surveyedVoters: { $sum: { $cond: ["$surveyed", 1, 0] } },
+            // Handle surveyed as boolean true, string "true", or "yes"/"Yes"
+            surveyedVoters: { $sum: { $cond: [{ $or: [
+              { $eq: ["$surveyed", true] },
+              { $eq: ["$surveyed", "true"] },
+              { $eq: ["$surveyed", "yes"] },
+              { $eq: ["$surveyed", "Yes"] }
+            ]}, 1, 0] } },
             avgAge: { $avg: "$age" },
             uniqueFamilies: { $addToSet: "$familyId" }
           }

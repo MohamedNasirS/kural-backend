@@ -29,7 +29,7 @@ interface UseBoothsOptions {
   autoFetch?: boolean;
   /** Initial AC to fetch booths for */
   initialAcId?: string | number;
-  /** Limit number of booths to fetch */
+  /** Limit number of booths to fetch (default: 500) */
   limit?: number;
 }
 
@@ -61,7 +61,7 @@ interface UseBoothsReturn {
  * ```
  */
 export function useBooths(options: UseBoothsOptions = {}): UseBoothsReturn {
-  const { autoFetch = false, initialAcId, limit = 200 } = options;
+  const { autoFetch = false, initialAcId, limit = 500 } = options;
 
   const [booths, setBooths] = useState<Booth[]>([]);
   const [loading, setLoading] = useState(false);
