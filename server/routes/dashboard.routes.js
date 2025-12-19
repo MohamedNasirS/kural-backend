@@ -71,9 +71,15 @@ router.get("/stats/:acId", async (req, res) => {
         acNumber: acId,
         totalFamilies: precomputed.totalFamilies,
         totalMembers: precomputed.totalMembers,
-        surveysCompleted: precomputed.surveysCompleted,
+        surveysCompleted: precomputed.surveysCompleted, // Legacy: voters with at least one survey
         totalBooths: precomputed.totalBooths,
         boothStats: precomputed.boothStats || [],
+        // NEW: Multi-survey tracking metrics
+        activeSurveysCount: precomputed.activeSurveysCount || 0,
+        totalSurveysNeeded: precomputed.totalSurveysNeeded || 0,
+        totalSurveysCompleted: precomputed.totalSurveysCompleted || 0,
+        votersSurveyed: precomputed.votersSurveyed || precomputed.surveysCompleted || 0,
+        surveyBreakdown: precomputed.surveyBreakdown || [],
         _source: 'precomputed',
         _computedAt: precomputed.computedAt
       };

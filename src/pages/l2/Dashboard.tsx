@@ -8,6 +8,13 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useEffect, useState } from 'react';
 import API_BASE_URL from '@/lib/api';
 
+interface SurveyBreakdownItem {
+  surveyId: string;
+  surveyName: string;
+  completedCount: number;
+  completionRate: number;
+}
+
 interface DashboardStats {
   acIdentifier: string | null;
   acId: number | null;
@@ -15,7 +22,7 @@ interface DashboardStats {
   acNumber: number | null;
   totalFamilies: number;
   totalMembers: number;
-  surveysCompleted: number;
+  surveysCompleted: number; // Legacy: voters with at least one survey
   totalBooths: number;
   boothStats: Array<{
     boothNo: number;
@@ -23,6 +30,12 @@ interface DashboardStats {
     boothId: string;
     voters: number;
   }>;
+  // NEW: Multi-survey tracking
+  activeSurveysCount?: number;
+  totalSurveysNeeded?: number;
+  totalSurveysCompleted?: number;
+  votersSurveyed?: number;
+  surveyBreakdown?: SurveyBreakdownItem[];
 }
 
 export const L2Dashboard = () => {
@@ -102,29 +115,30 @@ export const L2Dashboard = () => {
 
         {/* Overview Cards - Clean Minimal Dashboard */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <StatCard 
-            title="Total Families" 
-            value={loading ? "Loading..." : formatNumber(stats?.totalFamilies || 0)} 
-            icon={Home} 
-            variant="primary" 
+          <StatCard
+            title="Total Families"
+            value={loading ? "Loading..." : formatNumber(stats?.totalFamilies || 0)}
+            icon={Home}
+            variant="primary"
           />
-          <StatCard 
-            title="Total Members" 
-            value={loading ? "Loading..." : formatNumber(stats?.totalMembers || 0)} 
-            icon={Users} 
-            variant="primary" 
+          <StatCard
+            title="Total Members"
+            value={loading ? "Loading..." : formatNumber(stats?.totalMembers || 0)}
+            icon={Users}
+            variant="primary"
           />
-          <StatCard 
-            title="Surveys Completed" 
-            value={loading ? "Loading..." : formatNumber(stats?.surveysCompleted || 0)} 
-            icon={FileCheck} 
-            variant="success" 
+          <StatCard
+            title="Surveys Completed"
+            value={loading ? "Loading..." : `${formatNumber(stats?.totalSurveysCompleted || stats?.surveysCompleted || 0)} / ${formatNumber(stats?.totalSurveysNeeded || stats?.totalMembers || 0)}`}
+            subtitle={loading ? undefined : stats?.activeSurveysCount ? `${stats.activeSurveysCount} active survey${stats.activeSurveysCount > 1 ? 's' : ''} • ${stats?.votersSurveyed || 0} voters surveyed` : undefined}
+            icon={FileCheck}
+            variant="success"
           />
-          <StatCard 
-            title="Total Booths" 
-            value={loading ? "Loading..." : formatNumber(stats?.totalBooths || 0)} 
-            icon={MapPin} 
-            variant="warning" 
+          <StatCard
+            title="Total Booths"
+            value={loading ? "Loading..." : formatNumber(stats?.totalBooths || 0)}
+            icon={MapPin}
+            variant="warning"
           />
         </div>
 

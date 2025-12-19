@@ -10,6 +10,13 @@ import { VoterDetailDrawer } from '@/components/VoterDetailDrawer';
 import API_BASE_URL from '@/lib/api';
 import { CONSTITUENCIES } from '@/constants/constituencies';
 
+interface CompletedSurvey {
+  surveyId: string;
+  surveyName: string;
+  completedAt?: string;
+  responseId?: string;
+}
+
 interface Voter {
   id: string;
   name: string;
@@ -23,6 +30,10 @@ interface Voter {
   gender?: string;
   verified?: boolean;
   surveyed?: boolean;
+  // Survey history fields (populated when viewing details)
+  surveysTaken?: number;
+  lastSurveyAt?: string;
+  completedSurveys?: CompletedSurvey[];
 }
 
 interface Pagination {
@@ -141,9 +152,33 @@ export const GlobalVoterManager = () => {
     fetchVoters();
   };
 
-  const handleViewDetails = (voter: Voter) => {
+  const handleViewDetails = async (voter: Voter) => {
+    // Set voter first to show drawer immediately
     setSelectedVoter(voter);
     setIsDrawerOpen(true);
+
+    // Then fetch survey history in background
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/voters/${encodeURIComponent(selectedAC)}/voter/${encodeURIComponent(voter.voterId)}/surveys`,
+        { credentials: 'include' }
+      );
+
+      if (response.ok) {
+        const responseData = await response.json();
+        const surveyData = responseData.data || responseData;
+
+        // Update selected voter with survey history
+        setSelectedVoter((prev: Voter | null) => prev ? {
+          ...prev,
+          surveysTaken: surveyData.surveysTaken || 0,
+          lastSurveyAt: surveyData.lastSurveyAt,
+          completedSurveys: surveyData.completedSurveys || []
+        } : null);
+      }
+    } catch (err) {
+      console.error('Error fetching voter survey history:', err);
+    }
   };
 
   const getACName = (acNumber: string) => {

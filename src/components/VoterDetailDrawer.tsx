@@ -8,6 +8,13 @@ import {
   Heart, Briefcase, Clock, Shield
 } from 'lucide-react';
 
+interface CompletedSurvey {
+  surveyId: string;
+  surveyName: string;
+  completedAt?: string;
+  responseId?: string;
+}
+
 interface VoterDetailDrawerProps {
   open: boolean;
   onClose: () => void;
@@ -50,6 +57,10 @@ interface VoterDetailDrawerProps {
     updatedAt?: string;
     status?: string;
     relationship?: string;
+    // NEW: Multi-survey tracking
+    surveysTaken?: number;
+    lastSurveyAt?: string;
+    completedSurveys?: CompletedSurvey[];
   } | null;
 }
 
@@ -326,15 +337,48 @@ export const VoterDetailDrawer = ({ open, onClose, voterData }: VoterDetailDrawe
                 ) : (
                   <AlertCircle className="h-5 w-5 text-yellow-600" />
                 )}
-                <div>
-                  <p className="font-medium">{voterData.surveyed ? 'Survey Completed' : 'Survey Pending'}</p>
-                  {voterData.surveyedAt && (
+                <div className="flex-1">
+                  <div className="flex items-center justify-between">
+                    <p className="font-medium">{voterData.surveyed ? 'Survey Completed' : 'Survey Pending'}</p>
+                    {voterData.surveysTaken !== undefined && voterData.surveysTaken > 0 && (
+                      <Badge variant="secondary" className="ml-2">
+                        {voterData.surveysTaken} survey{voterData.surveysTaken > 1 ? 's' : ''} completed
+                      </Badge>
+                    )}
+                  </div>
+                  {voterData.lastSurveyAt && (
+                    <p className="text-xs text-muted-foreground">
+                      Last surveyed: {formatDate(voterData.lastSurveyAt)}
+                    </p>
+                  )}
+                  {!voterData.lastSurveyAt && voterData.surveyedAt && (
                     <p className="text-xs text-muted-foreground">
                       Surveyed on: {formatDate(voterData.surveyedAt)}
                     </p>
                   )}
                 </div>
               </div>
+
+              {/* Completed Surveys List */}
+              {voterData.completedSurveys && voterData.completedSurveys.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Completed Surveys</p>
+                  {voterData.completedSurveys.map((survey, index) => (
+                    <div key={survey.surveyId || index} className="flex items-center justify-between p-2 bg-green-500/5 border border-green-500/20 rounded">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle className="h-4 w-4 text-green-600" />
+                        <span className="text-sm font-medium">{survey.surveyName || 'Survey'}</span>
+                      </div>
+                      <div className="text-right">
+                        {survey.completedAt && (
+                          <p className="text-xs text-muted-foreground">{formatDate(survey.completedAt)}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div className="flex items-center gap-3 p-3 bg-muted rounded">
                 {voterData.verified ? (
                   <Shield className="h-5 w-5 text-green-600" />

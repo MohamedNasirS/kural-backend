@@ -24,7 +24,20 @@ const precomputedStatsSchema = new mongoose.Schema({
   totalMembers: { type: Number, default: 0 },
   totalFamilies: { type: Number, default: 0 },
   totalBooths: { type: Number, default: 0 },
+  // Legacy field - voters who completed at least one survey (surveyed: true)
   surveysCompleted: { type: Number, default: 0 },
+  // NEW: Multi-survey tracking
+  activeSurveysCount: { type: Number, default: 0 },        // Number of active survey forms for this AC
+  totalSurveysNeeded: { type: Number, default: 0 },        // activeSurveys × totalVoters
+  totalSurveysCompleted: { type: Number, default: 0 },     // Sum of all voter.surveysTaken
+  votersSurveyed: { type: Number, default: 0 },            // Voters with at least one survey (same as surveysCompleted)
+  // Per-survey breakdown
+  surveyBreakdown: [{
+    surveyId: String,
+    surveyName: String,
+    completedCount: { type: Number, default: 0 },
+    completionRate: { type: Number, default: 0 }
+  }],
   boothStats: [{
     boothNo: mongoose.Schema.Types.Mixed, // Can be String or Number depending on data
     boothName: String,
@@ -73,11 +86,20 @@ export async function computeStatsForAC(acId) {
         totalFamilies: 0,
         totalBooths: 0,
         surveysCompleted: 0,
+        // NEW: Multi-survey tracking defaults
+        activeSurveysCount: 0,
+        totalSurveysNeeded: 0,
+        totalSurveysCompleted: 0,
+        votersSurveyed: 0,
+        surveyBreakdown: [],
         boothStats: [],
         computedAt: new Date(),
         computeDurationMs: Date.now() - startTime
       };
     }
+
+    // Get Survey model for counting active surveys
+    const Survey = mongoose.models.Survey || mongoose.model('Survey', new mongoose.Schema({}, { strict: false }), 'surveys');
 
     // Run all aggregations in parallel for speed
     const [
@@ -86,7 +108,10 @@ export async function computeStatsForAC(acId) {
       familiesResult,
       boothsResult,
       boothStatsResult,
-      acMeta
+      acMeta,
+      activeSurveys,
+      totalSurveysTakenResult,
+      surveyBreakdownResult
     ] = await Promise.all([
       // 1. Count total voters
       countVoters(acId, {}),
@@ -150,8 +175,43 @@ export async function computeStatsForAC(acId) {
       ]),
 
       // 6. Get AC metadata
-      VoterModel.findOne({}, { aci_name: 1, aci_id: 1 }).lean()
+      VoterModel.findOne({}, { aci_name: 1, aci_id: 1 }).lean(),
+
+      // 7. Get active surveys for this AC
+      Survey.find({ assignedACs: acId, status: 'Active' }, { _id: 1, title: 1 }).lean(),
+
+      // 8. Sum of all voter.surveysTaken (total individual survey completions)
+      aggregateVoters(acId, [
+        { $match: { surveysTaken: { $exists: true, $gt: 0 } } },
+        { $group: { _id: null, total: { $sum: "$surveysTaken" } } }
+      ]),
+
+      // 9. Per-survey breakdown from voter.completedSurveys array
+      aggregateVoters(acId, [
+        { $match: { completedSurveys: { $exists: true, $ne: [] } } },
+        { $unwind: "$completedSurveys" },
+        { $group: {
+          _id: "$completedSurveys.surveyId",
+          surveyName: { $first: "$completedSurveys.surveyName" },
+          completedCount: { $sum: 1 }
+        }},
+        { $sort: { completedCount: -1 } }
+      ])
     ]);
+
+    // Calculate multi-survey metrics
+    const activeSurveysCount = activeSurveys?.length || 0;
+    const totalSurveysNeeded = activeSurveysCount * totalMembers;
+    const totalSurveysCompleted = totalSurveysTakenResult[0]?.total || 0;
+    const votersSurveyed = surveysCompleted; // Same as surveysCompleted (voters with surveyed: true)
+
+    // Build survey breakdown with completion rates
+    const surveyBreakdown = (surveyBreakdownResult || []).map(s => ({
+      surveyId: s._id?.toString() || '',
+      surveyName: s.surveyName || 'Unknown Survey',
+      completedCount: s.completedCount || 0,
+      completionRate: totalMembers > 0 ? Math.round((s.completedCount / totalMembers) * 10000) / 100 : 0
+    }));
 
     const stats = {
       acId,
@@ -159,7 +219,13 @@ export async function computeStatsForAC(acId) {
       totalMembers,
       totalFamilies: familiesResult[0]?.total || 0,
       totalBooths: boothsResult[0]?.total || 0,
-      surveysCompleted,
+      surveysCompleted, // Legacy: voters with at least one survey
+      // NEW: Multi-survey tracking
+      activeSurveysCount,
+      totalSurveysNeeded,
+      totalSurveysCompleted,
+      votersSurveyed,
+      surveyBreakdown,
       boothStats: boothStatsResult.map(booth => ({
         boothNo: booth.boothno,
         boothName: booth._id,

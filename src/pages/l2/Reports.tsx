@@ -39,9 +39,20 @@ interface BoothReport {
 interface DashboardStats {
   totalFamilies: number;
   totalMembers: number;
-  surveysCompleted: number;
+  surveysCompleted: number; // Legacy: voters with at least one survey
   totalBooths: number;
   acName?: string;
+  // NEW: Multi-survey tracking
+  activeSurveysCount?: number;
+  totalSurveysNeeded?: number;
+  totalSurveysCompleted?: number;
+  votersSurveyed?: number;
+  surveyBreakdown?: Array<{
+    surveyId: string;
+    surveyName: string;
+    completedCount: number;
+    completionRate: number;
+  }>;
 }
 
 interface AgeGroup {
@@ -145,22 +156,44 @@ export const Reports = () => {
   const totalFamilies = boothFilter !== 'all'
     ? filteredBoothPerformance.reduce((sum, b) => sum + b.total_families, 0)
     : (stats?.totalFamilies || boothReports.reduce((sum, b) => sum + b.total_families, 0));
+
+  // Multi-survey tracking: use totalSurveysCompleted and totalSurveysNeeded when available
+  const hasMultiSurveyData = stats?.totalSurveysNeeded && stats.totalSurveysNeeded > 0;
+
   // When filtering by booth, use booth-specific survey count from filteredBoothPerformance
-  // Use nullish coalescing (??) to properly handle 0 values
+  // Otherwise use multi-survey tracking data if available, else legacy surveysCompleted
   const totalSurveys = boothFilter !== 'all'
     ? filteredBoothPerformance.reduce((sum, b) => sum + b.surveys_completed, 0)
-    : (demographics?.surveyStatus?.surveyed ?? stats?.surveysCompleted ?? boothReports.reduce((sum, b) => sum + b.surveys_completed, 0));
-  const pendingSurveys = totalVoters - totalSurveys;
+    : (hasMultiSurveyData
+        ? (stats?.totalSurveysCompleted || 0)
+        : (demographics?.surveyStatus?.surveyed ?? stats?.surveysCompleted ?? boothReports.reduce((sum, b) => sum + b.surveys_completed, 0)));
+
+  // Use totalSurveysNeeded as denominator when available, else totalVoters
+  const totalSurveysTarget = boothFilter !== 'all'
+    ? filteredBoothPerformance.reduce((sum, b) => sum + b.total_voters, 0)
+    : (hasMultiSurveyData ? (stats?.totalSurveysNeeded || totalVoters) : totalVoters);
+
+  const pendingSurveys = totalSurveysTarget - totalSurveys;
+
   // Calculate completion rate with proper precision for small values
-  const rawCompletionRate = totalVoters > 0 ? (totalSurveys / totalVoters) * 100 : 0;
-  const completionRate = rawCompletionRate > 0 && rawCompletionRate < 0.1
-    ? Math.round(rawCompletionRate * 100) / 100  // 2 decimal places for very small values
-    : Math.round(rawCompletionRate * 10) / 10;   // 1 decimal place for normal values
-  // Pending rate should use same precision as completion rate
+  const rawCompletionRate = totalSurveysTarget > 0 ? (totalSurveys / totalSurveysTarget) * 100 : 0;
+  // When there's actual progress but it's very small, show "< 0.01" indicator
+  const hasProgress = totalSurveys > 0;
+  const completionRateNum = rawCompletionRate >= 0.01
+    ? Math.round(rawCompletionRate * 100) / 100  // 2 decimal places
+    : 0;
+  // Display string: show "< 0.01" when there's progress but rounds to 0
+  const completionRate = hasProgress && completionRateNum === 0 ? '< 0.01' : completionRateNum.toString();
+  // Pending rate calculation
   const rawPendingRate = 100 - rawCompletionRate;
-  const pendingRate = rawPendingRate > 99.9 && rawPendingRate < 100
-    ? Math.round(rawPendingRate * 100) / 100  // 2 decimal places when close to 100%
-    : Math.round(rawPendingRate * 10) / 10;   // 1 decimal place for normal values
+  const pendingRateNum = rawPendingRate >= 99.99 && hasProgress
+    ? 99.99  // Cap at 99.99% when there's some progress
+    : Math.round(rawPendingRate * 100) / 100;
+  const pendingRate = hasProgress && pendingRateNum > 99.99 ? '> 99.99' : pendingRateNum.toString();
+
+  // Multi-survey info for display
+  const activeSurveysCount = stats?.activeSurveysCount || 0;
+  const votersSurveyed = stats?.votersSurveyed || stats?.surveysCompleted || 0;
 
   // Chart data preparations
   const genderDistributionData = [
@@ -266,8 +299,14 @@ export const Reports = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <StatCard title="Total Voters" value={totalVoters.toLocaleString()} icon={Users} variant="primary" />
           <StatCard title="Total Families" value={totalFamilies.toLocaleString()} icon={Home} variant="primary" />
-          <StatCard title="Surveys Completed" value={totalSurveys.toLocaleString()} icon={FileCheck} variant="success" />
-          <StatCard title="Completion Rate" value={`${completionRate}%`} icon={TrendingUp} variant={completionRate > 50 ? 'success' : 'warning'} />
+          <StatCard
+            title="Surveys Completed"
+            value={`${totalSurveys.toLocaleString()} / ${totalSurveysTarget.toLocaleString()}`}
+            subtitle={hasMultiSurveyData ? `${activeSurveysCount} survey${activeSurveysCount > 1 ? 's' : ''} • ${votersSurveyed.toLocaleString()} voters surveyed` : undefined}
+            icon={FileCheck}
+            variant="success"
+          />
+          <StatCard title="Completion Rate" value={`${completionRate}%`} icon={TrendingUp} variant={completionRateNum > 50 ? 'success' : 'warning'} />
         </div>
 
         {/* Charts Section */}
@@ -302,7 +341,7 @@ export const Reports = () => {
                   </div>
                   <div className="p-3 bg-yellow-500/10 rounded-lg">
                     <p className="text-2xl font-bold text-yellow-600">{pendingSurveys.toLocaleString()}</p>
-                    <p className="text-sm text-muted-foreground">Pending ({pendingRate}%)</p>
+                    <p className="text-sm text-muted-foreground">Pending ({hasProgress ? (pendingRateNum < 100 ? pendingRateNum.toFixed(2) : '99.99+') : '100'}%)</p>
                   </div>
                 </div>
               </Card>
@@ -342,23 +381,64 @@ export const Reports = () => {
                     <span>Overall Completion</span>
                     <span className="font-semibold">{completionRate}%</span>
                   </div>
-                  <Progress value={completionRate} className="h-4" />
+                  <Progress value={completionRateNum > 0 ? Math.max(completionRateNum, 0.5) : 0} className="h-4" />
+                  {hasMultiSurveyData && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {activeSurveysCount} active survey{activeSurveysCount > 1 ? 's' : ''} × {totalVoters.toLocaleString()} voters = {totalSurveysTarget.toLocaleString()} total surveys needed
+                    </p>
+                  )}
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-center">
                   <div className="p-4 bg-muted rounded-lg">
-                    <p className="text-2xl font-bold">{totalVoters.toLocaleString()}</p>
+                    <p className="text-2xl font-bold">{totalSurveysTarget.toLocaleString()}</p>
                     <p className="text-sm text-muted-foreground">Total Target</p>
                   </div>
                   <div className="p-4 bg-green-500/10 rounded-lg">
                     <p className="text-2xl font-bold text-green-600">{totalSurveys.toLocaleString()}</p>
                     <p className="text-sm text-muted-foreground">Completed</p>
                   </div>
+                  <div className="p-4 bg-blue-500/10 rounded-lg">
+                    <p className="text-2xl font-bold text-blue-600">{votersSurveyed.toLocaleString()}</p>
+                    <p className="text-sm text-muted-foreground">Voters Surveyed</p>
+                  </div>
                   <div className="p-4 bg-yellow-500/10 rounded-lg">
                     <p className="text-2xl font-bold text-yellow-600">{pendingSurveys.toLocaleString()}</p>
                     <p className="text-sm text-muted-foreground">Remaining</p>
                   </div>
                 </div>
+
+                {/* Per-survey breakdown */}
+                {stats?.surveyBreakdown && stats.surveyBreakdown.length > 0 && (
+                  <div className="mt-6 pt-6 border-t">
+                    <h4 className="text-sm font-semibold mb-4">Survey Breakdown</h4>
+                    <div className="space-y-3">
+                      {stats.surveyBreakdown.map((survey) => {
+                        // Handle very small completion rates
+                        const surveyHasProgress = survey.completedCount > 0;
+                        const surveyRateDisplay = surveyHasProgress && survey.completionRate === 0
+                          ? '< 0.01'
+                          : survey.completionRate.toString();
+                        const surveyRateForProgress = surveyHasProgress && survey.completionRate === 0
+                          ? 0.5  // Show a tiny sliver on progress bar
+                          : survey.completionRate;
+
+                        return (
+                          <div key={survey.surveyId} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                            <span className="text-sm font-medium">{survey.surveyName}</span>
+                            <div className="flex items-center gap-4">
+                              <span className="text-sm text-muted-foreground">{survey.completedCount.toLocaleString()} completed</span>
+                              <div className="flex items-center gap-2 w-32">
+                                <Progress value={surveyRateForProgress} className="h-2" />
+                                <span className="text-sm font-semibold w-14 text-right">{surveyRateDisplay}%</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </Card>
           </TabsContent>

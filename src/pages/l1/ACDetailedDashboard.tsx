@@ -23,7 +23,7 @@ interface ACStats {
   acNumber: number | null;
   totalFamilies: number;
   totalMembers: number;
-  surveysCompleted: number;
+  surveysCompleted: number; // Legacy: voters with at least one survey
   totalBooths: number;
   boothStats: {
     boothNo: string;
@@ -31,6 +31,17 @@ interface ACStats {
     boothId: string;
     voters: number;
   }[];
+  // NEW: Multi-survey tracking
+  activeSurveysCount?: number;
+  totalSurveysNeeded?: number;
+  totalSurveysCompleted?: number;
+  votersSurveyed?: number;
+  surveyBreakdown?: Array<{
+    surveyId: string;
+    surveyName: string;
+    completedCount: number;
+    completionRate: number;
+  }>;
 }
 
 interface BoothData {
@@ -273,7 +284,8 @@ export const ACDetailedDashboard = () => {
           />
           <StatCard
             title="Surveys Completed"
-            value={(acStats?.surveysCompleted || 0).toLocaleString()}
+            value={`${(acStats?.totalSurveysCompleted || acStats?.surveysCompleted || 0).toLocaleString()} / ${(acStats?.totalSurveysNeeded || acStats?.totalMembers || 0).toLocaleString()}`}
+            subtitle={acStats?.activeSurveysCount ? `${acStats.activeSurveysCount} active survey${acStats.activeSurveysCount > 1 ? 's' : ''} • ${acStats?.votersSurveyed || 0} voters surveyed` : undefined}
             icon={FileCheck}
             variant="success"
           />
@@ -576,23 +588,60 @@ export const ACDetailedDashboard = () => {
               <div className="space-y-4">
                 <div>
                   <div className="flex justify-between mb-2">
-                    <span className="text-sm font-medium">Overall Completion</span>
-                    <span className="text-sm text-muted-foreground">{completionPercentage}%</span>
+                    <span className="text-sm font-medium">Overall Survey Completion</span>
+                    <span className="text-sm text-muted-foreground">
+                      {acStats?.totalSurveysNeeded && acStats.totalSurveysNeeded > 0
+                        ? ((acStats.totalSurveysCompleted || 0) / acStats.totalSurveysNeeded * 100).toFixed(2)
+                        : completionPercentage}%
+                    </span>
                   </div>
                   <div className="w-full bg-muted rounded-full h-2">
-                    <div className="bg-primary h-2 rounded-full" style={{ width: `${completionPercentage}%` }} />
+                    <div
+                      className="bg-primary h-2 rounded-full"
+                      style={{
+                        width: `${acStats?.totalSurveysNeeded && acStats.totalSurveysNeeded > 0
+                          ? Math.min(((acStats.totalSurveysCompleted || 0) / acStats.totalSurveysNeeded * 100), 100)
+                          : completionPercentage}%`
+                      }}
+                    />
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4 mt-6">
+                {acStats?.activeSurveysCount && acStats.activeSurveysCount > 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    {acStats.activeSurveysCount} active survey{acStats.activeSurveysCount > 1 ? 's' : ''} × {(acStats.totalMembers || 0).toLocaleString()} voters = {(acStats.totalSurveysNeeded || 0).toLocaleString()} total surveys needed
+                  </p>
+                )}
+                <div className="grid grid-cols-3 gap-4 mt-6">
                   <div className="p-4 bg-muted rounded-lg">
-                    <p className="text-2xl font-bold text-primary">{(acStats?.surveysCompleted || 0).toLocaleString()}</p>
-                    <p className="text-sm text-muted-foreground">Completed Surveys</p>
+                    <p className="text-2xl font-bold text-primary">{(acStats?.totalSurveysCompleted || acStats?.surveysCompleted || 0).toLocaleString()}</p>
+                    <p className="text-sm text-muted-foreground">Total Surveys Completed</p>
                   </div>
                   <div className="p-4 bg-muted rounded-lg">
-                    <p className="text-2xl font-bold text-warning">{((acStats?.totalMembers || 0) - (acStats?.surveysCompleted || 0)).toLocaleString()}</p>
+                    <p className="text-2xl font-bold text-success">{(acStats?.votersSurveyed || acStats?.surveysCompleted || 0).toLocaleString()}</p>
+                    <p className="text-sm text-muted-foreground">Voters Surveyed</p>
+                  </div>
+                  <div className="p-4 bg-muted rounded-lg">
+                    <p className="text-2xl font-bold text-warning">{((acStats?.totalSurveysNeeded || acStats?.totalMembers || 0) - (acStats?.totalSurveysCompleted || acStats?.surveysCompleted || 0)).toLocaleString()}</p>
                     <p className="text-sm text-muted-foreground">Pending Surveys</p>
                   </div>
                 </div>
+                {/* Per-survey breakdown */}
+                {acStats?.surveyBreakdown && acStats.surveyBreakdown.length > 0 && (
+                  <div className="mt-6">
+                    <h4 className="text-sm font-medium mb-3">Survey Breakdown</h4>
+                    <div className="space-y-2">
+                      {acStats.surveyBreakdown.map((survey) => (
+                        <div key={survey.surveyId} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                          <span className="text-sm font-medium">{survey.surveyName}</span>
+                          <div className="flex items-center gap-4">
+                            <span className="text-sm text-muted-foreground">{survey.completedCount.toLocaleString()} completed</span>
+                            <span className="text-sm font-semibold">{survey.completionRate}%</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </Card>
           </TabsContent>

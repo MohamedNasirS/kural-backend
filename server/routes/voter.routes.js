@@ -16,6 +16,11 @@ import {
   queryAllVoters,
   ALL_AC_IDS,
 } from "../utils/voterCollection.js";
+import {
+  querySurveyResponses,
+  countSurveyResponses,
+} from "../utils/surveyResponseCollection.js";
+import Survey from "../models/Survey.js";
 import { isAuthenticated, canAccessAC } from "../middleware/auth.js";
 import { getCache, setCache, TTL, invalidateCache, invalidateACCache } from "../utils/cache.js";
 import { getPrecomputedStats } from "../utils/precomputedStats.js";
@@ -949,6 +954,89 @@ router.get("/:acId", async (req, res) => {
   } catch (error) {
     console.error("Error fetching voters:", error);
     return sendServerError(res, "Failed to fetch voters", error);
+  }
+});
+
+// Get survey history for a specific voter
+// This endpoint fetches all completed surveys for a voter from surveyresponses collection
+router.get("/:acId/voter/:voterId/surveys", async (req, res) => {
+  try {
+    await connectToDatabase();
+
+    const { acId: rawAcId, voterId } = req.params;
+
+    // Parse AC ID
+    let acId;
+    const numericId = Number(rawAcId);
+    if (!isNaN(numericId) && numericId > 0) {
+      acId = numericId;
+    } else {
+      return sendBadRequest(res, `Invalid AC identifier: ${rawAcId}`);
+    }
+
+    // AC Isolation: Check if user can access this AC
+    if (!canAccessAC(req.user, acId)) {
+      return sendForbidden(res, "Access denied. You do not have permission to view this AC's data.");
+    }
+
+    if (!voterId) {
+      return sendBadRequest(res, "Voter ID is required");
+    }
+
+    // Query survey responses for this voter
+    // The respondentVoterId field links survey responses to voters
+    const surveyResponses = await querySurveyResponses(acId, {
+      $or: [
+        { respondentVoterId: voterId },
+        { voterId: voterId },
+        { voterID: voterId }
+      ]
+    }, {
+      sort: { createdAt: -1 }
+    });
+
+    // Get unique survey IDs to fetch survey names
+    const surveyIds = [...new Set(surveyResponses.map(r => r.formId || r.surveyId).filter(Boolean))];
+
+    // Fetch survey forms to get names
+    const surveyForms = await Survey.find({
+      _id: { $in: surveyIds.map(id => {
+        try {
+          return new mongoose.Types.ObjectId(id);
+        } catch {
+          return id;
+        }
+      })}
+    }).lean();
+
+    const surveyNameMap = new Map();
+    surveyForms.forEach(form => {
+      surveyNameMap.set(form._id.toString(), form.title || 'Survey');
+    });
+
+    // Format the response
+    const completedSurveys = surveyResponses.map(response => {
+      const surveyId = (response.formId || response.surveyId || '').toString();
+      return {
+        surveyId: surveyId,
+        surveyName: surveyNameMap.get(surveyId) || response.formName || 'Survey',
+        completedAt: response.submittedAt || response.createdAt,
+        responseId: response._id?.toString(),
+        boothId: response.booth_id,
+        boothName: response.boothname || response.booth
+      };
+    });
+
+    return sendSuccess(res, {
+      voterId,
+      surveysTaken: completedSurveys.length,
+      lastSurveyAt: completedSurveys.length > 0 ? completedSurveys[0].completedAt : null,
+      completedSurveys
+    });
+
+  } catch (error) {
+    console.error("Error fetching voter survey history:", error);
+    return sendServerError(res, "Failed to fetch voter survey history", error);
   }
 });
 
