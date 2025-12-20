@@ -79,6 +79,7 @@ const BoothManagement = lazy(() => import("@/pages/shared/BoothManagement").then
 const BoothAgentManagementNew = lazy(() => import("@/pages/shared/BoothAgentManagementNew").then(m => ({ default: m.BoothAgentManagementNew })));
 const BoothAgentRegistration = lazy(() => import("@/pages/shared/BoothAgentRegistration"));
 const FormPreview = lazy(() => import("@/pages/shared/FormPreview").then(m => ({ default: m.FormPreview })));
+const NotificationManagement = lazy(() => import("@/pages/shared/NotificationManagement"));
 
 // Lazy load MLA pages
 const MLALayout = lazy(() => import("@/pages/mla/MLALayout"));
@@ -175,6 +176,7 @@ const AppRoutes = () => {
       <Route path="/shared/booth-management" element={<ProtectedRoute allowedRoles={['L0', 'L1', 'L2']}><LazyRoute pageName="Booth Management"><BoothManagement /></LazyRoute></ProtectedRoute>} />
       <Route path="/shared/booth-agent-management" element={<ProtectedRoute allowedRoles={['L0', 'L1', 'L2']}><LazyRoute pageName="Booth Agent Management"><BoothAgentManagementNew /></LazyRoute></ProtectedRoute>} />
       <Route path="/shared/booth-agent-registration" element={<ProtectedRoute allowedRoles={['L0', 'L1']}><LazyRoute pageName="Booth Agent Registration"><BoothAgentRegistration /></LazyRoute></ProtectedRoute>} />
+      <Route path="/shared/notifications" element={<ProtectedRoute allowedRoles={['L0', 'L1', 'L2']}><LazyRoute pageName="Notifications"><NotificationManagement /></LazyRoute></ProtectedRoute>} />
 
       {/* L1 Routes */}
       <Route path="/l1/constituencies" element={<ProtectedRoute allowedRoles={['L1']}><LazyRoute pageName="Constituencies"><ConstituencySelector /></LazyRoute></ProtectedRoute>} />

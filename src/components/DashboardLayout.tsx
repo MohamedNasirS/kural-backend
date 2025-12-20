@@ -38,6 +38,7 @@ import {
   Layers,
   Smartphone,
   Inbox,
+  Bell,
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Separator } from './ui/separator';
@@ -104,6 +105,7 @@ const AppSidebar = () => {
           { icon: ClipboardList, label: 'Survey Responses', path: '/l0/survey-responses' },
           { icon: Smartphone, label: 'Mobile App Question', path: '/l0/mobile-app-questions' },
           { icon: Inbox, label: 'Mobile App Responses', path: '/l0/mobile-app-responses' },
+          { icon: Bell, label: 'Notifications', path: '/shared/notifications' },
           { icon: Home, label: 'Booth Management', path: '/shared/booth-management' },
           { icon: UserCircle, label: 'Booth Agent Management', path: '/shared/booth-agent-management' },
           { icon: ScrollText, label: 'Activity Logs', path: '/l0/activity-logs' },
@@ -136,6 +138,7 @@ const AppSidebar = () => {
           { icon: Activity, label: 'Survey Manager', path: '/l1/survey-manager' },
           { icon: MapPin, label: 'Live Booth Updates', path: '/l1/live-booth-updates' },
           { icon: UserCog, label: 'User Management', path: '/l1/moderators' },
+          { icon: Bell, label: 'Notifications', path: '/shared/notifications' },
           { icon: Home, label: 'Booth Management', path: '/shared/booth-management' },
           { icon: UserCircle, label: 'Booth Agent Management', path: '/shared/booth-agent-management' },
           { icon: TrendingUp, label: 'Advanced Analytics', path: '/l1/advanced-analytics' },
@@ -151,6 +154,7 @@ const AppSidebar = () => {
           { icon: Home, label: 'Family Manager', path: '/l2/families' },
           { icon: FileText, label: 'Survey Forms', path: '/l2/survey-forms' },
           { icon: FileText, label: 'Survey Manager', path: '/l2/surveys' },
+          { icon: Bell, label: 'Notifications', path: '/shared/notifications' },
           { icon: Home, label: 'Booth Management', path: '/shared/booth-management' },
           { icon: UserCircle, label: 'Booth Agent Management', path: '/shared/booth-agent-management' },
           { icon: Activity, label: 'Live Booth Updates', path: '/l2/live-updates' },

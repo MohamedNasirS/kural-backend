@@ -8,13 +8,15 @@
 import User from "./User.js";
 import Booth from "./Booth.js";
 import Survey from "./Survey.js";
+import Notification from "./Notification.js";
 
 // Export models for convenience
-export { User, Booth, Survey };
+export { User, Booth, Survey, Notification };
 
 // Also export as default object
 export default {
   User,
   Booth,
   Survey,
+  Notification,
 };

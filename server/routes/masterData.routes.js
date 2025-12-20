@@ -14,6 +14,7 @@ import {
 import { isAuthenticated, hasRole } from "../middleware/auth.js";
 import { getCache, setCache, invalidateCache, TTL } from "../utils/cache.js";
 import { writeRateLimiter } from "../middleware/rateLimit.js";
+import { onMasterDataUpdated } from "../utils/notificationHelper.js";
 
 const router = express.Router();
 
@@ -339,6 +340,13 @@ router.put("/sections/:sectionId", writeRateLimiter, async (req, res) => {
     // ISS-007 fix: Invalidate cache on write
     invalidateCache(MASTER_SECTIONS_CACHE_KEY);
 
+    // Auto-generate notification for booth agents
+    if (req.user) {
+      onMasterDataUpdated(savedSection || section, req.user).catch((err) => {
+        console.error("[Notification] Failed to create master data notification:", err);
+      });
+    }
+
     return res.json({
       message: "Section updated successfully",
       section: await formatMasterSectionResponse(savedSection || section, true),
@@ -524,6 +532,13 @@ router.put("/sections/:sectionId/questions/:questionId", writeRateLimiter, async
 
     // ISS-007 fix: Invalidate cache on write
     invalidateCache(MASTER_SECTIONS_CACHE_KEY);
+
+    // Auto-generate notification for booth agents (when questions are updated)
+    if (req.user) {
+      onMasterDataUpdated(section, req.user).catch((err) => {
+        console.error("[Notification] Failed to create master data question notification:", err);
+      });
+    }
 
     return res.json({
       message: "Question updated successfully",

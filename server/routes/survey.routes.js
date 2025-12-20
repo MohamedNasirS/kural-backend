@@ -22,6 +22,7 @@ import {
   sendServerError
 } from "../utils/responseHelpers.js";
 import { MESSAGES } from "../config/constants.js";
+import { onSurveyCreated, onSurveyUpdated } from "../utils/notificationHelper.js";
 
 const router = express.Router();
 
@@ -189,6 +190,13 @@ router.post("/", writeRateLimiter, async (req, res) => {
     invalidateCache('surveys:list');
     console.log(`[Cache] Invalidated survey list caches after creating survey "${savedSurvey.title}"`);
 
+    // Auto-generate notification for booth agents
+    if (req.user) {
+      onSurveyCreated(survey, req.user).catch((err) => {
+        console.error("[Notification] Failed to create survey notification:", err);
+      });
+    }
+
     return sendCreated(res, savedSurvey, MESSAGES.success.created);
   } catch (error) {
     console.error("Error creating survey", error);
@@ -263,6 +271,13 @@ router.put("/:surveyId", writeRateLimiter, async (req, res) => {
     invalidateCache('surveys:list');
     invalidateCache(`survey:${surveyId}`);
     console.log(`[Cache] Invalidated survey caches after updating survey "${updatedSurvey.title}"`);
+
+    // Auto-generate notification for booth agents
+    if (req.user) {
+      onSurveyUpdated(survey, req.user).catch((err) => {
+        console.error("[Notification] Failed to create survey update notification:", err);
+      });
+    }
 
     return sendSuccess(res, updatedSurvey, MESSAGES.success.updated);
   } catch (error) {
