@@ -1,4 +1,4 @@
-import { Bell, Filter, RefreshCw, Globe, MapPin, Megaphone, AlertTriangle, Clock, FileText } from 'lucide-react';
+import { Bell, Filter, RefreshCw, Globe, MapPin, Megaphone, AlertTriangle, Clock, FileText, Check } from 'lucide-react';
 import { Button } from './ui/button';
 import {
   Sheet,
@@ -15,6 +15,28 @@ import { formatDistanceToNow } from 'date-fns';
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+
+// localStorage key for read notifications
+const READ_NOTIFICATIONS_KEY = 'kural_read_notifications';
+
+// Get read notification IDs from localStorage
+const getReadNotificationIds = (): Set<string> => {
+  try {
+    const stored = localStorage.getItem(READ_NOTIFICATIONS_KEY);
+    return stored ? new Set(JSON.parse(stored)) : new Set();
+  } catch {
+    return new Set();
+  }
+};
+
+// Save read notification IDs to localStorage
+const saveReadNotificationIds = (ids: Set<string>) => {
+  try {
+    localStorage.setItem(READ_NOTIFICATIONS_KEY, JSON.stringify([...ids]));
+  } catch {
+    console.error('Failed to save read notifications');
+  }
+};
 
 // Database notification interface
 interface DBNotification {
@@ -69,10 +91,37 @@ export const NotificationCenter = () => {
   const [notifications, setNotifications] = useState<DBNotification[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<'all' | 'announcements' | 'surveys'>('all');
+  const [filter, setFilter] = useState<'all' | 'unread' | 'announcements' | 'surveys'>('all');
   const [isOpen, setIsOpen] = useState(false);
+  const [readIds, setReadIds] = useState<Set<string>>(() => getReadNotificationIds());
 
   const canAccessNotifications = user && ['L0', 'L1', 'L2'].includes(user.role);
+
+  // Mark a notification as read
+  const markAsRead = useCallback((id: string) => {
+    setReadIds(prev => {
+      const newSet = new Set(prev);
+      newSet.add(id);
+      saveReadNotificationIds(newSet);
+      return newSet;
+    });
+  }, []);
+
+  // Mark all notifications as read
+  const markAllAsRead = useCallback(() => {
+    setReadIds(prev => {
+      const newSet = new Set(prev);
+      notifications.forEach(n => newSet.add(n.id));
+      saveReadNotificationIds(newSet);
+      return newSet;
+    });
+  }, [notifications]);
+
+  // Check if notification is unread
+  const isUnread = useCallback((id: string) => !readIds.has(id), [readIds]);
+
+  // Count unread notifications
+  const unreadCount = notifications.filter(n => isUnread(n.id)).length;
 
   const fetchNotifications = useCallback(async () => {
     if (!canAccessNotifications) return;
@@ -102,6 +151,7 @@ export const NotificationCenter = () => {
   }, [canAccessNotifications, fetchNotifications]);
 
   const filteredNotifications = notifications.filter((n) => {
+    if (filter === 'unread') return isUnread(n.id);
     if (filter === 'announcements') return ['ANNOUNCEMENT', 'ALERT', 'REMINDER'].includes(n.type);
     if (filter === 'surveys') return ['SURVEY_CREATED', 'SURVEY_UPDATED'].includes(n.type);
     return true;
@@ -125,9 +175,9 @@ export const NotificationCenter = () => {
       <SheetTrigger asChild>
         <Button variant="ghost" size="icon" className="relative">
           <Bell className="h-5 w-5" />
-          {notifications.length > 0 && (
+          {unreadCount > 0 && (
             <Badge className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-xs" variant="destructive">
-              {notifications.length > 9 ? '9+' : notifications.length}
+              {unreadCount > 9 ? '9+' : unreadCount}
             </Badge>
           )}
         </Button>
@@ -136,14 +186,25 @@ export const NotificationCenter = () => {
         <SheetHeader>
           <SheetTitle className="flex items-center justify-between flex-wrap gap-2">
             <span>Notifications</span>
-            <Button variant="ghost" size="sm" onClick={fetchNotifications} disabled={loading} className="h-8">
-              <RefreshCw className={'h-4 w-4 ' + spinClass} />
-            </Button>
+            <div className="flex items-center gap-1">
+              {unreadCount > 0 && (
+                <Button variant="ghost" size="sm" onClick={markAllAsRead} className="h-8 text-xs">
+                  <Check className="h-4 w-4 mr-1" />
+                  Mark all read
+                </Button>
+              )}
+              <Button variant="ghost" size="sm" onClick={fetchNotifications} disabled={loading} className="h-8">
+                <RefreshCw className={'h-4 w-4 ' + spinClass} />
+              </Button>
+            </div>
           </SheetTitle>
           <SheetDescription className="flex items-center gap-2 flex-wrap">
             <Filter className="h-3 w-3 flex-shrink-0" />
             <Button variant={filter === 'all' ? 'default' : 'ghost'} size="sm" onClick={() => setFilter('all')} className="h-7 text-xs">
               All ({notifications.length})
+            </Button>
+            <Button variant={filter === 'unread' ? 'default' : 'ghost'} size="sm" onClick={() => setFilter('unread')} className="h-7 text-xs">
+              Unread ({unreadCount})
             </Button>
             <Button variant={filter === 'announcements' ? 'default' : 'ghost'} size="sm" onClick={() => setFilter('announcements')} className="h-7 text-xs">
               Announcements ({announcementCount})
@@ -174,10 +235,19 @@ export const NotificationCenter = () => {
           ) : (
             <div className="space-y-2">
               {filteredNotifications.map((notification) => (
-                <div key={notification.id} className="p-3 rounded-lg border bg-card hover:shadow-md transition-all">
+                <div
+                  key={notification.id}
+                  onClick={() => markAsRead(notification.id)}
+                  className={'p-3 rounded-lg border hover:shadow-md transition-all cursor-pointer ' + (isUnread(notification.id) ? 'bg-blue-50 border-blue-200' : 'bg-card')}
+                >
                   <div className="flex items-start gap-3">
-                    <div className={'p-2 rounded-full ' + (typeColors[notification.type] || 'bg-gray-100')}>
-                      {getTypeIcon(notification.type)}
+                    <div className="relative">
+                      {isUnread(notification.id) && (
+                        <span className="absolute -top-1 -left-1 h-2 w-2 bg-blue-500 rounded-full" />
+                      )}
+                      <div className={'p-2 rounded-full ' + (typeColors[notification.type] || 'bg-gray-100')}>
+                        {getTypeIcon(notification.type)}
+                      </div>
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2">
