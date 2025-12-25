@@ -210,11 +210,11 @@ export default function MLADashboard() {
     { name: 'Flippable', value: overview.boothSentiment.flippable.count, color: SENTIMENT_COLORS.flippable },
   ];
 
-  const genderChartData = genderData
+  const genderChartData = genderData?.genderDistribution
     ? [
-        { name: 'Male', value: genderData.genderDistribution.male.count },
-        { name: 'Female', value: genderData.genderDistribution.female.count },
-        { name: 'Others', value: genderData.genderDistribution.transgender.count },
+        { name: 'Male', value: genderData.genderDistribution.male?.count || 0 },
+        { name: 'Female', value: genderData.genderDistribution.female?.count || 0 },
+        { name: 'Others', value: genderData.genderDistribution.transgender?.count || 0 },
       ]
     : [];
 
@@ -716,9 +716,9 @@ export default function MLADashboard() {
                   <CardContent>
                     <BeautifulDonutChart
                       data={[
-                        { name: 'Male', value: currentVoterStats.currentVoterRoll.genderDistribution.male.count, color: '#3b82f6' },
-                        { name: 'Female', value: currentVoterStats.currentVoterRoll.genderDistribution.female.count, color: '#ec4899' },
-                        { name: 'Others', value: currentVoterStats.currentVoterRoll.genderDistribution.others.count, color: '#8b5cf6' },
+                        { name: 'Male', value: currentVoterStats.currentVoterRoll.genderDistribution?.male?.count || 0, color: '#3b82f6' },
+                        { name: 'Female', value: currentVoterStats.currentVoterRoll.genderDistribution?.female?.count || 0, color: '#ec4899' },
+                        { name: 'Others', value: currentVoterStats.currentVoterRoll.genderDistribution?.others?.count || 0, color: '#8b5cf6' },
                       ].filter(d => d.value > 0)}
                       height={280}
                       valueLabel="Voters"
@@ -743,26 +743,26 @@ export default function MLADashboard() {
                     <div className="p-3 bg-muted/50 rounded-lg">
                       <div className="text-muted-foreground">Male Voters</div>
                       <div className="text-lg font-bold text-blue-600 dark:text-blue-400">
-                        {currentVoterStats.currentVoterRoll.genderDistribution.male.count.toLocaleString()}
-                        <span className="text-xs font-normal ml-1">({currentVoterStats.currentVoterRoll.genderDistribution.male.percentage.toFixed(1)}%)</span>
+                        {(currentVoterStats.currentVoterRoll.genderDistribution?.male?.count || 0).toLocaleString()}
+                        <span className="text-xs font-normal ml-1">({(currentVoterStats.currentVoterRoll.genderDistribution?.male?.percentage || 0).toFixed(1)}%)</span>
                       </div>
                     </div>
                     <div className="p-3 bg-muted/50 rounded-lg">
                       <div className="text-muted-foreground">Female Voters</div>
                       <div className="text-lg font-bold text-pink-600 dark:text-pink-400">
-                        {currentVoterStats.currentVoterRoll.genderDistribution.female.count.toLocaleString()}
-                        <span className="text-xs font-normal ml-1">({currentVoterStats.currentVoterRoll.genderDistribution.female.percentage.toFixed(1)}%)</span>
+                        {(currentVoterStats.currentVoterRoll.genderDistribution?.female?.count || 0).toLocaleString()}
+                        <span className="text-xs font-normal ml-1">({(currentVoterStats.currentVoterRoll.genderDistribution?.female?.percentage || 0).toFixed(1)}%)</span>
                       </div>
                     </div>
                     <div className="p-3 bg-muted/50 rounded-lg">
                       <div className="text-muted-foreground">Others</div>
                       <div className="text-lg font-bold text-purple-600 dark:text-purple-400">
-                        {currentVoterStats.currentVoterRoll.genderDistribution.others.count.toLocaleString()}
+                        {(currentVoterStats.currentVoterRoll.genderDistribution?.others?.count || 0).toLocaleString()}
                         <span className="text-xs font-normal ml-1">
-                          ({currentVoterStats.currentVoterRoll.genderDistribution.others.count > 0 &&
-                            currentVoterStats.currentVoterRoll.genderDistribution.others.percentage < 0.1
+                          ({(currentVoterStats.currentVoterRoll.genderDistribution?.others?.count || 0) > 0 &&
+                            (currentVoterStats.currentVoterRoll.genderDistribution?.others?.percentage || 0) < 0.1
                             ? '< 0.1'
-                            : currentVoterStats.currentVoterRoll.genderDistribution.others.percentage.toFixed(1)}%)
+                            : (currentVoterStats.currentVoterRoll.genderDistribution?.others?.percentage || 0).toFixed(1)}%)
                         </span>
                       </div>
                     </div>
