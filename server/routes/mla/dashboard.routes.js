@@ -209,7 +209,16 @@ router.get('/:acId/gender-distribution', async (req, res) => {
     // Try to use cached data first
     const cached = await getMLAPrecomputedStats(acId);
     if (cached && cached.genderDistribution && !cached.isStale) {
-      return res.json(cached.genderDistribution);
+      // Return in same format as live query
+      return res.json({
+        genderDistribution: {
+          male: cached.genderDistribution.male,
+          female: cached.genderDistribution.female,
+          transgender: cached.genderDistribution.transgender,
+        },
+        total: cached.genderDistribution.total,
+        note: cached.genderDistribution.note,
+      });
     }
 
     // Fall back to live query
