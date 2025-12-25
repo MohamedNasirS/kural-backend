@@ -24,11 +24,16 @@ npm ci
 echo "==> Building application"
 npm run build
 
-echo "==> Restarting PM2 process: ${PM2_PROCESS_NAME}"
-pm2 restart "${PM2_PROCESS_NAME}" --update-env || {
-  echo "==> Process not found, starting fresh with ecosystem.config.cjs"
-  pm2 start ecosystem.config.cjs --env production --update-env
-}
+echo "==> Stopping PM2 process: ${PM2_PROCESS_NAME}"
+pm2 stop "${PM2_PROCESS_NAME}" 2>/dev/null || true
+
+echo "==> Killing any stale processes on port 4000"
+fuser -k 4000/tcp 2>/dev/null || true
+sleep 1
+
+echo "==> Starting PM2 process: ${PM2_PROCESS_NAME}"
+pm2 delete "${PM2_PROCESS_NAME}" 2>/dev/null || true
+pm2 start ecosystem.config.cjs --env production --update-env
 
 echo "==> Deployment complete"
 pm2 list
