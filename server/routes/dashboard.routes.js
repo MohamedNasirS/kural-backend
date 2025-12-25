@@ -80,6 +80,13 @@ router.get("/stats/:acId", async (req, res) => {
         totalSurveysCompleted: precomputed.totalSurveysCompleted || 0,
         votersSurveyed: precomputed.votersSurveyed || precomputed.surveysCompleted || 0,
         surveyBreakdown: precomputed.surveyBreakdown || [],
+        // SIR Statistics
+        sirStats: precomputed.sirStats || {
+          activeVoters: precomputed.totalMembers || 0,
+          removedVoters: 0,
+          activePercentage: 100,
+          removedPercentage: 0
+        },
         _source: 'precomputed',
         _computedAt: precomputed.computedAt
       };
@@ -114,17 +121,20 @@ router.get("/stats/:acId", async (req, res) => {
         { $count: "total" }
       ]),
       aggregateVoters(acId, [
-        { $match: { booth_id: { $exists: true, $ne: null } } },
+        // Only count booths with active voters
+        { $match: { booth_id: { $exists: true, $ne: null }, isActive: { $ne: false } } },
         { $group: { _id: "$booth_id" } },
         { $count: "total" }
       ]),
       aggregateVoters(acId, [
-        { $match: {} },
+        // Only count active voters for booth stats
+        { $match: { isActive: { $ne: false } } },
         {
           $group: {
-            _id: "$boothname",
+            _id: "$booth_id",
             boothno: { $first: "$boothno" },
-            booth_id: { $first: "$booth_id" },
+            // Collect all unique booth names to pick the best one
+            boothnames: { $addToSet: "$boothname" },
             voters: { $sum: 1 }
           }
         },
@@ -135,6 +145,24 @@ router.get("/stats/:acId", async (req, res) => {
     const totalFamilies = familiesAggregation[0]?.total || 0;
     const totalBooths = boothsAggregation[0]?.total || 0;
 
+    // Helper function to select the best booth name
+    const selectBestBoothName = (boothnames, boothNumber) => {
+      if (!boothnames || boothnames.length === 0) return `Booth ${boothNumber}`;
+      const validNames = boothnames.filter(n => n && n.trim());
+      if (validNames.length === 0) return `Booth ${boothNumber}`;
+      // Prefer names with booth number prefix (e.g., "1- Corporation...")
+      const withPrefix = validNames.find(n => /^\d+[-\s]/.test(n));
+      if (withPrefix) return withPrefix;
+      // Otherwise pick the shortest name
+      return validNames.reduce((s, c) => c.length < s.length ? c : s, validNames[0]);
+    };
+
+    // Compute SIR stats for realtime path
+    const [sirActiveCount, sirRemovedCount] = await Promise.all([
+      countVoters(acId, { $or: [{ isActive: true }, { isActive: { $exists: false } }] }),
+      countVoters(acId, { isActive: false })
+    ]);
+
     const responseData = {
       acIdentifier: acName || String(acId),
       acId: acId,
@@ -144,12 +172,25 @@ router.get("/stats/:acId", async (req, res) => {
       totalMembers,
       surveysCompleted,
       totalBooths,
-      boothStats: boothStats.map((booth) => ({
-        boothNo: booth.boothno,
-        boothName: booth._id,
-        boothId: booth.booth_id,
-        voters: booth.voters,
-      })),
+      boothStats: boothStats.map((booth) => {
+        const boothNumber = booth.boothno || 0;
+        const selectedName = selectBestBoothName(booth.boothnames, boothNumber);
+        const hasNumberPrefix = /^\d+[-\s]/.test(selectedName);
+        const displayName = hasNumberPrefix ? selectedName : `${boothNumber}- ${selectedName}`;
+        return {
+          boothNo: boothNumber,
+          boothName: displayName,
+          boothId: booth._id,
+          voters: booth.voters,
+        };
+      }),
+      // SIR Statistics
+      sirStats: {
+        activeVoters: sirActiveCount || totalMembers,
+        removedVoters: sirRemovedCount || 0,
+        activePercentage: totalMembers > 0 ? Math.round((sirActiveCount / totalMembers) * 10000) / 100 : 100,
+        removedPercentage: totalMembers > 0 ? Math.round((sirRemovedCount / totalMembers) * 10000) / 100 : 0
+      },
       _source: 'realtime'
     };
 

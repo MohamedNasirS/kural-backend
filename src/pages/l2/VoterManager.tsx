@@ -19,20 +19,43 @@ interface CompletedSurvey {
 interface Voter {
   id: string;
   name: string;
+  nameTamil?: string;
   voterId: string;
   familyId: string;
   booth: string;
+  boothTamil?: string;
   boothNo: number;
+  boothId?: string;
   phone: string;
   status: string;
   age?: number;
   gender?: string;
   verified?: boolean;
   surveyed?: boolean;
+  address?: string;
+  addressTamil?: string;
+  doorNumber?: string;
   // Survey history fields (populated when viewing details)
   surveysTaken?: number;
   lastSurveyAt?: string;
   completedSurveys?: CompletedSurvey[];
+  // SIR Fields
+  isActive?: boolean;
+  isNewFromSir?: boolean;
+  currentSirStatus?: 'passed' | 'removed' | 'reinstated' | 'new';
+  currentSirRevision?: string;
+  // Relative Info
+  relative?: {
+    name?: { english?: string; tamil?: string };
+    relation?: string;
+  };
+  // Ward Info
+  wardNo?: number;
+  wardName?: string;
+  wardNameEnglish?: string;
+  // AC Info
+  aciId?: number;
+  aciName?: string;
 }
 
 interface Pagination {
@@ -53,6 +76,7 @@ export const VoterManager = () => {
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [boothFilter, setBoothFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [sirFilter, setSirFilter] = useState<string>('active'); // 'all' | 'active' | 'removed'
   const [selectedVoter, setSelectedVoter] = useState<any>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   
@@ -85,7 +109,7 @@ export const VoterManager = () => {
   // Fetch voters when filters change
   useEffect(() => {
     fetchVoters();
-  }, [acIdentifier, boothFilter, statusFilter, pagination.page]);
+  }, [acIdentifier, boothFilter, statusFilter, sirFilter, pagination.page]);
 
   const fetchBooths = async () => {
     try {
@@ -126,6 +150,15 @@ export const VoterManager = () => {
       if (statusFilter && statusFilter !== 'all') {
         params.append('status', statusFilter);
       }
+
+      // SIR Filter
+      if (sirFilter === 'all') {
+        params.append('includeRemoved', 'true');
+      } else if (sirFilter === 'removed') {
+        params.append('includeRemoved', 'true');
+        params.append('sirStatus', 'removed');
+      }
+      // 'active' is default - no param needed
 
       if (searchTerm.trim()) {
         params.append('search', searchTerm.trim());
@@ -244,6 +277,16 @@ export const VoterManager = () => {
                 <SelectItem value="Not Contacted">Not Contacted</SelectItem>
               </SelectContent>
             </Select>
+            <Select value={sirFilter} onValueChange={setSirFilter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="SIR Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="active">Active (SIR Passed)</SelectItem>
+                <SelectItem value="removed">Removed from SIR</SelectItem>
+                <SelectItem value="all">All Voters</SelectItem>
+              </SelectContent>
+            </Select>
             <Button variant="outline" onClick={handleSearch}>
               <Filter className="mr-2 h-4 w-4" />
               Apply
@@ -293,21 +336,32 @@ export const VoterManager = () => {
                   <th className="px-4 py-3 text-left text-sm font-semibold">Family ID</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Booth</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Phone</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold">Status</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold">Survey</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold">SIR Status</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {loading ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
+                    <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">
                       Loading voters...
                     </td>
                   </tr>
                 ) : voters.length > 0 ? (
                   voters.map((voter) => (
-                    <tr key={voter.id} className="hover:bg-muted/50">
-                      <td className="px-4 py-3 text-sm font-medium">{voter.name}</td>
+                    <tr key={voter.id} className={`hover:bg-muted/50 ${voter.isActive === false ? 'opacity-60' : ''}`}>
+                      <td className="px-4 py-3 text-sm font-medium">
+                        <div className="flex items-center gap-2">
+                          {voter.isActive === false && <span className="line-through">{voter.name}</span>}
+                          {voter.isActive !== false && voter.name}
+                          {(voter.isNewFromSir || voter.currentSirStatus === 'new') && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-500 text-white">
+                              NEW
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-4 py-3 text-sm">{voter.voterId}</td>
                       <td className="px-4 py-3 text-sm">{voter.familyId}</td>
                       <td className="px-4 py-3 text-sm">{voter.booth}</td>
@@ -322,6 +376,13 @@ export const VoterManager = () => {
                         </span>
                       </td>
                       <td className="px-4 py-3">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          voter.isActive === false ? 'bg-destructive/10 text-destructive' : 'bg-green-100 text-green-800'
+                        }`}>
+                          {voter.isActive === false ? 'Removed' : 'Active'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
                         <Button variant="ghost" size="sm" onClick={() => handleViewDetails(voter)}>
                           <Eye className="h-4 w-4" />
                         </Button>
@@ -330,7 +391,7 @@ export const VoterManager = () => {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
+                    <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">
                       No voters found for the selected filters.
                     </td>
                   </tr>

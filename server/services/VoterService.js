@@ -722,6 +722,35 @@ function formatVoterResponse(voter) {
 }
 
 /**
+ * Helper function to select the best booth name from multiple options
+ * Prefers names with booth number prefix (e.g., "1- Corporation...") over Tamil names
+ */
+function selectBestBoothName(boothnames, boothNumber) {
+  if (!boothnames || boothnames.length === 0) {
+    return `Booth ${boothNumber}`;
+  }
+
+  // Filter out null/undefined/empty values
+  const validNames = boothnames.filter(name => name && name.trim());
+  if (validNames.length === 0) {
+    return `Booth ${boothNumber}`;
+  }
+
+  // Prefer names that already have the booth number prefix (e.g., "1- Corporation...")
+  const withNumberPrefix = validNames.find(name => /^\d+[-\s]/.test(name));
+  if (withNumberPrefix) {
+    return withNumberPrefix;
+  }
+
+  // Otherwise, pick the shortest name (usually the English format)
+  const shortestName = validNames.reduce((shortest, current) => {
+    return current.length < shortest.length ? current : shortest;
+  }, validNames[0]);
+
+  return shortestName;
+}
+
+/**
  * Get distinct booths for an AC
  * @param {number} acId - AC ID
  * @returns {Promise<Array>} Array of booths
@@ -734,7 +763,8 @@ export async function getBoothsByAC(acId) {
       $group: {
         _id: "$booth_id",
         boothno: { $first: "$boothno" },
-        boothname: { $first: "$boothname" },
+        // Collect all unique booth names to pick the best one
+        boothnames: { $addToSet: "$boothname" },
         voterCount: { $sum: 1 }
       }
     },
@@ -743,15 +773,24 @@ export async function getBoothsByAC(acId) {
 
   return boothsAggregation
     .filter((booth) => booth._id != null && booth._id !== "")
-    .map((booth) => ({
-      boothId: booth._id,
-      booth_id: booth._id,
-      boothNo: booth.boothno,
-      boothName: booth.boothname || `Booth ${booth.boothno}`,
-      voterCount: booth.voterCount,
-      label: booth.boothname || `Booth ${booth.boothno}`,
-      displayName: `${booth._id} - ${booth.boothname || `Booth ${booth.boothno}`}`
-    }));
+    .map((booth) => {
+      const boothNumber = booth.boothno || 0;
+      // Select the best booth name from available options
+      const selectedName = selectBestBoothName(booth.boothnames, boothNumber);
+      // Check if name already has booth number prefix - if not, add it
+      const hasNumberPrefix = /^\d+[-\s]/.test(selectedName);
+      const displayName = hasNumberPrefix ? selectedName : `${boothNumber}- ${selectedName}`;
+
+      return {
+        boothId: booth._id,
+        booth_id: booth._id,
+        boothNo: boothNumber,
+        boothName: displayName,
+        voterCount: booth.voterCount,
+        label: displayName,
+        displayName: `${booth._id} - ${displayName}`
+      };
+    });
 }
 
 export default {

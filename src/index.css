@@ -378,4 +378,33 @@
   [data-sidebar="content"]::-webkit-scrollbar {
     display: none; /* Chrome, Safari, Opera */
   }
+
+  /* Fix for Recharts pie chart focus outline/selection rectangle */
+  .recharts-surface,
+  .recharts-pie,
+  .recharts-pie-sector,
+  .recharts-sector {
+    outline: none !important;
+  }
+
+  .recharts-wrapper {
+    outline: none !important;
+  }
+
+  .recharts-surface:focus,
+  .recharts-pie:focus,
+  .recharts-pie-sector:focus,
+  .recharts-sector:focus {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Remove selection highlight on pie chart click */
+  .recharts-layer.recharts-pie-sector:focus-visible {
+    outline: none !important;
+  }
+
+  svg.recharts-surface *:focus {
+    outline: none !important;
+  }
 }

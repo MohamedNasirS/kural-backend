@@ -160,7 +160,7 @@ const AppRoutes = () => {
       <Route path="/l0/dashboard" element={<ProtectedRoute allowedRoles={['L0']}><LazyRoute pageName="System Dashboard"><L0Dashboard /></LazyRoute></ProtectedRoute>} />
       <Route path="/l0/users" element={<ProtectedRoute allowedRoles={['L0']}><LazyRoute pageName="User Management"><UserManagement /></LazyRoute></ProtectedRoute>} />
       <Route path="/l0/settings" element={<ProtectedRoute allowedRoles={['L0']}><LazyRoute pageName="App Settings"><AppSettings /></LazyRoute></ProtectedRoute>} />
-      <Route path="/l0/voters" element={<ProtectedRoute allowedRoles={['L0']}><LazyRoute pageName="Voter Data"><VoterData /></LazyRoute></ProtectedRoute>} />
+      <Route path="/l0/voters" element={<ProtectedRoute allowedRoles={['L0']}><LazyRoute pageName="Voter Manager"><GlobalVoterManager /></LazyRoute></ProtectedRoute>} />
       <Route path="/l0/voter-fields" element={<ProtectedRoute allowedRoles={['L0']}><LazyRoute pageName="Voter Fields"><VoterFieldManager /></LazyRoute></ProtectedRoute>} />
       <Route path="/l0/surveys" element={<ProtectedRoute allowedRoles={['L0']}><LazyRoute pageName="Survey Bank"><SurveyBank /></LazyRoute></ProtectedRoute>} />
       <Route path="/l0/survey-responses" element={<ProtectedRoute allowedRoles={['L0']}><LazyRoute pageName="Survey Responses"><SurveyResponses /></LazyRoute></ProtectedRoute>} />

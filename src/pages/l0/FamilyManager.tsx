@@ -194,7 +194,7 @@ export const FamilyManager = () => {
                 <SelectItem value="all">All Booths ({booths.length})</SelectItem>
                 {booths.map((booth) => (
                   <SelectItem key={booth.boothId} value={booth.boothId}>
-                    {booth.boothName || booth.label || booth.boothId} ({booth.boothNo || booth.boothId.split('-')[0]})
+                    {booth.boothName || booth.label || booth.boothId}
                   </SelectItem>
                 ))}
               </SelectContent>

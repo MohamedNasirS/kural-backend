@@ -396,7 +396,7 @@ export const ACSurveyManager = () => {
                 <SelectItem value="all">All Booths ({booths.length})</SelectItem>
                 {booths.map((booth) => (
                   <SelectItem key={booth.boothId} value={booth.boothId}>
-                    {booth.boothName || booth.label} ({booth.boothNo})
+                    {booth.boothName || booth.label}
                   </SelectItem>
                 ))}
               </SelectContent>

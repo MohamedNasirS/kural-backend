@@ -62,6 +62,7 @@ import { setupSwagger } from "./config/swagger.js";
 
 // Import pre-computed stats for background job
 import { startStatsComputeJob } from "./utils/precomputedStats.js";
+import { startMLAStatsComputeJob } from "./utils/mlaPrecomputedStats.js";
 import { connectToDatabase } from "./config/database.js";
 
 logger.info({ pid: process.pid }, 'Starting server initialization');
@@ -250,6 +251,10 @@ if (isPrimaryWorker) {
       await connectToDatabase();
       logger.info({ pid: process.pid }, 'Starting pre-computed stats background job');
       startStatsComputeJob(5 * 60 * 1000); // Every 5 minutes
+
+      // Start MLA dashboard stats job
+      logger.info({ pid: process.pid }, 'Starting MLA pre-computed stats background job');
+      startMLAStatsComputeJob(10 * 60 * 1000); // Every 10 minutes
     } catch (err) {
       logger.error({ error: err.message }, 'Failed to start stats background job');
     }

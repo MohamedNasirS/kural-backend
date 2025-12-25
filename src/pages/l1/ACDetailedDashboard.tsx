@@ -5,7 +5,8 @@ import { StatCard } from '@/components/StatCard';
 import { ActionButton } from '@/components/ActionButton';
 import { Card } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Users, Home, FileCheck, MapPin, Activity, Clock, TrendingUp, LineChart, Loader2, UserCheck, Phone } from 'lucide-react';
+import { ResponsiveTabsList } from '@/components/responsive';
+import { Users, Home, FileCheck, MapPin, Activity, Clock, TrendingUp, LineChart, Loader2, UserCheck, UserX, UserPlus, Phone } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { BeautifulLineChart, BeautifulBarChart } from '@/components/charts';
@@ -42,6 +43,16 @@ interface ACStats {
     completedCount: number;
     completionRate: number;
   }>;
+  // SIR Statistics
+  sirStats?: {
+    activeVoters: number;
+    removedVoters: number;
+    newVoters: number;
+    activePercentage: number;
+    removedPercentage: number;
+    newPercentage: number;
+    currentRevision: string | null;
+  };
 }
 
 interface BoothData {
@@ -296,6 +307,44 @@ export const ACDetailedDashboard = () => {
             variant="warning"
           />
         </div>
+
+        {/* SIR Statistics - Show if SIR data exists */}
+        {acStats?.sirStats && (acStats.sirStats.removedVoters > 0 || acStats.sirStats.newVoters > 0) && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard
+              title="SIR Active Voters"
+              value={(acStats?.sirStats?.activeVoters || 0).toLocaleString()}
+              subtitle={`${acStats?.sirStats?.activePercentage?.toFixed(2) || 100}% of total`}
+              icon={UserCheck}
+              variant="success"
+              compact
+            />
+            <StatCard
+              title="SIR Removed Voters"
+              value={(acStats?.sirStats?.removedVoters || 0).toLocaleString()}
+              subtitle={`${acStats?.sirStats?.removedPercentage?.toFixed(2) || 0}% of total`}
+              icon={UserX}
+              variant="destructive"
+              compact
+            />
+            <StatCard
+              title="New Voters (SIR)"
+              value={(acStats?.sirStats?.newVoters || 0).toLocaleString()}
+              subtitle={`${acStats?.sirStats?.newPercentage?.toFixed(2) || 0}% of total`}
+              icon={UserPlus}
+              variant="info"
+              compact
+            />
+            <StatCard
+              title="SIR Coverage"
+              value={`${((acStats?.sirStats?.activeVoters || 0) + (acStats?.sirStats?.removedVoters || 0)).toLocaleString()}`}
+              subtitle={acStats?.sirStats?.currentRevision ? `SIR: ${acStats.sirStats.currentRevision}` : "Voters with SIR status"}
+              icon={Users}
+              variant="primary"
+              compact
+            />
+          </div>
+        )}
 
         <Separator />
 

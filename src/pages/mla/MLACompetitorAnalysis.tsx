@@ -3,13 +3,13 @@
  * Shows detailed party-wise performance analysis
  */
 
-import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
 import { PARTY_COLORS, OTHERS_COLOR } from '@/lib/chartColors';
 import { BeautifulDonutChart, BeautifulBarChart } from '@/components/charts';
+import { useMLACompetitorAnalysis } from '@/hooks/useMLADashboard';
 
 interface Competitor {
   party: string;
@@ -32,31 +32,12 @@ interface CompetitorData {
 export default function MLACompetitorAnalysis() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [data, setData] = useState<CompetitorData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   const acId = user?.assignedAC;
 
-  useEffect(() => {
-    const fetchData = async () => {
-      if (!acId) return;
-
-      try {
-        setLoading(true);
-        const res = await fetch(`/api/mla-dashboard/${acId}/competitor-analysis`);
-        if (!res.ok) throw new Error('Failed to fetch competitor analysis');
-        const json = await res.json();
-        setData(json);
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, [acId]);
+  // React Query hook - data is cached for 5 minutes
+  const { data: queryData, isLoading: loading, error } = useMLACompetitorAnalysis(acId);
+  const data = queryData as CompetitorData | undefined;
 
   // Get party color from centralized config
   const getPartyColor = (party: string) => {
@@ -74,7 +55,7 @@ export default function MLACompetitorAnalysis() {
   if (error) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-red-500">Error: {error}</div>
+        <div className="text-red-500">Error: {(error as Error).message}</div>
       </div>
     );
   }
@@ -82,7 +63,7 @@ export default function MLACompetitorAnalysis() {
   if (!data) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">No data available</div>
+        <div className="text-muted-foreground">No data available</div>
       </div>
     );
   }
@@ -108,43 +89,43 @@ export default function MLACompetitorAnalysis() {
     <div className="space-y-6">
       {/* Head-to-Head Comparison */}
       {data.ourParty && data.mainOpponent && (
-        <Card>
+        <Card className="dark:bg-card">
           <CardHeader>
-            <CardTitle>Head-to-Head: AIADMK vs DMK</CardTitle>
+            <CardTitle className="dark:text-foreground">Head-to-Head: AIADMK vs DMK</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 gap-6">
-              <div className="text-center p-6 bg-green-50 rounded-lg">
-                <div className="text-4xl font-bold text-green-600">{data.ourParty.voteSharePercent}%</div>
-                <div className="text-lg font-semibold mt-2">AIADMK</div>
-                <div className="text-sm text-gray-600 mt-1">
+              <div className="text-center p-6 bg-green-50 dark:bg-green-950/30 rounded-lg">
+                <div className="text-4xl font-bold text-green-600 dark:text-green-400">{data.ourParty.voteSharePercent}%</div>
+                <div className="text-lg font-semibold mt-2 dark:text-foreground">AIADMK</div>
+                <div className="text-sm text-muted-foreground mt-1">
                   {data.ourParty.totalVotes.toLocaleString()} votes
                 </div>
-                <div className="mt-4 text-sm">
+                <div className="mt-4 text-sm dark:text-foreground">
                   <span className="font-semibold">{data.ourParty.boothsWon}</span> booths won
-                  <span className="text-gray-500 ml-2">({data.ourParty.winRate}% win rate)</span>
+                  <span className="text-muted-foreground ml-2">({data.ourParty.winRate}% win rate)</span>
                 </div>
               </div>
-              <div className="text-center p-6 bg-red-50 rounded-lg">
-                <div className="text-4xl font-bold text-red-600">{data.mainOpponent.voteSharePercent}%</div>
-                <div className="text-lg font-semibold mt-2">DMK</div>
-                <div className="text-sm text-gray-600 mt-1">
+              <div className="text-center p-6 bg-red-50 dark:bg-red-950/30 rounded-lg">
+                <div className="text-4xl font-bold text-red-600 dark:text-red-400">{data.mainOpponent.voteSharePercent}%</div>
+                <div className="text-lg font-semibold mt-2 dark:text-foreground">DMK</div>
+                <div className="text-sm text-muted-foreground mt-1">
                   {data.mainOpponent.totalVotes.toLocaleString()} votes
                 </div>
-                <div className="mt-4 text-sm">
+                <div className="mt-4 text-sm dark:text-foreground">
                   <span className="font-semibold">{data.mainOpponent.boothsWon}</span> booths won
-                  <span className="text-gray-500 ml-2">({data.mainOpponent.winRate}% win rate)</span>
+                  <span className="text-muted-foreground ml-2">({data.mainOpponent.winRate}% win rate)</span>
                 </div>
               </div>
             </div>
             <div className="mt-4 text-center">
-              <div className="text-sm text-gray-600">
+              <div className="text-sm text-muted-foreground">
                 Margin:{' '}
                 <span
                   className={`font-bold ${
                     data.ourParty.voteSharePercent > data.mainOpponent.voteSharePercent
-                      ? 'text-green-600'
-                      : 'text-red-600'
+                      ? 'text-green-600 dark:text-green-400'
+                      : 'text-red-600 dark:text-red-400'
                   }`}
                 >
                   {(data.ourParty.voteSharePercent - data.mainOpponent.voteSharePercent).toFixed(1)}%
@@ -158,9 +139,9 @@ export default function MLACompetitorAnalysis() {
       {/* Charts Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Vote Share Pie Chart */}
-        <Card>
+        <Card className="dark:bg-card">
           <CardHeader>
-            <CardTitle className="text-base">Vote Share Distribution</CardTitle>
+            <CardTitle className="text-base dark:text-foreground">Vote Share Distribution</CardTitle>
           </CardHeader>
           <CardContent>
             <BeautifulDonutChart
@@ -177,9 +158,9 @@ export default function MLACompetitorAnalysis() {
         </Card>
 
         {/* Booths Won Bar Chart */}
-        <Card>
+        <Card className="dark:bg-card">
           <CardHeader>
-            <CardTitle className="text-base">Booths Won by Party</CardTitle>
+            <CardTitle className="text-base dark:text-foreground">Booths Won by Party</CardTitle>
           </CardHeader>
           <CardContent>
             <BeautifulBarChart
@@ -197,28 +178,28 @@ export default function MLACompetitorAnalysis() {
       </div>
 
       {/* All Parties Table */}
-      <Card>
+      <Card className="dark:bg-card">
         <CardHeader>
-          <CardTitle>All Parties Performance</CardTitle>
+          <CardTitle className="dark:text-foreground">All Parties Performance</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b bg-gray-50">
-                  <th className="text-left py-3 px-4">Rank</th>
-                  <th className="text-left py-3 px-4">Party</th>
-                  <th className="text-right py-3 px-4">Total Votes</th>
-                  <th className="text-right py-3 px-4">Vote Share</th>
-                  <th className="text-right py-3 px-4">Booths Contested</th>
-                  <th className="text-right py-3 px-4">Booths Won</th>
-                  <th className="text-right py-3 px-4">Win Rate</th>
+                <tr className="border-b dark:border-border bg-muted/50 dark:bg-muted/20">
+                  <th className="text-left py-3 px-4 dark:text-foreground">Rank</th>
+                  <th className="text-left py-3 px-4 dark:text-foreground">Party</th>
+                  <th className="text-right py-3 px-4 dark:text-foreground">Total Votes</th>
+                  <th className="text-right py-3 px-4 dark:text-foreground">Vote Share</th>
+                  <th className="text-right py-3 px-4 dark:text-foreground">Booths Contested</th>
+                  <th className="text-right py-3 px-4 dark:text-foreground">Booths Won</th>
+                  <th className="text-right py-3 px-4 dark:text-foreground">Win Rate</th>
                 </tr>
               </thead>
               <tbody>
                 {data.competitors.map((competitor, index) => (
-                  <tr key={competitor.party} className="border-b hover:bg-gray-50">
-                    <td className="py-3 px-4">{index + 1}</td>
+                  <tr key={competitor.party} className="border-b dark:border-border hover:bg-muted/50">
+                    <td className="py-3 px-4 dark:text-foreground">{index + 1}</td>
                     <td className="py-3 px-4">
                       <span
                         className="inline-flex items-center px-2 py-1 rounded text-white font-medium"
@@ -227,18 +208,18 @@ export default function MLACompetitorAnalysis() {
                         {competitor.party}
                       </span>
                     </td>
-                    <td className="text-right py-3 px-4">{competitor.totalVotes.toLocaleString()}</td>
-                    <td className="text-right py-3 px-4 font-bold">{competitor.voteSharePercent}%</td>
-                    <td className="text-right py-3 px-4">{competitor.boothsContested}</td>
-                    <td className="text-right py-3 px-4 font-semibold">{competitor.boothsWon}</td>
+                    <td className="text-right py-3 px-4 dark:text-foreground">{competitor.totalVotes.toLocaleString()}</td>
+                    <td className="text-right py-3 px-4 font-bold dark:text-foreground">{competitor.voteSharePercent}%</td>
+                    <td className="text-right py-3 px-4 dark:text-foreground">{competitor.boothsContested}</td>
+                    <td className="text-right py-3 px-4 font-semibold dark:text-foreground">{competitor.boothsWon}</td>
                     <td className="text-right py-3 px-4">
                       <span
                         className={`font-medium ${
                           competitor.winRate > 50
-                            ? 'text-green-600'
+                            ? 'text-green-600 dark:text-green-400'
                             : competitor.winRate > 25
-                            ? 'text-yellow-600'
-                            : 'text-red-600'
+                            ? 'text-yellow-600 dark:text-yellow-400'
+                            : 'text-red-600 dark:text-red-400'
                         }`}
                       >
                         {competitor.winRate}%

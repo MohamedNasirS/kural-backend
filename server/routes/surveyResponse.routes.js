@@ -155,12 +155,29 @@ router.get("/", async (req, res) => {
     if (acId) {
       console.log(`Querying AC-specific collection: surveyresponses_${acId}`);
       // Get booth names for booth filter dropdown support
+      // Group by booth_id to avoid duplicates when same booth has multiple name formats
       try {
         const voterBooths = await aggregateVoters(acId, [
           { $match: {} },
-          { $group: { _id: "$boothname", booth_id: { $first: "$booth_id" } } }
+          { $group: {
+              _id: "$booth_id",
+              boothno: { $first: "$boothno" },
+              boothnames: { $addToSet: "$boothname" }
+            }
+          },
+          { $sort: { boothno: 1 } }
         ]);
-        boothNamesFromAC = voterBooths.map(b => b._id).filter(Boolean);
+        // Select the best booth name for each booth (prefer English with number prefix)
+        boothNamesFromAC = voterBooths.map(b => {
+          if (!b.boothnames || b.boothnames.length === 0) return null;
+          const validNames = b.boothnames.filter(n => n && n.trim());
+          if (validNames.length === 0) return null;
+          // Prefer names with booth number prefix (e.g., "1- Corporation...")
+          const withPrefix = validNames.find(n => /^\d+[-\s]/.test(n));
+          if (withPrefix) return withPrefix;
+          // Otherwise pick the shortest name
+          return validNames.reduce((s, c) => c.length < s.length ? c : s, validNames[0]);
+        }).filter(Boolean);
         console.log(`Found ${boothNamesFromAC.length} unique booth names for AC ${acId}`);
       } catch (voterError) {
         console.error("Error getting booth names from voter data:", voterError);

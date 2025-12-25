@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ResponsiveTabsList } from '@/components/responsive';
 import { Plus, Edit, Trash2, Database, Save, X, Search, Filter, Users, Eye, Info } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { useState, useEffect } from 'react';
@@ -38,6 +39,19 @@ interface Voter {
   gender?: string;
   verified?: boolean;
   surveyed?: boolean;
+  // SIR Fields
+  isActive?: boolean;
+  currentSirStatus?: 'passed' | 'removed' | 'reinstated' | 'new';
+  currentSirRevision?: string;
+  // Ward Info
+  wardNo?: number;
+  wardName?: string;
+  wardNameEnglish?: string;
+  // Relative Info
+  relative?: {
+    name?: { english?: string; tamil?: string };
+    relation?: string;
+  };
   [key: string]: any; // For custom fields
 }
 
@@ -133,6 +147,7 @@ export const VoterFieldManager = () => {
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [boothFilter, setBoothFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [sirFilter, setSirFilter] = useState<string>('active'); // 'all' | 'active' | 'removed'
   const [votersLoading, setVotersLoading] = useState(false);
   const [votersError, setVotersError] = useState<string | null>(null);
   const [pagination, setPagination] = useState<Pagination>({
@@ -190,7 +205,7 @@ export const VoterFieldManager = () => {
       fetchBooths();
       fetchVoters();
     }
-  }, [selectedAC, boothFilter, statusFilter, pagination.page]);
+  }, [selectedAC, boothFilter, statusFilter, sirFilter, pagination.page]);
 
   const fetchBooths = async () => {
     try {
@@ -236,6 +251,15 @@ export const VoterFieldManager = () => {
         params.append('status', statusFilter);
       }
 
+      // SIR Filter
+      if (sirFilter === 'all') {
+        params.append('includeRemoved', 'true');
+      } else if (sirFilter === 'removed') {
+        params.append('includeRemoved', 'true');
+        params.append('sirStatus', 'removed');
+      }
+      // 'active' is default - no param needed
+
       if (searchTerm.trim()) {
         params.append('search', searchTerm.trim());
       }
@@ -277,7 +301,9 @@ export const VoterFieldManager = () => {
   const handleEditIndividualVoter = async (voter: Voter) => {
     try {
       // Fetch full voter details
-      const fullVoterData = await api.get(`/voters/details/${voter.id}`);
+      const response = await api.get(`/voters/details/${voter.id}`);
+      // Handle standardized API response format - extract voter data from response.data
+      const fullVoterData = response.data || response;
       setSelectedVoter(voter);
       // Unwrap legacy field values before setting
       const unwrappedData: any = {};
@@ -879,6 +905,16 @@ export const VoterFieldManager = () => {
                       <SelectItem value="Not Contacted">Not Contacted</SelectItem>
                     </SelectContent>
                   </Select>
+                  <Select value={sirFilter} onValueChange={setSirFilter}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="SIR Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">Active (SIR Passed)</SelectItem>
+                      <SelectItem value="removed">Removed from SIR</SelectItem>
+                      <SelectItem value="all">All Voters</SelectItem>
+                    </SelectContent>
+                  </Select>
                   <Button variant="outline" onClick={handleVoterSearch}>
                     <Filter className="mr-2 h-4 w-4" />
                     Apply
@@ -929,21 +965,25 @@ export const VoterFieldManager = () => {
                       <th className="px-4 py-3 text-left text-sm font-semibold">Gender</th>
                       <th className="px-4 py-3 text-left text-sm font-semibold">Booth</th>
                       <th className="px-4 py-3 text-left text-sm font-semibold">Phone</th>
-                      <th className="px-4 py-3 text-left text-sm font-semibold">Status</th>
+                      <th className="px-4 py-3 text-left text-sm font-semibold">Survey</th>
+                      <th className="px-4 py-3 text-left text-sm font-semibold">SIR Status</th>
                       <th className="px-4 py-3 text-left text-sm font-semibold">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
                     {votersLoading ? (
                       <tr>
-                        <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">
+                        <td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">
                           Loading voters...
                         </td>
                       </tr>
                     ) : voters.length > 0 ? (
                       voters.map((voter) => (
-                        <tr key={voter.id} className="hover:bg-muted/50">
-                          <td className="px-4 py-3 text-sm font-medium">{renderValue(voter.name)}</td>
+                        <tr key={voter.id} className={`hover:bg-muted/50 ${voter.isActive === false ? 'opacity-60' : ''}`}>
+                          <td className="px-4 py-3 text-sm font-medium">
+                            {voter.isActive === false && <span className="line-through">{renderValue(voter.name)}</span>}
+                            {voter.isActive !== false && renderValue(voter.name)}
+                          </td>
                           <td className="px-4 py-3 text-sm">{renderValue(voter.voterId)}</td>
                           <td className="px-4 py-3 text-sm">{renderValue(voter.age)}</td>
                           <td className="px-4 py-3 text-sm">{renderValue(voter.gender)}</td>
@@ -955,6 +995,13 @@ export const VoterFieldManager = () => {
                             </Badge>
                           </td>
                           <td className="px-4 py-3">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              voter.isActive === false ? 'bg-destructive/10 text-destructive' : 'bg-green-100 text-green-800'
+                            }`}>
+                              {voter.isActive === false ? 'Removed' : 'Active'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
                             <Button variant="ghost" size="sm" onClick={() => handleEditIndividualVoter(voter)}>
                               <Edit className="h-4 w-4" />
                             </Button>
@@ -963,7 +1010,7 @@ export const VoterFieldManager = () => {
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">
+                        <td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">
                           No voters found for the selected filters.
                         </td>
                       </tr>
@@ -1197,20 +1244,60 @@ export const VoterFieldManager = () => {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="fathername">Father's Name</Label>
+                      <Label htmlFor="relativeNameEnglish">Relative Name (English)</Label>
                       <Input
-                        id="fathername"
-                        value={editingVoterData.fathername || ''}
-                        onChange={(e) => setEditingVoterData({ ...editingVoterData, fathername: e.target.value })}
+                        id="relativeNameEnglish"
+                        value={editingVoterData.relative?.name?.english || ''}
+                        onChange={(e) => setEditingVoterData({
+                          ...editingVoterData,
+                          relative: {
+                            ...editingVoterData.relative,
+                            name: {
+                              ...editingVoterData.relative?.name,
+                              english: e.target.value
+                            }
+                          }
+                        })}
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="guardian">Guardian</Label>
+                      <Label htmlFor="relativeNameTamil">Relative Name (Tamil)</Label>
                       <Input
-                        id="guardian"
-                        value={editingVoterData.guardian || ''}
-                        onChange={(e) => setEditingVoterData({ ...editingVoterData, guardian: e.target.value })}
+                        id="relativeNameTamil"
+                        value={editingVoterData.relative?.name?.tamil || ''}
+                        onChange={(e) => setEditingVoterData({
+                          ...editingVoterData,
+                          relative: {
+                            ...editingVoterData.relative,
+                            name: {
+                              ...editingVoterData.relative?.name,
+                              tamil: e.target.value
+                            }
+                          }
+                        })}
                       />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="relativeRelation">Relation</Label>
+                      <Select
+                        value={editingVoterData.relative?.relation || ''}
+                        onValueChange={(value) => setEditingVoterData({
+                          ...editingVoterData,
+                          relative: {
+                            ...editingVoterData.relative,
+                            relation: value
+                          }
+                        })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select relation" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Father">Father</SelectItem>
+                          <SelectItem value="Mother">Mother</SelectItem>
+                          <SelectItem value="Husband">Husband</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="emailid">Email</Label>
@@ -1296,19 +1383,37 @@ export const VoterFieldManager = () => {
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="fatherless">Fatherless</Label>
-                      <Select
-                        value={editingVoterData.fatherless === undefined ? '' : String(editingVoterData.fatherless)}
-                        onValueChange={(value) => setEditingVoterData({ ...editingVoterData, fatherless: value === 'true' })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="true">Yes</SelectItem>
-                          <SelectItem value="false">No</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      <Label htmlFor="wardNo">Ward No (Read-only)</Label>
+                      <Input
+                        id="wardNo"
+                        value={editingVoterData.ward_no || editingVoterData.wardNo || ''}
+                        disabled
+                        className="bg-muted"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="wardName">Ward Name (Read-only)</Label>
+                      <Input
+                        id="wardName"
+                        value={editingVoterData.ward_name_english || editingVoterData.ward_name || editingVoterData.wardName || ''}
+                        disabled
+                        className="bg-muted"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="sirStatus">SIR Status (Read-only)</Label>
+                      <div className="flex items-center gap-2 h-10">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          editingVoterData.isActive === false ? 'bg-destructive/10 text-destructive' : 'bg-green-100 text-green-800'
+                        }`}>
+                          {editingVoterData.isActive === false ? 'Removed from SIR' : 'Active (SIR Passed)'}
+                        </span>
+                        {editingVoterData.currentSirStatus && (
+                          <Badge variant="outline" className="text-xs">
+                            {editingVoterData.currentSirStatus}
+                          </Badge>
+                        )}
+                      </div>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="verified">Verified</Label>

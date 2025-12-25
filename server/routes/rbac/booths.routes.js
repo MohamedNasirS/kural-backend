@@ -29,6 +29,35 @@ import {
 const router = express.Router();
 
 /**
+ * Helper function to select the best booth name from multiple options
+ * Prefers names with booth number prefix (e.g., "1- Corporation...") over Tamil names
+ */
+function selectBestBoothName(boothnames, boothNumber) {
+  if (!boothnames || boothnames.length === 0) {
+    return `Booth ${boothNumber}`;
+  }
+
+  // Filter out null/undefined/empty values
+  const validNames = boothnames.filter(name => name && name.trim());
+  if (validNames.length === 0) {
+    return `Booth ${boothNumber}`;
+  }
+
+  // Prefer names that already have the booth number prefix (e.g., "1- Corporation...")
+  const withNumberPrefix = validNames.find(name => /^\d+[-\s]/.test(name));
+  if (withNumberPrefix) {
+    return withNumberPrefix;
+  }
+
+  // Otherwise, pick the shortest name (usually the English format)
+  const shortestName = validNames.reduce((shortest, current) => {
+    return current.length < shortest.length ? current : shortest;
+  }, validNames[0]);
+
+  return shortestName;
+}
+
+/**
  * GET /api/rbac/booths
  * Get booths from voter collections (source of truth)
  * Aggregates booth data from voter_{AC_ID} collections
@@ -77,12 +106,14 @@ router.get("/", isAuthenticated, canManageBooths, validateACAccess, async (req, 
           }));
         } else {
           voterBooths = await aggregateVoters(targetAC, [
-            { $match: {} },
+            // Only count active voters (exclude removed voters from SIR)
+            { $match: { isActive: { $ne: false } } },
             {
               $group: {
                 _id: "$booth_id",
                 boothno: { $first: "$boothno" },
-                boothname: { $first: "$boothname" },
+                // Collect all unique booth names to pick the best one
+                boothnames: { $addToSet: "$boothname" },
                 aci_id: { $first: "$aci_id" },
                 aci_name: { $first: "$aci_name" },
                 totalVoters: { $sum: 1 }
@@ -128,11 +159,24 @@ router.get("/", isAuthenticated, canManageBooths, validateACAccess, async (req, 
           const boothNumber = vb.boothno || index + 1;
           const agentsFromUsers = boothAgentMap[boothId] || [];
 
+          // Select the best booth name from available options (fallback path)
+          // vb.boothnames is from aggregation, vb.boothname is from precomputed stats
+          let displayName;
+          if (vb.boothnames && Array.isArray(vb.boothnames)) {
+            // Aggregation path - select best from collected names
+            const selectedName = selectBestBoothName(vb.boothnames, boothNumber);
+            const hasNumberPrefix = /^\d+[-\s]/.test(selectedName);
+            displayName = hasNumberPrefix ? selectedName : `${boothNumber}- ${selectedName}`;
+          } else {
+            // Precomputed stats path - use as-is (already processed)
+            displayName = vb.boothname || `Booth ${boothNumber}`;
+          }
+
           return {
             _id: boothId,
             boothCode: boothId,
             boothNumber: boothNumber,
-            boothName: vb.boothname || `Booth ${boothNumber}`,
+            boothName: displayName,
             ac_id: vb.aci_id || targetAC,
             ac_name: vb.aci_name || `AC ${targetAC}`,
             totalVoters: vb.totalVoters,

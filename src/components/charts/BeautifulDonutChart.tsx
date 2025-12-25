@@ -114,7 +114,7 @@ const renderCustomLabel = ({
       {/* Polyline connecting segment to label */}
       <polyline
         points={`${startX},${startY} ${elbowX},${elbowY} ${endX},${endY}`}
-        stroke="#94a3b8"
+        className="stroke-slate-400 dark:stroke-slate-500"
         strokeWidth={1}
         fill="none"
       />
@@ -124,7 +124,8 @@ const renderCustomLabel = ({
         y={endY - 7}
         textAnchor={textAnchor}
         dominantBaseline="middle"
-        style={{ fontSize: '12px', fontWeight: 600, fill: '#1e293b' }}
+        className="fill-slate-800 dark:fill-slate-100"
+        style={{ fontSize: '12px', fontWeight: 600 }}
       >
         {name}
       </text>
@@ -134,7 +135,8 @@ const renderCustomLabel = ({
         y={endY + 9}
         textAnchor={textAnchor}
         dominantBaseline="middle"
-        style={{ fontSize: '12px', fontWeight: 500, fill: '#64748b' }}
+        className="fill-slate-500 dark:fill-slate-400"
+        style={{ fontSize: '12px', fontWeight: 500 }}
       >
         {displayPercent}%
       </text>
@@ -180,7 +182,7 @@ const CustomLegend = ({ payload, showAll, onToggle, threshold, isMobile, total, 
           return (
             <div
               key={`legend-${index}`}
-              className={`flex items-center gap-1.5 ${isOthersItem ? 'cursor-pointer hover:bg-slate-100 px-2 py-1 rounded-md -mx-2 -my-1 transition-colors' : ''}`}
+              className={`flex items-center gap-1.5 ${isOthersItem ? 'cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 px-2 py-1 rounded-md -mx-2 -my-1 transition-colors' : ''}`}
               onClick={isOthersItem ? onOthersToggle : undefined}
               title={isOthersItem ? (othersExpanded ? 'Click to collapse' : 'Click to expand') : undefined}
             >
@@ -188,12 +190,12 @@ const CustomLegend = ({ payload, showAll, onToggle, threshold, isMobile, total, 
                 className={`${isMobile ? 'w-3 h-3' : 'w-3.5 h-3.5'} rounded flex-shrink-0`}
                 style={{ backgroundColor: entry.color }}
               />
-              <span className={`${isMobile ? 'text-xs' : 'text-sm'} text-slate-600 font-medium ${isOthersItem ? 'underline decoration-dotted underline-offset-2' : ''}`}>
+              <span className={`${isMobile ? 'text-xs' : 'text-sm'} text-slate-600 dark:text-slate-300 font-medium ${isOthersItem ? 'underline decoration-dotted underline-offset-2' : ''}`}>
                 {entry.value}
-                {isMobile && <span className="text-slate-400 ml-1">({percentage}%)</span>}
+                {isMobile && <span className="text-slate-400 dark:text-slate-500 ml-1">({percentage}%)</span>}
               </span>
               {isOthersItem && (
-                othersExpanded ? <ChevronUp className="w-3 h-3 text-slate-400" /> : <ChevronDown className="w-3 h-3 text-slate-400" />
+                othersExpanded ? <ChevronUp className="w-3 h-3 text-slate-400 dark:text-slate-500" /> : <ChevronDown className="w-3 h-3 text-slate-400 dark:text-slate-500" />
               )}
             </div>
           );
@@ -204,7 +206,7 @@ const CustomLegend = ({ payload, showAll, onToggle, threshold, isMobile, total, 
       {hasOthers && !othersExpanded && (
         <button
           onClick={onOthersToggle}
-          className={`flex items-center gap-1.5 px-3 py-1.5 ${isMobile ? 'text-xs' : 'text-sm'} text-slate-600 hover:bg-slate-100 rounded-full border border-slate-200 transition-all font-medium`}
+          className={`flex items-center gap-1.5 px-3 py-1.5 ${isMobile ? 'text-xs' : 'text-sm'} text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full border border-slate-200 dark:border-slate-600 transition-all font-medium`}
         >
           <ChevronDown className="w-3.5 h-3.5" />
           Expand Others
@@ -215,7 +217,7 @@ const CustomLegend = ({ payload, showAll, onToggle, threshold, isMobile, total, 
       {hasOthers && othersExpanded && (
         <button
           onClick={onOthersToggle}
-          className={`flex items-center gap-1.5 px-3 py-1.5 ${isMobile ? 'text-xs' : 'text-sm'} text-slate-600 hover:bg-slate-100 rounded-full border border-slate-200 transition-all font-medium`}
+          className={`flex items-center gap-1.5 px-3 py-1.5 ${isMobile ? 'text-xs' : 'text-sm'} text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full border border-slate-200 dark:border-slate-600 transition-all font-medium`}
         >
           <ChevronUp className="w-3.5 h-3.5" />
           Collapse to Others
@@ -226,7 +228,7 @@ const CustomLegend = ({ payload, showAll, onToggle, threshold, isMobile, total, 
       {hiddenCount > 0 && !hasOthers && (
         <button
           onClick={onToggle}
-          className={`flex items-center gap-1.5 px-4 py-2 ${isMobile ? 'text-xs' : 'text-sm'} text-blue-600 hover:bg-blue-50 rounded-full border border-slate-200 transition-all font-medium`}
+          className={`flex items-center gap-1.5 px-4 py-2 ${isMobile ? 'text-xs' : 'text-sm'} text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-full border border-slate-200 dark:border-slate-600 transition-all font-medium`}
         >
           {showAll ? (
             <>
@@ -308,13 +310,13 @@ export function BeautifulDonutChart({
       {/* Title and subtitle */}
       {(title || subtitle) && (
         <div className="mb-3">
-          {title && <h3 className={`${isMobile ? 'text-sm' : 'text-base'} font-semibold text-slate-800`}>{title}</h3>}
-          {subtitle && <p className={`${isMobile ? 'text-xs' : 'text-sm'} text-slate-500`}>{subtitle}</p>}
+          {title && <h3 className={`${isMobile ? 'text-sm' : 'text-base'} font-semibold text-slate-800 dark:text-slate-100`}>{title}</h3>}
+          {subtitle && <p className={`${isMobile ? 'text-xs' : 'text-sm'} text-slate-500 dark:text-slate-400`}>{subtitle}</p>}
         </div>
       )}
 
       <ResponsiveContainer width="100%" height={responsiveHeight}>
-        <PieChart>
+        <PieChart style={{ outline: 'none' }}>
           <Pie
             data={displayData}
             cx="50%"
@@ -326,6 +328,7 @@ export function BeautifulDonutChart({
             label={isMobile ? false : renderCustomLabel}
             labelLine={false}
             cornerRadius={isMobile ? 4 : 6}
+            style={{ outline: 'none', cursor: 'pointer' }}
           >
             {displayData.map((entry, index) => (
               <Cell
@@ -333,6 +336,7 @@ export function BeautifulDonutChart({
                 fill={entry.color}
                 stroke="#fff"
                 strokeWidth={isMobile ? 2 : 3}
+                style={{ outline: 'none' }}
               />
             ))}
           </Pie>

@@ -12,6 +12,7 @@ import healthRoutes from "./health.routes.js";
 import rbacRoutes from "./rbac/index.js";
 import mlaDashboardRoutes from "./mla/index.js";
 import notificationRoutes from "./notification.routes.js";
+import voterDocumentRoutes from "./voterDocument.routes.js";
 
 // Import MLA models to register them with Mongoose
 import "../models/ElectionResult.js";
@@ -34,6 +35,7 @@ export {
   rbacRoutes,
   mlaDashboardRoutes,
   notificationRoutes,
+  voterDocumentRoutes,
 };
 
 export function registerRoutes(app) {
@@ -101,6 +103,9 @@ export function registerRoutes(app) {
 
   // Notification routes (admin)
   app.use("/api/admin/notifications", notificationRoutes);
+
+  // Voter document routes (view, verify, delete)
+  app.use("/api/voter-documents", voterDocumentRoutes);
 
   console.log("✓ All routes registered");
 }

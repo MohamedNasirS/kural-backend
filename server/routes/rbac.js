@@ -56,6 +56,35 @@ const router = express.Router();
 
 const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+/**
+ * Helper function to select the best booth name from multiple options
+ * Prefers names with booth number prefix (e.g., "1- Corporation...") over Tamil names
+ */
+function selectBestBoothName(boothnames, boothNumber) {
+  if (!boothnames || boothnames.length === 0) {
+    return `Booth ${boothNumber}`;
+  }
+
+  // Filter out null/undefined/empty values
+  const validNames = boothnames.filter(name => name && name.trim());
+  if (validNames.length === 0) {
+    return `Booth ${boothNumber}`;
+  }
+
+  // Prefer names that already have the booth number prefix (e.g., "1- Corporation...")
+  const withNumberPrefix = validNames.find(name => /^\d+[-\s]/.test(name));
+  if (withNumberPrefix) {
+    return withNumberPrefix;
+  }
+
+  // Otherwise, pick the shortest name (usually the English format)
+  const shortestName = validNames.reduce((shortest, current) => {
+    return current.length < shortest.length ? current : shortest;
+  }, validNames[0]);
+
+  return shortestName;
+}
+
 // Legacy function for backward compatibility - use getACSurveyResponseModel from utility instead
 const getSurveyResponseModel = (acId = null) => {
   if (acId) {
@@ -1245,7 +1274,8 @@ router.get("/booths", isAuthenticated, canManageBooths, validateACAccess, async 
               $group: {
                 _id: "$booth_id",
                 boothno: { $first: "$boothno" },
-                boothname: { $first: "$boothname" },
+                // Collect all unique booth names to pick the best one
+                boothnames: { $addToSet: "$boothname" },
                 aci_id: { $first: "$aci_id" },
                 aci_name: { $first: "$aci_name" },
                 totalVoters: { $sum: 1 }
@@ -1287,15 +1317,28 @@ router.get("/booths", isAuthenticated, canManageBooths, validateACAccess, async 
 
         // Transform voter data into booth format
         booths = voterBooths.map((vb, index) => {
-          const boothId = vb._id; // e.g., "BOOTH1-111"
+          const boothId = vb._id; // e.g., "BOOTH1-111" or "ac118001"
           const boothNumber = vb.boothno || index + 1;
           const agentsFromUsers = boothAgentMap[boothId] || [];
+
+          // Select the best booth name from available options (fallback path)
+          // vb.boothnames is from aggregation, vb.boothname is from precomputed stats
+          let displayName;
+          if (vb.boothnames && Array.isArray(vb.boothnames)) {
+            // Aggregation path - select best from collected names
+            const selectedName = selectBestBoothName(vb.boothnames, boothNumber);
+            const hasNumberPrefix = /^\d+[-\s]/.test(selectedName);
+            displayName = hasNumberPrefix ? selectedName : `${boothNumber}- ${selectedName}`;
+          } else {
+            // Precomputed stats path - use as-is (already processed)
+            displayName = vb.boothname || `Booth ${boothNumber}`;
+          }
 
           return {
             _id: boothId,
             boothCode: boothId,
             boothNumber: boothNumber,
-            boothName: vb.boothname || `Booth ${boothNumber}`,
+            boothName: displayName,
             ac_id: vb.aci_id || targetAC,
             ac_name: vb.aci_name || `AC ${targetAC}`,
             totalVoters: vb.totalVoters,

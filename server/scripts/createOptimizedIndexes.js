@@ -35,6 +35,11 @@ const VOTER_INDEXES = [
   { key: { age: 1 }, name: 'idx_age' },
   { key: { surveyed: 1 }, name: 'idx_surveyed' },
 
+  // SIR/Active status indexes (for mobile app filtering)
+  { key: { isActive: 1 }, name: 'idx_isActive' },
+  { key: { isActive: 1, boothno: 1 }, name: 'idx_active_booth' },
+  { key: { currentSirStatus: 1 }, name: 'idx_sirStatus' },
+
   // Text search index for name fields
   { key: { 'name.english': 'text', 'name.tamil': 'text', address: 'text' }, name: 'idx_text_search' },
 ];

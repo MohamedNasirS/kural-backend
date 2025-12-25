@@ -177,7 +177,7 @@ export const ACFamilyManager = () => {
                 <SelectItem value="all">All Booths ({booths.length})</SelectItem>
                 {booths.map((booth) => (
                   <SelectItem key={booth.boothNo} value={booth.boothId || `BOOTH${booth.boothNo}-${acNumber}`}>
-                    {booth.boothName || booth.label} ({booth.boothNo})
+                    {booth.boothName || booth.label}
                   </SelectItem>
                 ))}
               </SelectContent>

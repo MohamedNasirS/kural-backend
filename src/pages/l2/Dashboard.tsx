@@ -2,7 +2,7 @@ import { DashboardLayout } from '@/components/DashboardLayout';
 import { StatCard } from '@/components/StatCard';
 import { ActionButton } from '@/components/ActionButton';
 import { Card } from '@/components/ui/card';
-import { Users, Home, FileCheck, MapPin, Activity } from 'lucide-react';
+import { Users, Home, FileCheck, MapPin, Activity, UserCheck, UserX, UserPlus } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEffect, useState } from 'react';
@@ -13,6 +13,16 @@ interface SurveyBreakdownItem {
   surveyName: string;
   completedCount: number;
   completionRate: number;
+}
+
+interface SIRStats {
+  activeVoters: number;
+  removedVoters: number;
+  newVoters: number;
+  activePercentage: number;
+  removedPercentage: number;
+  newPercentage: number;
+  currentRevision: string | null;
 }
 
 interface DashboardStats {
@@ -36,6 +46,8 @@ interface DashboardStats {
   totalSurveysCompleted?: number;
   votersSurveyed?: number;
   surveyBreakdown?: SurveyBreakdownItem[];
+  // SIR Statistics
+  sirStats?: SIRStats;
 }
 
 export const L2Dashboard = () => {
@@ -141,6 +153,44 @@ export const L2Dashboard = () => {
             variant="warning"
           />
         </div>
+
+        {/* SIR Statistics - Show if SIR data exists */}
+        {stats?.sirStats && (stats.sirStats.removedVoters > 0 || stats.sirStats.newVoters > 0) && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard
+              title="SIR Active Voters"
+              value={loading ? "Loading..." : formatNumber(stats?.sirStats?.activeVoters || 0)}
+              subtitle={`${stats?.sirStats?.activePercentage?.toFixed(2) || 100}% of total`}
+              icon={UserCheck}
+              variant="success"
+              compact
+            />
+            <StatCard
+              title="SIR Removed Voters"
+              value={loading ? "Loading..." : formatNumber(stats?.sirStats?.removedVoters || 0)}
+              subtitle={`${stats?.sirStats?.removedPercentage?.toFixed(2) || 0}% of total`}
+              icon={UserX}
+              variant="destructive"
+              compact
+            />
+            <StatCard
+              title="New Voters (SIR)"
+              value={loading ? "Loading..." : formatNumber(stats?.sirStats?.newVoters || 0)}
+              subtitle={`${stats?.sirStats?.newPercentage?.toFixed(2) || 0}% of total`}
+              icon={UserPlus}
+              variant="info"
+              compact
+            />
+            <StatCard
+              title="Total Booths"
+              value={loading ? "Loading..." : formatNumber(stats?.totalBooths || 0)}
+              subtitle={stats?.sirStats?.currentRevision ? `SIR: ${stats.sirStats.currentRevision}` : undefined}
+              icon={MapPin}
+              variant="warning"
+              compact
+            />
+          </div>
+        )}
 
         <Separator />
 

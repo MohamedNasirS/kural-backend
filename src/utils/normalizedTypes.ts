@@ -179,7 +179,26 @@ export interface NormalizedBoothAgentActivity extends AcMetadata, BoothMetadata 
 
 export interface VoterName {
   english: string;
-  tamil: string;
+  tamil?: string;
+}
+
+export interface VoterRelative {
+  name: {
+    english?: string;
+    tamil?: string;
+  };
+  relation?: string;  // Father, Husband, Mother
+}
+
+export interface SirRevisionStatus {
+  inSir: boolean;
+  status: 'passed' | 'removed' | 'reinstated' | 'new' | null;
+  sirEpicNo?: string;
+  sirBoothNo?: number;
+  sirBoothName?: string;
+  sirWardNo?: number;
+  sirWardName?: string;
+  matchedAt?: string;
 }
 
 export interface NormalizedVoter extends AcMetadata, BoothMetadata {
@@ -187,6 +206,7 @@ export interface NormalizedVoter extends AcMetadata, BoothMetadata {
   voterID: string;
   name: VoterName;
   address: string;
+  address_tamil?: string;
   DOB: string;
   age: number;
   gender: 'Male' | 'Female' | string;
@@ -194,9 +214,6 @@ export interface NormalizedVoter extends AcMetadata, BoothMetadata {
   mobile: string;
   /** Door number (always string) */
   doornumber: string;
-  fathername: string;
-  guardian: string;
-  fatherless: boolean;
   emailid: string;
   aadhar: string;
   pan: string;
@@ -209,6 +226,41 @@ export interface NormalizedVoter extends AcMetadata, BoothMetadata {
   verified: boolean;
   status: string;
   booth_agent_id: string;
+
+  // Booth/Polling Station (updated)
+  boothname_tamil?: string;
+
+  // Ward Info (from SIR)
+  ward_no?: number;
+  ward_name?: string;
+  ward_name_english?: string;
+
+  // Relative Info (replaces fathername, guardian, fatherless)
+  relative?: VoterRelative;
+
+  // Legacy fields (for backward compatibility - deprecated)
+  fathername?: string;
+  guardian?: string;
+  fatherless?: boolean;
+
+  // SIR Status
+  isActive: boolean;
+  currentSirStatus?: 'passed' | 'removed' | 'reinstated' | 'new';
+  currentSirRevision?: string;
+  sirStatus?: {
+    december2024?: SirRevisionStatus;
+    february2025?: SirRevisionStatus;
+  };
+  sirPageNo?: number;
+
+  // Booth History
+  boothVersion?: number;
+  boothUpdatedAt?: string;
+  previousBooth?: {
+    booth_id: string;
+    boothno: number;
+    boothname: string;
+  };
 }
 
 // ============================================================================

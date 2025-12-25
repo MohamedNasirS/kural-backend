@@ -7,23 +7,69 @@ const voterSchema = new mongoose.Schema({
   },
   voterID: String,
   address: String,
+  address_tamil: String,
   DOB: Date,
-  fathername: String,
-  doornumber: Number,
-  fatherless: Boolean,
-  guardian: String,
+  doornumber: mongoose.Schema.Types.Mixed,
   age: Number,
   gender: String,
-  mobile: Number,
+  mobile: mongoose.Schema.Types.Mixed,
   emailid: String,
   aadhar: String,
   PAN: String,
   religion: String,
   caste: String,
   subcaste: String,
+
+  // Booth/Polling Station Info
   booth_id: String,
   boothname: String,
+  boothname_tamil: String,
   boothno: Number,
+
+  // Ward Info (from SIR)
+  ward_no: Number,
+  ward_name: String,
+  ward_name_english: String,
+
+  // Relative/Guardian Info (replaces fathername, guardian, fatherless)
+  relative: {
+    name: {
+      english: String,
+      tamil: String
+    },
+    relation: String  // Father, Husband, Mother
+  },
+
+  // SIR Status Fields
+  isActive: { type: Boolean, default: true },
+  currentSirStatus: String,  // passed, removed, reinstated, new
+  currentSirRevision: String,  // december2024, february2025
+  sirStatus: {
+    type: mongoose.Schema.Types.Mixed,
+    default: {}
+  },
+  sirPageNo: Number,
+
+  // Booth Change Tracking
+  boothVersion: { type: Number, default: 1 },
+  boothUpdatedAt: Date,
+  boothUpdatedFrom: String,
+  previousBooth: {
+    booth_id: String,
+    boothno: Number,
+    boothname: String,
+    version: Number
+  },
+  boothHistory: [{
+    booth_id: String,
+    boothno: Number,
+    boothname: String,
+    version: Number,
+    from: String,
+    changedAt: Date
+  }],
+
+  // Other fields
   status: String,
   verified: Boolean,
   verifiedAt: Date,
@@ -31,8 +77,12 @@ const voterSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  surveyedAt: Date,
   aci_id: Number,
-  aci_name: String
+  aci_name: String,
+  aci_name_tamil: String,
+  familyId: String,
+  booth_agent_id: String
 }, {
   timestamps: true,
   strict: false, // Allow dynamic fields for voter records
@@ -62,6 +112,15 @@ voterSchema.index({ familyId: 1 }, { sparse: true });
 
 // Index for mobile lookups
 voterSchema.index({ mobile: 1 }, { sparse: true });
+
+// SIR Status indexes
+voterSchema.index({ isActive: 1 });
+voterSchema.index({ currentSirStatus: 1 });
+voterSchema.index({ aci_id: 1, isActive: 1 });
+voterSchema.index({ boothno: 1, isActive: 1 });
+
+// Ward index
+voterSchema.index({ ward_no: 1 }, { sparse: true });
 
 const Voter = mongoose.model('Voter', voterSchema, 'voters');
 

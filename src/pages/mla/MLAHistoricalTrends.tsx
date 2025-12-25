@@ -3,12 +3,12 @@
  * Shows detailed historical election trends with charts
  */
 
-import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
 import { BeautifulLineChart } from '@/components/charts';
+import { useMLAHistoricalTrends } from '@/hooks/useMLADashboard';
 
 interface PartyTrend {
   year: number;
@@ -41,31 +41,12 @@ interface HistoricalData {
 export default function MLAHistoricalTrends() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [data, setData] = useState<HistoricalData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   const acId = user?.assignedAC;
 
-  useEffect(() => {
-    const fetchData = async () => {
-      if (!acId) return;
-
-      try {
-        setLoading(true);
-        const res = await fetch(`/api/mla-dashboard/${acId}/historical-trends`);
-        if (!res.ok) throw new Error('Failed to fetch historical trends');
-        const json = await res.json();
-        setData(json);
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, [acId]);
+  // React Query hook - data is cached for 5 minutes
+  const { data: queryData, isLoading: loading, error } = useMLAHistoricalTrends(acId);
+  const data = queryData as HistoricalData | undefined;
 
   if (loading) {
     return (
@@ -78,7 +59,7 @@ export default function MLAHistoricalTrends() {
   if (error) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-red-500">Error: {error}</div>
+        <div className="text-red-500">Error: {(error as Error).message}</div>
       </div>
     );
   }
@@ -86,7 +67,7 @@ export default function MLAHistoricalTrends() {
   if (!data) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">No historical data available</div>
+        <div className="text-muted-foreground">No historical data available</div>
       </div>
     );
   }
@@ -119,19 +100,19 @@ export default function MLAHistoricalTrends() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <Card>
+      <Card className="dark:bg-card">
         <CardHeader>
-          <CardTitle>Historical Election Trends - {data.acName}</CardTitle>
+          <CardTitle className="dark:text-foreground">Historical Election Trends - {data.acName}</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-gray-600">{data.leadingSummary}</p>
+          <p className="text-muted-foreground">{data.leadingSummary}</p>
         </CardContent>
       </Card>
 
       {/* Vote Share Trend Chart */}
-      <Card>
+      <Card className="dark:bg-card">
         <CardHeader>
-          <CardTitle>Vote Share Trends (2009-2021)</CardTitle>
+          <CardTitle className="dark:text-foreground">Vote Share Trends (2009-2021)</CardTitle>
         </CardHeader>
         <CardContent>
           <BeautifulLineChart
@@ -151,16 +132,16 @@ export default function MLAHistoricalTrends() {
       </Card>
 
       {/* Candidate History */}
-      <Card>
+      <Card className="dark:bg-card">
         <CardHeader>
-          <CardTitle>Election Results by Year</CardTitle>
+          <CardTitle className="dark:text-foreground">Election Results by Year</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {data.candidateHistory.map((election) => (
-              <Card key={election.year} className="border">
+              <Card key={election.year} className="border dark:border-border dark:bg-card">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-lg">{election.year} Assembly Election</CardTitle>
+                  <CardTitle className="text-lg dark:text-foreground">{election.year} Assembly Election</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-2">
@@ -168,11 +149,11 @@ export default function MLAHistoricalTrends() {
                       <div
                         key={index}
                         className={`flex items-center justify-between p-2 rounded ${
-                          index === 0 ? 'bg-green-50 border border-green-200' : 'bg-gray-50'
+                          index === 0 ? 'bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800' : 'bg-muted/50'
                         }`}
                       >
                         <div>
-                          <div className="font-medium text-sm">{candidate.name}</div>
+                          <div className="font-medium text-sm dark:text-foreground">{candidate.name}</div>
                           <div
                             className="text-xs font-semibold"
                             style={{ color: getPartyColor(candidate.party) }}
@@ -181,8 +162,8 @@ export default function MLAHistoricalTrends() {
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className="font-bold">{candidate.voteShare}%</div>
-                          <div className="text-xs text-gray-500">
+                          <div className="font-bold dark:text-foreground">{candidate.voteShare}%</div>
+                          <div className="text-xs text-muted-foreground">
                             {candidate.votes?.toLocaleString()} votes
                           </div>
                         </div>

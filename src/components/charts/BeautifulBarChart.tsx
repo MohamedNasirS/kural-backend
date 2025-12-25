@@ -188,14 +188,14 @@ export function BeautifulBarChart({
             <>
               <XAxis
                 type="number"
-                tick={{ fontSize: isMobile ? 9 : 11 }}
+                tick={{ fontSize: isMobile ? 9 : 11, fill: 'hsl(var(--muted-foreground))' }}
                 tickLine={false}
                 axisLine={false}
               />
               <YAxis
                 dataKey="name"
                 type="category"
-                tick={{ fontSize: isMobile ? 9 : 11 }}
+                tick={{ fontSize: isMobile ? 9 : 11, fill: 'hsl(var(--muted-foreground))' }}
                 tickLine={false}
                 axisLine={false}
                 width={isMobile ? 50 : 85}
@@ -205,7 +205,7 @@ export function BeautifulBarChart({
             <>
               <XAxis
                 dataKey="name"
-                tick={{ fontSize: isMobile ? 9 : 11 }}
+                tick={{ fontSize: isMobile ? 9 : 11, fill: 'hsl(var(--muted-foreground))' }}
                 tickLine={false}
                 axisLine={false}
                 interval={0}
@@ -214,7 +214,7 @@ export function BeautifulBarChart({
                 height={processedData.length > 4 || isMobile ? 50 : 30}
               />
               <YAxis
-                tick={{ fontSize: isMobile ? 9 : 11 }}
+                tick={{ fontSize: isMobile ? 9 : 11, fill: 'hsl(var(--muted-foreground))' }}
                 tickLine={false}
                 axisLine={false}
                 width={isMobile ? 30 : 40}

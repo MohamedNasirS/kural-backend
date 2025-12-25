@@ -11,7 +11,6 @@
  * See docs/MLA_DASHBOARD_CONTENT.md for full specification
  */
 
-import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -25,6 +24,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { BeautifulDonutChart, BeautifulBarChart } from '@/components/charts';
+import { useMLABoothDetail } from '@/hooks/useMLADashboard';
 
 // TODO: Define types matching API response
 interface BoothDetail {
@@ -65,30 +65,11 @@ export default function MLABoothDetail() {
   const { boothNo } = useParams();
   const navigate = useNavigate();
 
-  const [detail, setDetail] = useState<BoothDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const acId = user?.assignedAC;
 
-  useEffect(() => {
-    const fetchDetail = async () => {
-      try {
-        const res = await fetch(
-          `/api/mla-dashboard/${user?.assignedAC}/booth/${boothNo}`
-        );
-        if (!res.ok) throw new Error('Failed to fetch booth detail');
-        const data = await res.json();
-        setDetail(data);
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (user?.assignedAC && boothNo) {
-      fetchDetail();
-    }
-  }, [user, boothNo]);
+  // React Query hook - data is cached for 5 minutes
+  const { data, isLoading: loading, error } = useMLABoothDetail(acId, boothNo);
+  const detail = data as BoothDetail | undefined;
 
   const getSentimentBadge = (sentiment: string) => {
     const badges: Record<string, string> = {
@@ -105,7 +86,7 @@ export default function MLABoothDetail() {
   }
 
   if (error) {
-    return <div className="text-center py-8 text-red-500">Error: {error}</div>;
+    return <div className="text-center py-8 text-red-500">Error: {(error as Error).message}</div>;
   }
 
   if (!detail) {
@@ -120,14 +101,14 @@ export default function MLABoothDetail() {
       </Button>
 
       {/* Header */}
-      <Card>
+      <Card className="dark:bg-card">
         <CardHeader>
           <div className="flex justify-between items-center">
             <div>
-              <CardTitle>
+              <CardTitle className="dark:text-foreground">
                 Booth #{detail.booth.boothNo} - {detail.booth.boothName}
               </CardTitle>
-              <p className="text-sm text-gray-500 mt-1">
+              <p className="text-sm text-muted-foreground mt-1">
                 {detail.booth.acName} (AC {detail.booth.acId})
               </p>
             </div>
@@ -144,25 +125,25 @@ export default function MLABoothDetail() {
 
       {/* Key Metrics */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card>
+        <Card className="dark:bg-card">
           <CardContent className="pt-4">
-            <div className="text-sm text-gray-500">Our Vote Share</div>
-            <div className="text-2xl font-bold">
+            <div className="text-sm text-muted-foreground">Our Vote Share</div>
+            <div className="text-2xl font-bold dark:text-foreground">
               {detail.electionResult.ourParty.voteSharePercent}%
             </div>
-            <div className="text-sm text-gray-500">
+            <div className="text-sm text-muted-foreground">
               ({detail.electionResult.ourParty.votes.toLocaleString()} votes)
             </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="dark:bg-card">
           <CardContent className="pt-4">
-            <div className="text-sm text-gray-500">Margin</div>
+            <div className="text-sm text-muted-foreground">Margin</div>
             <div
               className={`text-2xl font-bold ${
                 detail.electionResult.result === 'won'
-                  ? 'text-green-600'
-                  : 'text-red-600'
+                  ? 'text-green-600 dark:text-green-400'
+                  : 'text-red-600 dark:text-red-400'
               }`}
             >
               {detail.electionResult.result === 'won' ? '+' : '-'}
@@ -170,24 +151,24 @@ export default function MLABoothDetail() {
               %)
             </div>
             {detail.electionResult.gapToFlip && (
-              <div className="text-sm text-orange-600">
+              <div className="text-sm text-orange-600 dark:text-orange-400">
                 Gap to flip: {detail.electionResult.gapToFlip} votes
               </div>
             )}
           </CardContent>
         </Card>
-        <Card>
+        <Card className="dark:bg-card">
           <CardContent className="pt-4">
-            <div className="text-sm text-gray-500">Turnout</div>
-            <div className="text-2xl font-bold">
+            <div className="text-sm text-muted-foreground">Turnout</div>
+            <div className="text-2xl font-bold dark:text-foreground">
               {detail.electionResult.turnoutPercent}%
             </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="dark:bg-card">
           <CardContent className="pt-4">
-            <div className="text-sm text-gray-500">Total Voters</div>
-            <div className="text-2xl font-bold">
+            <div className="text-sm text-muted-foreground">Total Voters</div>
+            <div className="text-2xl font-bold dark:text-foreground">
               {detail.voterStats.total.toLocaleString()}
             </div>
           </CardContent>
@@ -195,9 +176,9 @@ export default function MLABoothDetail() {
       </div>
 
       {/* Demographics */}
-      <Card>
+      <Card className="dark:bg-card">
         <CardHeader>
-          <CardTitle>Demographics</CardTitle>
+          <CardTitle className="dark:text-foreground">Demographics</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -235,24 +216,24 @@ export default function MLABoothDetail() {
       </Card>
 
       {/* All Party Results */}
-      <Card>
+      <Card className="dark:bg-card">
         <CardHeader>
-          <CardTitle>All Party Results ({detail.electionResult.year})</CardTitle>
+          <CardTitle className="dark:text-foreground">All Party Results ({detail.electionResult.year})</CardTitle>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead>Party</TableHead>
-                <TableHead>Candidate</TableHead>
-                <TableHead>Votes</TableHead>
-                <TableHead>Vote Share %</TableHead>
+              <TableRow className="dark:border-border">
+                <TableHead className="dark:text-foreground">Party</TableHead>
+                <TableHead className="dark:text-foreground">Candidate</TableHead>
+                <TableHead className="dark:text-foreground">Votes</TableHead>
+                <TableHead className="dark:text-foreground">Vote Share %</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {(detail.allPartyResults || []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center text-gray-500">
+                  <TableCell colSpan={4} className="text-center text-muted-foreground">
                     No party results available
                   </TableCell>
                 </TableRow>
@@ -260,12 +241,12 @@ export default function MLABoothDetail() {
                 (detail.allPartyResults || []).map((party, idx) => (
                   <TableRow
                     key={party.party}
-                    className={idx === 0 ? 'bg-green-50' : ''}
+                    className={`dark:border-border ${idx === 0 ? 'bg-green-50 dark:bg-green-950/30' : ''}`}
                   >
-                    <TableCell className="font-medium">{party.party}</TableCell>
-                    <TableCell>{party.candidate}</TableCell>
-                    <TableCell>{party.votes.toLocaleString()}</TableCell>
-                    <TableCell>{party.voteSharePercent}%</TableCell>
+                    <TableCell className="font-medium dark:text-foreground">{party.party}</TableCell>
+                    <TableCell className="dark:text-foreground">{party.candidate}</TableCell>
+                    <TableCell className="dark:text-foreground">{party.votes.toLocaleString()}</TableCell>
+                    <TableCell className="dark:text-foreground">{party.voteSharePercent}%</TableCell>
                   </TableRow>
                 ))
               )}

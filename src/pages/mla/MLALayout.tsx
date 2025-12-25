@@ -20,8 +20,8 @@ export default function MLALayout() {
       <div className="p-4">
         {/* Header with AC info */}
         <div className="mb-6">
-          <h1 className="text-2xl font-bold">MLA War Room Dashboard</h1>
-          <p className="text-gray-600">
+          <h1 className="text-2xl font-bold dark:text-foreground">MLA War Room Dashboard</h1>
+          <p className="text-muted-foreground">
             AC {user?.assignedAC} - {acName}
           </p>
         </div>

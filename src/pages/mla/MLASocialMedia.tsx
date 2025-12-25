@@ -10,7 +10,7 @@
  * Currently shows state-wide aggregated data (All Constituencies)
  */
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -35,6 +35,7 @@ import {
   SHARE_OF_VOICE_COLORS,
   PARTY_COLORS,
 } from '@/lib/chartColors';
+import { useMLAShareOfVoice, useMLASentimentBreakdown } from '@/hooks/useMLADashboard';
 
 // Social Media Analytics interfaces (production API format)
 interface ShareOfVoiceData {
@@ -63,54 +64,27 @@ interface SentimentBreakdownData {
 export default function MLASocialMedia() {
   const { user } = useAuth();
   const acId = user?.assignedAC;
-
-  const [shareOfVoice, setShareOfVoice] = useState<ShareOfVoiceData | null>(null);
-  const [socialSentiment, setSocialSentiment] = useState<SentimentBreakdownData | null>(null);
   const [socialTimeRange, setSocialTimeRange] = useState<string>('30d');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchSocialData = async () => {
-      if (!acId) return;
+  // React Query hooks - data is cached for 5 minutes
+  const {
+    data: shareOfVoiceData,
+    isLoading: sovLoading,
+    error: sovError,
+  } = useMLAShareOfVoice(acId, socialTimeRange);
 
-      setLoading(true);
-      setError(null);
+  const {
+    data: socialSentimentData,
+    isLoading: sentimentLoading,
+    error: sentimentError,
+  } = useMLASentimentBreakdown(acId, socialTimeRange);
 
-      try {
-        const [sovRes, sentimentRes] = await Promise.all([
-          fetch(`/api/mla-dashboard/${acId}/social-media/share-of-voice?time_range=${socialTimeRange}`),
-          fetch(`/api/mla-dashboard/${acId}/social-media/sentiment-breakdown?time_range=${socialTimeRange}`),
-        ]);
-
-        if (sovRes.ok) {
-          const sovData = await sovRes.json();
-          setShareOfVoice(sovData);
-        } else {
-          setShareOfVoice(null);
-        }
-
-        if (sentimentRes.ok) {
-          const sentimentData = await sentimentRes.json();
-          setSocialSentiment(sentimentData);
-        } else {
-          setSocialSentiment(null);
-        }
-
-        // Check if we got any data
-        if (!sovRes.ok && !sentimentRes.ok) {
-          setError('Analytics API is not available. Social media data cannot be fetched.');
-        }
-      } catch (err: any) {
-        console.error('Error fetching social media data:', err);
-        setError('Failed to connect to analytics API. Please ensure it is running.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchSocialData();
-  }, [acId, socialTimeRange]);
+  const shareOfVoice = shareOfVoiceData as ShareOfVoiceData | undefined;
+  const socialSentiment = socialSentimentData as SentimentBreakdownData | undefined;
+  const loading = sovLoading || sentimentLoading;
+  const error = (sovError && sentimentError)
+    ? 'Analytics API is not available. Social media data cannot be fetched.'
+    : null;
 
   const hasData = shareOfVoice?.data?.items?.length || socialSentiment?.data;
 
@@ -121,15 +95,15 @@ export default function MLASocialMedia() {
   return (
     <div className="space-y-6">
       {/* Header with time range selector */}
-      <Card>
+      <Card className="dark:bg-card">
         <CardHeader className="pb-3">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
             <div className="flex items-center gap-2">
-              <CardTitle className="text-lg">Social Media Analytics</CardTitle>
+              <CardTitle className="text-lg dark:text-foreground">Social Media Analytics</CardTitle>
               <Badge variant="secondary" className="text-xs">All Constituencies</Badge>
             </div>
             <Select value={socialTimeRange} onValueChange={setSocialTimeRange}>
-              <SelectTrigger className="w-[120px]">
+              <SelectTrigger className="w-[120px] dark:bg-background">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -146,12 +120,12 @@ export default function MLASocialMedia() {
       </Card>
 
       {error && (
-        <Card className="border-yellow-200 bg-yellow-50">
+        <Card className="border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950/30">
           <CardContent className="py-4">
             <div className="flex items-center gap-2">
-              <span className="text-yellow-600 text-sm">{error}</span>
+              <span className="text-yellow-600 dark:text-yellow-400 text-sm">{error}</span>
             </div>
-            <p className="text-xs text-yellow-500 mt-1">
+            <p className="text-xs text-yellow-500 dark:text-yellow-500/80 mt-1">
               Please contact the administrator if this issue persists.
             </p>
           </CardContent>
@@ -164,9 +138,9 @@ export default function MLASocialMedia() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Share of Voice Chart */}
             {shareOfVoice?.data?.items?.length > 0 && (
-              <Card>
+              <Card className="dark:bg-card">
                 <CardHeader>
-                  <CardTitle className="text-base">Share of Voice</CardTitle>
+                  <CardTitle className="text-base dark:text-foreground">Share of Voice</CardTitle>
                   <p className="text-sm text-muted-foreground">
                     Distribution of mentions by competitor/party
                   </p>
@@ -191,9 +165,9 @@ export default function MLASocialMedia() {
 
             {/* Social Media Sentiment Chart */}
             {socialSentiment?.data && (
-              <Card>
+              <Card className="dark:bg-card">
                 <CardHeader>
-                  <CardTitle className="text-base">Social Media Sentiment</CardTitle>
+                  <CardTitle className="text-base dark:text-foreground">Social Media Sentiment</CardTitle>
                   <p className="text-sm text-muted-foreground">
                     Overall sentiment of social media mentions
                   </p>
@@ -218,23 +192,23 @@ export default function MLASocialMedia() {
 
           {/* Competitor Mentions Table */}
           {shareOfVoice?.data?.items?.length > 0 && (
-            <Card>
+            <Card className="dark:bg-card">
               <CardHeader>
-                <CardTitle className="text-base">Competitor Mentions Details</CardTitle>
+                <CardTitle className="text-base dark:text-foreground">Competitor Mentions Details</CardTitle>
               </CardHeader>
               <CardContent>
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Competitor</TableHead>
-                      <TableHead className="text-right">Mentions</TableHead>
-                      <TableHead className="text-right">Share %</TableHead>
+                    <TableRow className="dark:border-border">
+                      <TableHead className="dark:text-foreground">Competitor</TableHead>
+                      <TableHead className="text-right dark:text-foreground">Mentions</TableHead>
+                      <TableHead className="text-right dark:text-foreground">Share %</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {shareOfVoice.data.items.map((item, idx) => (
-                      <TableRow key={item.competitor_id}>
-                        <TableCell className="font-medium">
+                      <TableRow key={item.competitor_id} className="dark:border-border">
+                        <TableCell className="font-medium dark:text-foreground">
                           <div className="flex items-center gap-2">
                             <div
                               className="w-3 h-3 rounded-full"
@@ -247,8 +221,8 @@ export default function MLASocialMedia() {
                             {item.competitor_name}
                           </div>
                         </TableCell>
-                        <TableCell className="text-right">{item.mention_count.toLocaleString()}</TableCell>
-                        <TableCell className="text-right">{item.percentage}%</TableCell>
+                        <TableCell className="text-right dark:text-foreground">{item.mention_count.toLocaleString()}</TableCell>
+                        <TableCell className="text-right dark:text-foreground">{item.percentage}%</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -259,7 +233,7 @@ export default function MLASocialMedia() {
         </>
       ) : (
         !error && (
-          <Card>
+          <Card className="dark:bg-card">
             <CardContent className="py-8 text-center">
               <p className="text-muted-foreground">No social media data available for this time period.</p>
               <p className="text-sm text-muted-foreground mt-2">

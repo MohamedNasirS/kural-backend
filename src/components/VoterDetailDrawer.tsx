@@ -7,6 +7,8 @@ import {
   CheckCircle, AlertCircle, MapPin, Mail, CreditCard,
   Heart, Briefcase, Clock, Shield
 } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { VoterDocuments } from '@/components/VoterDocuments';
 
 interface CompletedSurvey {
   surveyId: string;
@@ -25,6 +27,7 @@ interface VoterDetailDrawerProps {
     age?: number;
     gender?: string;
     booth?: string;
+    boothTamil?: string;
     boothNo?: number | string;
     boothId?: string;
     family?: string;
@@ -36,6 +39,7 @@ interface VoterDetailDrawerProps {
     voterID?: string;
     // Additional fields
     address?: string;
+    addressTamil?: string;
     doorNumber?: string | number;
     fatherName?: string;
     guardian?: string;
@@ -61,6 +65,20 @@ interface VoterDetailDrawerProps {
     surveysTaken?: number;
     lastSurveyAt?: string;
     completedSurveys?: CompletedSurvey[];
+    // NEW: SIR Fields
+    isActive?: boolean;
+    isNewFromSir?: boolean;
+    currentSirStatus?: 'passed' | 'removed' | 'reinstated' | 'new';
+    currentSirRevision?: string;
+    // NEW: Relative Info (replaces fatherName/guardian)
+    relative?: {
+      name?: { english?: string; tamil?: string };
+      relation?: string;
+    };
+    // NEW: Ward Info
+    wardNo?: number;
+    wardName?: string;
+    wardNameEnglish?: string;
   } | null;
 }
 
@@ -90,9 +108,12 @@ const maskAadhar = (aadhar?: string) => {
 };
 
 export const VoterDetailDrawer = ({ open, onClose, voterData }: VoterDetailDrawerProps) => {
+  const { user } = useAuth();
+
   if (!voterData) return null;
 
   const voterIdDisplay = voterData.voterId || voterData.voterID || 'N/A';
+  const canViewDocuments = ['L0', 'L1', 'L2'].includes(user?.role || '');
 
   return (
     <Sheet open={open} onOpenChange={onClose}>
@@ -115,6 +136,18 @@ export const VoterDetailDrawer = ({ open, onClose, voterData }: VoterDetailDrawe
         <div className="space-y-4 mt-6">
           {/* Status Badges */}
           <div className="flex flex-wrap gap-2">
+            {/* NEW VOTER Badge - Prominent display for new voters from SIR */}
+            {(voterData.isNewFromSir || voterData.currentSirStatus === 'new') && (
+              <Badge className="bg-blue-500 hover:bg-blue-600 text-white animate-pulse">
+                New Voter
+              </Badge>
+            )}
+            {/* SIR Status Badge */}
+            {voterData.isActive !== undefined && (
+              <Badge variant={voterData.isActive ? 'default' : 'destructive'}>
+                {voterData.isActive ? 'Active (SIR)' : 'Removed from SIR'}
+              </Badge>
+            )}
             <Badge variant={voterData.surveyed ? 'default' : 'secondary'}>
               {voterData.surveyed ? 'Surveyed' : 'Not Surveyed'}
             </Badge>
@@ -123,6 +156,11 @@ export const VoterDetailDrawer = ({ open, onClose, voterData }: VoterDetailDrawe
             </Badge>
             {voterData.status && (
               <Badge variant="outline">{voterData.status}</Badge>
+            )}
+            {voterData.currentSirRevision && (
+              <Badge variant="outline" className="text-xs">
+                SIR: {voterData.currentSirRevision}
+              </Badge>
             )}
           </div>
 
@@ -194,24 +232,41 @@ export const VoterDetailDrawer = ({ open, onClose, voterData }: VoterDetailDrawe
             </div>
           </Card>
 
-          {/* Family Information */}
+          {/* Family & Relative Information */}
           <Card className="p-4">
             <h3 className="font-semibold mb-3 flex items-center gap-2">
               <Home className="h-4 w-4" />
-              Family Information
+              Family & Relative Information
             </h3>
             <div className="grid grid-cols-2 gap-3">
               <div className="p-2 bg-muted rounded">
                 <p className="text-xs text-muted-foreground">Family ID</p>
                 <p className="text-sm font-medium">{voterData.familyId || voterData.family || 'N/A'}</p>
               </div>
-              {voterData.fatherName && (
+              {/* New: Relative Info from SIR */}
+              {(voterData.relative?.name?.english || voterData.fatherName) && (
                 <div className="p-2 bg-muted rounded">
-                  <p className="text-xs text-muted-foreground">Father's Name</p>
-                  <p className="text-sm font-medium">{voterData.fatherName}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {voterData.relative?.relation || 'Relative'}'s Name
+                  </p>
+                  <p className="text-sm font-medium">
+                    {voterData.relative?.name?.english || voterData.fatherName}
+                  </p>
+                  {voterData.relative?.name?.tamil && (
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {voterData.relative.name.tamil}
+                    </p>
+                  )}
                 </div>
               )}
-              {voterData.guardian && voterData.guardian !== voterData.fatherName && (
+              {voterData.relative?.relation && (
+                <div className="p-2 bg-muted rounded">
+                  <p className="text-xs text-muted-foreground">Relation Type</p>
+                  <p className="text-sm font-medium">{voterData.relative.relation}</p>
+                </div>
+              )}
+              {/* Legacy: Guardian (for backward compatibility) */}
+              {voterData.guardian && !voterData.relative?.name?.english && (
                 <div className="p-2 bg-muted rounded">
                   <p className="text-xs text-muted-foreground">Guardian</p>
                   <p className="text-sm font-medium">{voterData.guardian}</p>
@@ -226,21 +281,37 @@ export const VoterDetailDrawer = ({ open, onClose, voterData }: VoterDetailDrawe
             </div>
           </Card>
 
-          {/* Booth Information */}
+          {/* Booth & Ward Information */}
           <Card className="p-4">
             <h3 className="font-semibold mb-3 flex items-center gap-2">
               <MapPin className="h-4 w-4" />
-              Booth Information
+              Booth & Ward Information
             </h3>
             <div className="grid grid-cols-2 gap-3">
+              {/* Polling Station Name */}
               <div className="p-2 bg-muted rounded col-span-2">
-                <p className="text-xs text-muted-foreground">Booth Name</p>
+                <p className="text-xs text-muted-foreground">Polling Station</p>
                 <p className="text-sm font-medium">{voterData.booth || 'N/A'}</p>
+                {voterData.boothTamil && (
+                  <p className="text-xs text-muted-foreground mt-0.5">{voterData.boothTamil}</p>
+                )}
               </div>
               <div className="p-2 bg-muted rounded">
                 <p className="text-xs text-muted-foreground">Booth No</p>
                 <p className="text-sm font-medium">{voterData.boothNo || 'N/A'}</p>
               </div>
+              {/* Ward Info */}
+              {voterData.wardNo && (
+                <div className="p-2 bg-muted rounded">
+                  <p className="text-xs text-muted-foreground">Ward</p>
+                  <p className="text-sm font-medium">
+                    {voterData.wardNo} - {voterData.wardNameEnglish || voterData.wardName || ''}
+                  </p>
+                  {voterData.wardName && voterData.wardNameEnglish && (
+                    <p className="text-xs text-muted-foreground mt-0.5">{voterData.wardName}</p>
+                  )}
+                </div>
+              )}
               {voterData.boothId && (
                 <div className="p-2 bg-muted rounded">
                   <p className="text-xs text-muted-foreground">Booth ID</p>
@@ -320,6 +391,11 @@ export const VoterDetailDrawer = ({ open, onClose, voterData }: VoterDetailDrawe
                 )}
               </div>
             </Card>
+          )}
+
+          {/* Uploaded Documents - Only for L0, L1, L2 */}
+          {canViewDocuments && voterData.id && (
+            <VoterDocuments voterId={String(voterData.id)} />
           )}
 
           <Separator />

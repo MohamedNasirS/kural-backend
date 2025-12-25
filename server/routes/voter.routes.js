@@ -780,10 +780,10 @@ router.get("/:acId", async (req, res) => {
       return sendForbidden(res, "Access denied. You do not have permission to view this AC's data.");
     }
 
-    const { booth, search, status, page = 1, limit = 50 } = req.query;
+    const { booth, search, status, page = 1, limit = 50, includeRemoved, sirStatus } = req.query;
 
     // OPTIMIZATION: Cache simple paginated queries (no filters) - increased TTL for better performance
-    const isSimpleQuery = !search && (!status || status === 'all') && (!booth || booth === 'all');
+    const isSimpleQuery = !search && (!status || status === 'all') && (!booth || booth === 'all') && !sirStatus;
     const cacheKey = isSimpleQuery ? `ac:${acId}:voters:page${page}:limit${limit}` : null;
 
     if (cacheKey) {
@@ -794,6 +794,23 @@ router.get("/:acId", async (req, res) => {
     }
 
     const queryClauses = [];
+
+    // SIR FILTER: By default, exclude removed voters (isActive = false)
+    // Pass includeRemoved=true to see all voters including removed ones
+    // Pass sirStatus=removed to show ONLY removed voters
+    if (sirStatus === 'removed') {
+      // Show only removed voters
+      queryClauses.push({ isActive: false });
+    } else if (includeRemoved !== 'true') {
+      // Default: exclude removed voters
+      queryClauses.push({
+        $or: [
+          { isActive: true },
+          { isActive: { $exists: false } }  // Include voters without isActive field (legacy data)
+        ]
+      });
+    }
+    // If includeRemoved=true and no sirStatus, show all voters (no filter)
 
     if (booth && booth !== "all") {
       // Support both booth_id (e.g., "BOOTH1-111") and boothname
@@ -935,6 +952,26 @@ router.get("/:acId", async (req, res) => {
           surveyedAt: voter.surveyedAt || null,
           createdAt: voter.createdAt || null,
           updatedAt: voter.updatedAt || null,
+          // SIR fields for mobile app
+          isActive: voter.isActive !== false,  // Default to true if not set
+          isNewFromSir: voter.isNewFromSir || false,  // New voter from SIR import
+          currentSirStatus: voter.currentSirStatus || null,
+          currentSirRevision: voter.currentSirRevision || null,
+          // Tamil fields
+          boothNameTamil: voter.boothname_tamil || null,
+          addressTamil: voter.address_tamil || null,  // Polling station in Tamil
+          // Relative info (new nested structure)
+          relative: {
+            name: {
+              english: voter.relative?.name?.english || voter.fathername || null,
+              tamil: voter.relative?.name?.tamil || voter.fathername_tamil || null
+            },
+            relation: voter.relative?.relation || null
+          },
+          // Ward info
+          wardNo: voter.ward_no || voter.wardNo || null,
+          wardName: voter.ward_name || voter.wardName || null,
+          wardNameEnglish: voter.ward_name_english || voter.wardNameEnglish || null
         };
       }),
       pagination: {
@@ -1076,29 +1113,91 @@ router.get("/:acId/booths", async (req, res) => {
     const VoterModel = getVoterModel(acId);
 
     const boothsAggregation = await VoterModel.aggregate([
+      // Only count active voters (exclude removed voters from SIR)
+      { $match: { isActive: { $ne: false } } },
       {
         $group: {
           _id: "$booth_id",
           boothno: { $first: "$boothno" },
-          boothname: { $first: "$boothname" },
+          // Collect all unique booth names to pick the best one
+          boothnames: { $addToSet: "$boothname" },
           voterCount: { $sum: 1 }
         }
-      },
-      { $sort: { boothno: 1 } }
+      }
     ]);
+
+    // Helper function to extract booth number from booth_id (e.g., "ac118001" -> 1)
+    const extractBoothNumber = (boothId, boothno) => {
+      // First try to use the boothno field if it's a pure numeric value
+      if (boothno != null && boothno !== '') {
+        const boothnoStr = String(boothno);
+        // Only use boothno if it's purely numeric (not "ac118195")
+        if (/^\d+$/.test(boothnoStr)) {
+          return parseInt(boothnoStr, 10) || 0;
+        }
+      }
+      // Extract from booth_id (format: "ac{AC_NUM}{BOOTH_NUM}" or "BOOTH{NUM}-{AC}")
+      if (boothId) {
+        // Try format like "ac118001" - extract digits after AC number (e.g., "001" -> 1)
+        const acMatch = boothId.match(/ac\d{3}(\d+)/i);
+        if (acMatch) {
+          return parseInt(acMatch[1], 10) || 0;
+        }
+        // Try format like "BOOTH1-119"
+        const boothMatch = boothId.match(/BOOTH(\d+)/i);
+        if (boothMatch) {
+          return parseInt(boothMatch[1], 10) || 0;
+        }
+      }
+      return 0;
+    };
+
+    // Helper function to select the best booth name from multiple options
+    const selectBestBoothName = (boothnames, boothNumber) => {
+      if (!boothnames || boothnames.length === 0) {
+        return `Booth ${boothNumber}`;
+      }
+      // Prefer names that already have the booth number prefix (e.g., "1- Corporation...")
+      const withNumberPrefix = boothnames.find(name =>
+        name && /^\d+[-\s]/.test(name)
+      );
+      if (withNumberPrefix) {
+        return withNumberPrefix;
+      }
+      // Otherwise, pick the shortest name (usually the English format)
+      const shortestName = boothnames.reduce((shortest, current) => {
+        if (!current) return shortest;
+        if (!shortest) return current;
+        return current.length < shortest.length ? current : shortest;
+      }, null);
+      return shortestName || `Booth ${boothNumber}`;
+    };
 
     const booths = boothsAggregation
       .filter((booth) => booth._id != null && booth._id !== "")
-      .map((booth) => ({
-        boothId: booth._id,
-        booth_id: booth._id,
-        boothNo: booth.boothno,
-        boothName: booth.boothname || `Booth ${booth.boothno}`,
-        voterCount: booth.voterCount,
-        label: booth.boothname || `Booth ${booth.boothno}`,
-        // Combined display for dropdowns: "BOOTH_ID - Booth Name"
-        displayName: `${booth._id} - ${booth.boothname || `Booth ${booth.boothno}`}`
-      }));
+      .map((booth) => {
+        const boothNumber = extractBoothNumber(booth._id, booth.boothno);
+        // Select the best booth name from available options
+        const selectedName = selectBestBoothName(booth.boothnames, boothNumber);
+        // Check if the name already has a booth number prefix
+        const hasNumberPrefix = /^\d+[-\s]/.test(selectedName);
+        // Create display label - don't add prefix if already present
+        const displayLabel = hasNumberPrefix ? selectedName : `${boothNumber}- ${selectedName}`;
+        return {
+          boothId: booth._id,
+          booth_id: booth._id,
+          boothNo: boothNumber, // Always use the extracted numeric booth number
+          boothName: displayLabel, // Include booth number prefix for display
+          voterCount: booth.voterCount,
+          label: displayLabel, // Include booth number prefix for dropdown display
+          // Combined display for dropdowns: "BOOTH_ID - Booth Name"
+          displayName: `${booth._id} - ${displayLabel}`,
+          // Store extracted number for sorting
+          _sortOrder: boothNumber
+        };
+      })
+      // Sort by booth number numerically
+      .sort((a, b) => a._sortOrder - b._sortOrder);
 
     return sendSuccess(res, { booths });
   } catch (error) {

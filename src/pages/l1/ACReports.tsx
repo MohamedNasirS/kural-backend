@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ExportButton } from '@/components/ExportButton';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Users, Home, FileCheck, TrendingUp, BarChart3, Loader2 } from 'lucide-react';
+import { ArrowLeft, Users, Home, FileCheck, TrendingUp, BarChart3, Loader2, UserCheck, UserX } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { BeautifulDonutChart } from '@/components/charts';
 import { useState, useEffect } from 'react';
@@ -30,6 +30,13 @@ interface DashboardStats {
   totalMembers: number;
   surveysCompleted: number;
   totalBooths: number;
+  // SIR Statistics
+  sirStats?: {
+    activeVoters: number;
+    removedVoters: number;
+    activePercentage: number;
+    removedPercentage: number;
+  };
 }
 
 export const ACReports = () => {
@@ -152,6 +159,33 @@ export const ACReports = () => {
           <StatCard title="Surveys Completed" value={totalSurveys.toLocaleString()} icon={FileCheck} variant="success" />
           <StatCard title="Completion Rate" value={`${completionRate}%`} icon={TrendingUp} variant="default" />
         </div>
+
+        {/* SIR Statistics - Show if SIR data exists */}
+        {stats?.sirStats && stats.sirStats.removedVoters > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <StatCard
+              title="SIR Active Voters"
+              value={(stats?.sirStats?.activeVoters || 0).toLocaleString()}
+              subtitle={`${stats?.sirStats?.activePercentage?.toFixed(2) || 100}% of total`}
+              icon={UserCheck}
+              variant="success"
+            />
+            <StatCard
+              title="SIR Removed Voters"
+              value={(stats?.sirStats?.removedVoters || 0).toLocaleString()}
+              subtitle={`${stats?.sirStats?.removedPercentage?.toFixed(2) || 0}% of total`}
+              icon={UserX}
+              variant="destructive"
+            />
+            <StatCard
+              title="SIR Coverage"
+              value={`${((stats?.sirStats?.activeVoters || 0) + (stats?.sirStats?.removedVoters || 0)).toLocaleString()} / ${totalVoters.toLocaleString()}`}
+              subtitle="Voters with SIR status"
+              icon={Users}
+              variant="primary"
+            />
+          </div>
+        )}
 
         {/* Charts Section */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

@@ -8,6 +8,7 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import { isAuthenticated, hasRole } from '../../middleware/auth.js';
+import { getMLAPrecomputedStats } from '../../utils/mlaPrecomputedStats.js';
 
 const router = express.Router();
 
@@ -60,10 +61,19 @@ const getVoterBoothNumber = (acId, boothNo) => {
 /**
  * GET /api/mla-dashboard/:acId/overview
  * Returns AC overview with stats, last election result, booth sentiment
+ * Uses cached data if available (refreshed every 10 minutes)
  */
 router.get('/:acId/overview', async (req, res) => {
   try {
     const acId = Number(req.params.acId);
+
+    // Try to use cached data first
+    const cached = await getMLAPrecomputedStats(acId);
+    if (cached && cached.overview && !cached.isStale) {
+      return res.json(cached.overview);
+    }
+
+    // Fall back to live query if cache is not available or stale
     const { boothResults, electionSummary } = getCollections();
 
     // Get AC summary from historical data
@@ -190,11 +200,19 @@ router.get('/:acId/overview', async (req, res) => {
 /**
  * GET /api/mla-dashboard/:acId/gender-distribution
  * Returns gender breakdown for AC
- * Uses actual voter data if available, otherwise estimates from booth votes
+ * Uses cached data if available, otherwise live query
  */
 router.get('/:acId/gender-distribution', async (req, res) => {
   try {
     const acId = Number(req.params.acId);
+
+    // Try to use cached data first
+    const cached = await getMLAPrecomputedStats(acId);
+    if (cached && cached.genderDistribution && !cached.isStale) {
+      return res.json(cached.genderDistribution);
+    }
+
+    // Fall back to live query
     const { boothResults } = getCollections();
     const voterCollection = getVoterCollection(acId);
 
@@ -212,31 +230,33 @@ router.get('/:acId/gender-distribution', async (req, res) => {
         },
       ]).toArray();
 
-      const genderMap = {};
+      const genderMap = { male: 0, female: 0, others: 0 };
       genderStats.forEach((g) => {
-        const gender = (g._id || '').toLowerCase();
+        const gender = (g._id || '').toLowerCase().trim();
         if (gender === 'm' || gender === 'male') genderMap.male = g.count;
         else if (gender === 'f' || gender === 'female') genderMap.female = g.count;
-        else genderMap.others = (genderMap.others || 0) + g.count;
+        else if (gender && gender !== '') genderMap.others += g.count; // Only count non-empty values
+        // Empty/null gender values are ignored (data quality issue)
       });
 
-      const total = voterCount;
+      // Calculate percentages based on voters with known gender
+      const knownGenderTotal = genderMap.male + genderMap.female + genderMap.others;
       res.json({
         genderDistribution: {
           male: {
-            count: genderMap.male || 0,
-            percentage: total > 0 ? Math.round((genderMap.male || 0) / total * 100) : 0,
+            count: genderMap.male,
+            percentage: knownGenderTotal > 0 ? parseFloat(((genderMap.male / knownGenderTotal) * 100).toFixed(1)) : 0,
           },
           female: {
-            count: genderMap.female || 0,
-            percentage: total > 0 ? Math.round((genderMap.female || 0) / total * 100) : 0,
+            count: genderMap.female,
+            percentage: knownGenderTotal > 0 ? parseFloat(((genderMap.female / knownGenderTotal) * 100).toFixed(1)) : 0,
           },
           transgender: {
-            count: genderMap.others || 0,
-            percentage: total > 0 ? Math.round((genderMap.others || 0) / total * 100) : 0,
+            count: genderMap.others,
+            percentage: knownGenderTotal > 0 ? parseFloat(((genderMap.others / knownGenderTotal) * 100).toFixed(2)) : 0,
           },
         },
-        total,
+        total: knownGenderTotal,
         note: 'Based on actual voter data',
       });
     } else {
@@ -281,10 +301,22 @@ router.get('/:acId/gender-distribution', async (req, res) => {
 /**
  * GET /api/mla-dashboard/:acId/booth-size-distribution
  * Returns booth size analysis
+ * Uses cached data if available
  */
 router.get('/:acId/booth-size-distribution', async (req, res) => {
   try {
     const acId = Number(req.params.acId);
+
+    // Try to use cached data first
+    const cached = await getMLAPrecomputedStats(acId);
+    if (cached && cached.boothSizeDistribution && !cached.isStale) {
+      return res.json({
+        boothSizeDistribution: cached.boothSizeDistribution.distribution,
+        totalBooths: cached.boothSizeDistribution.totalBooths,
+      });
+    }
+
+    // Fall back to live query
     const { boothResults } = getCollections();
 
     const booths = await boothResults.find({ acId }).toArray();
@@ -322,10 +354,22 @@ router.get('/:acId/booth-size-distribution', async (req, res) => {
 /**
  * GET /api/mla-dashboard/:acId/margin-distribution
  * Returns victory margin distribution across booths
+ * Uses cached data if available
  */
 router.get('/:acId/margin-distribution', async (req, res) => {
   try {
     const acId = Number(req.params.acId);
+
+    // Try to use cached data first
+    const cached = await getMLAPrecomputedStats(acId);
+    if (cached && cached.marginDistribution && !cached.isStale) {
+      return res.json({
+        marginDistribution: cached.marginDistribution.distribution,
+        totalBooths: cached.marginDistribution.totalBooths,
+      });
+    }
+
+    // Fall back to live query
     const { boothResults } = getCollections();
 
     const booths = await boothResults.find({ acId }).toArray();
@@ -529,18 +573,18 @@ router.get('/:acId/booth/:boothNo', async (req, res) => {
 
       const genderMap = { male: 0, female: 0, others: 0 };
       genderStats.forEach((g) => {
-        const gender = (g._id || '').toLowerCase();
+        const gender = (g._id || '').toLowerCase().trim();
         if (gender === 'm' || gender === 'male') genderMap.male = g.count;
         else if (gender === 'f' || gender === 'female') genderMap.female = g.count;
-        else genderMap.others += g.count;
+        else if (gender && gender !== '') genderMap.others += g.count; // Only count non-empty values
       });
 
-      const voterTotal = boothVoterCount;
+      const knownGenderTotal = genderMap.male + genderMap.female + genderMap.others;
       voterStats = {
-        total: voterTotal,
-        male: { count: genderMap.male, percentage: voterTotal > 0 ? Math.round(genderMap.male / voterTotal * 100) : 0 },
-        female: { count: genderMap.female, percentage: voterTotal > 0 ? Math.round(genderMap.female / voterTotal * 100) : 0 },
-        others: { count: genderMap.others, percentage: voterTotal > 0 ? Math.round(genderMap.others / voterTotal * 100) : 0 },
+        total: boothVoterCount,
+        male: { count: genderMap.male, percentage: knownGenderTotal > 0 ? parseFloat(((genderMap.male / knownGenderTotal) * 100).toFixed(1)) : 0 },
+        female: { count: genderMap.female, percentage: knownGenderTotal > 0 ? parseFloat(((genderMap.female / knownGenderTotal) * 100).toFixed(1)) : 0 },
+        others: { count: genderMap.others, percentage: knownGenderTotal > 0 ? parseFloat(((genderMap.others / knownGenderTotal) * 100).toFixed(2)) : 0 },
       };
 
       // Get age distribution from actual voter data
@@ -618,11 +662,30 @@ router.get('/:acId/booth/:boothNo', async (req, res) => {
 /**
  * GET /api/mla-dashboard/:acId/priority-targets
  * Returns flippable booths (lost by narrow margin)
+ * Uses cached data if available (for default limit)
  */
 router.get('/:acId/priority-targets', async (req, res) => {
   try {
     const acId = Number(req.params.acId);
     const { limit = 10 } = req.query;
+
+    // Try to use cached data for default limit (10 or less)
+    if (Number(limit) <= 10) {
+      const cached = await getMLAPrecomputedStats(acId);
+      if (cached && cached.priorityTargets && !cached.isStale) {
+        return res.json({
+          priorityTargets: cached.priorityTargets.slice(0, Number(limit)),
+          summary: {
+            totalFlippable: cached.prioritySummary.totalFlippable,
+            totalGapToFlip: cached.prioritySummary.totalGapToFlip,
+            avgGapPerBooth: cached.prioritySummary.avgGapPerBooth,
+            potentialBoothGain: cached.prioritySummary.totalFlippable,
+          },
+        });
+      }
+    }
+
+    // Fall back to live query
     const { boothResults } = getCollections();
 
     // Get flippable booths sorted by gap to flip (ascending)
@@ -806,6 +869,280 @@ router.get('/:acId/competitor-analysis', async (req, res) => {
     });
   } catch (error) {
     console.error('Error in competitor analysis API:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+/**
+ * GET /api/mla-dashboard/:acId/current-voter-stats
+ * Returns current voter roll statistics from SIR data
+ * Shows: active voters, removed voters, new voters, gender breakdown
+ * Uses cached data if available
+ */
+router.get('/:acId/current-voter-stats', async (req, res) => {
+  try {
+    const acId = Number(req.params.acId);
+
+    // Try to use cached data first
+    const cached = await getMLAPrecomputedStats(acId);
+    if (cached && cached.currentVoterStats && !cached.isStale) {
+      return res.json({
+        available: cached.currentVoterStats.available,
+        currentVoterRoll: cached.currentVoterStats.available ? {
+          totalBooths: cached.currentVoterStats.totalBooths,
+          activeVoters: cached.currentVoterStats.activeVoters,
+          removedVoters: cached.currentVoterStats.removedVoters,
+          newVoters: cached.currentVoterStats.newVoters,
+          totalInDB: cached.currentVoterStats.totalInDB,
+          genderDistribution: cached.currentVoterStats.genderDistribution,
+        } : undefined,
+        note: 'Current voter roll based on latest SIR data (cached)',
+      });
+    }
+
+    // Fall back to live query
+    const voterCollection = getVoterCollection(acId);
+
+    // Check if voter data exists
+    const totalVoters = await voterCollection.countDocuments();
+    if (totalVoters === 0) {
+      return res.json({
+        available: false,
+        message: 'No voter data available for this AC',
+      });
+    }
+
+    // Get comprehensive stats in a single aggregation
+    const stats = await voterCollection.aggregate([
+      {
+        $facet: {
+          // Active voters count
+          active: [
+            { $match: { isActive: { $ne: false } } },
+            { $count: 'count' }
+          ],
+          // Removed voters count
+          removed: [
+            { $match: { isActive: false } },
+            { $count: 'count' }
+          ],
+          // New voters from SIR
+          newVoters: [
+            { $match: { $or: [{ isNewFromSir: true }, { currentSirStatus: 'new' }] } },
+            { $count: 'count' }
+          ],
+          // Gender distribution (active only)
+          gender: [
+            { $match: { isActive: { $ne: false } } },
+            { $group: { _id: '$gender', count: { $sum: 1 } } }
+          ],
+          // Booth count (active only)
+          booths: [
+            { $match: { isActive: { $ne: false } } },
+            { $group: { _id: '$boothno' } },
+            { $count: 'count' }
+          ]
+        }
+      }
+    ]).toArray();
+
+    const result = stats[0];
+    const activeCount = result.active[0]?.count || 0;
+    const removedCount = result.removed[0]?.count || 0;
+    const newCount = result.newVoters[0]?.count || 0;
+    const boothCount = result.booths[0]?.count || 0;
+
+    // Process gender stats
+    const genderMap = { male: 0, female: 0, others: 0 };
+    result.gender.forEach((g) => {
+      const gender = (g._id || '').toLowerCase().trim();
+      if (gender === 'm' || gender === 'male') genderMap.male = g.count;
+      else if (gender === 'f' || gender === 'female') genderMap.female = g.count;
+      else if (gender && gender !== '') genderMap.others += g.count; // Only count non-empty values as "others"
+      // Empty/null gender values are ignored (data quality issue)
+    });
+
+    // Calculate percentages based on voters with known gender
+    const knownGenderTotal = genderMap.male + genderMap.female + genderMap.others;
+
+    res.json({
+      available: true,
+      currentVoterRoll: {
+        totalBooths: boothCount,
+        activeVoters: activeCount,
+        removedVoters: removedCount,
+        newVoters: newCount,
+        totalInDB: totalVoters,
+        genderDistribution: {
+          male: {
+            count: genderMap.male,
+            percentage: knownGenderTotal > 0 ? parseFloat(((genderMap.male / knownGenderTotal) * 100).toFixed(1)) : 0
+          },
+          female: {
+            count: genderMap.female,
+            percentage: knownGenderTotal > 0 ? parseFloat(((genderMap.female / knownGenderTotal) * 100).toFixed(1)) : 0
+          },
+          others: {
+            count: genderMap.others,
+            percentage: knownGenderTotal > 0 ? parseFloat(((genderMap.others / knownGenderTotal) * 100).toFixed(2)) : 0
+          }
+        }
+      },
+      note: 'Current voter roll based on latest SIR data'
+    });
+  } catch (error) {
+    console.error('Error in current voter stats API:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+/**
+ * GET /api/mla-dashboard/:acId/booths-sir-stats
+ * Returns SIR statistics for all booths in an AC
+ */
+router.get('/:acId/booths-sir-stats', async (req, res) => {
+  try {
+    const acId = Number(req.params.acId);
+    const voterCollection = getVoterCollection(acId);
+
+    // Check if voter data exists
+    const totalVoters = await voterCollection.countDocuments();
+    if (totalVoters === 0) {
+      return res.json({
+        available: false,
+        message: 'No voter data available for this AC',
+      });
+    }
+
+    // Get booth-level stats using aggregation
+    const boothStats = await voterCollection.aggregate([
+      {
+        $group: {
+          _id: '$boothno',
+          boothname: { $first: '$boothname_english' },
+          boothnameTamil: { $first: '$boothname' },
+          total: { $sum: 1 },
+          active: { $sum: { $cond: [{ $ne: ['$isActive', false] }, 1, 0] } },
+          removed: { $sum: { $cond: [{ $eq: ['$isActive', false] }, 1, 0] } },
+          newVoters: { $sum: { $cond: [{ $or: [{ $eq: ['$isNewFromSir', true] }, { $eq: ['$currentSirStatus', 'new'] }] }, 1, 0] } },
+          male: { $sum: { $cond: [{ $and: [{ $ne: ['$isActive', false] }, { $in: ['$gender', ['male', 'Male', 'm', 'M']] }] }, 1, 0] } },
+          female: { $sum: { $cond: [{ $and: [{ $ne: ['$isActive', false] }, { $in: ['$gender', ['female', 'Female', 'f', 'F']] }] }, 1, 0] } },
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]).toArray();
+
+    const booths = boothStats.map(b => ({
+      boothNo: b._id,
+      boothName: b.boothname || b.boothnameTamil || `Booth ${b._id}`,
+      activeVoters: b.active,
+      removedVoters: b.removed,
+      newVoters: b.newVoters,
+      male: b.male,
+      female: b.female,
+      others: b.active - b.male - b.female,
+    }));
+
+    res.json({
+      available: true,
+      totalBooths: booths.length,
+      booths,
+    });
+  } catch (error) {
+    console.error('Error in booths SIR stats API:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+/**
+ * GET /api/mla-dashboard/:acId/booth/:boothNo/sir-stats
+ * Returns SIR statistics for a specific booth
+ */
+router.get('/:acId/booth/:boothNo/sir-stats', async (req, res) => {
+  try {
+    const acId = Number(req.params.acId);
+    const { boothNo } = req.params;
+    const voterCollection = getVoterCollection(acId);
+
+    // Try numeric boothno first
+    let query = { boothno: parseInt(boothNo) };
+    let count = await voterCollection.countDocuments(query);
+
+    // If no results, try string boothno
+    if (count === 0) {
+      query = { boothno: boothNo };
+      count = await voterCollection.countDocuments(query);
+    }
+
+    if (count === 0) {
+      return res.json({
+        available: false,
+        message: `No voter data found for booth ${boothNo}`,
+      });
+    }
+
+    // Get booth-level SIR stats
+    const stats = await voterCollection.aggregate([
+      { $match: query },
+      {
+        $facet: {
+          active: [
+            { $match: { isActive: { $ne: false } } },
+            { $count: 'count' }
+          ],
+          removed: [
+            { $match: { isActive: false } },
+            { $count: 'count' }
+          ],
+          newVoters: [
+            { $match: { $or: [{ isNewFromSir: true }, { currentSirStatus: 'new' }] } },
+            { $count: 'count' }
+          ],
+          gender: [
+            { $match: { isActive: { $ne: false } } },
+            { $group: { _id: '$gender', count: { $sum: 1 } } }
+          ],
+          boothInfo: [
+            { $limit: 1 },
+            { $project: { boothname: 1, boothname_english: 1 } }
+          ]
+        }
+      }
+    ]).toArray();
+
+    const result = stats[0];
+    const activeCount = result.active[0]?.count || 0;
+    const removedCount = result.removed[0]?.count || 0;
+    const newCount = result.newVoters[0]?.count || 0;
+    const boothInfo = result.boothInfo[0] || {};
+
+    // Process gender
+    const genderMap = { male: 0, female: 0, others: 0 };
+    result.gender.forEach((g) => {
+      const gender = (g._id || '').toLowerCase().trim();
+      if (gender === 'm' || gender === 'male') genderMap.male = g.count;
+      else if (gender === 'f' || gender === 'female') genderMap.female = g.count;
+      else if (gender && gender !== '') genderMap.others += g.count; // Only count non-empty values
+    });
+
+    res.json({
+      available: true,
+      boothNo,
+      boothName: boothInfo.boothname_english || boothInfo.boothname || `Booth ${boothNo}`,
+      sirStats: {
+        activeVoters: activeCount,
+        removedVoters: removedCount,
+        newVoters: newCount,
+        totalInDB: count,
+        genderDistribution: {
+          male: genderMap.male,
+          female: genderMap.female,
+          others: genderMap.others
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error in booth SIR stats API:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });

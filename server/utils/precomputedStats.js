@@ -38,6 +38,16 @@ const precomputedStatsSchema = new mongoose.Schema({
     completedCount: { type: Number, default: 0 },
     completionRate: { type: Number, default: 0 }
   }],
+  // SIR Statistics
+  sirStats: {
+    activeVoters: { type: Number, default: 0 },
+    removedVoters: { type: Number, default: 0 },
+    newVoters: { type: Number, default: 0 },           // NEW: Voters added from SIR (not in old data)
+    activePercentage: { type: Number, default: 0 },
+    removedPercentage: { type: Number, default: 0 },
+    newPercentage: { type: Number, default: 0 },       // NEW: Percentage of new voters
+    currentRevision: { type: String, default: null }   // NEW: Current SIR revision (e.g., "december2024")
+  },
   boothStats: [{
     boothNo: mongoose.Schema.Types.Mixed, // Can be String or Number depending on data
     boothName: String,
@@ -49,7 +59,10 @@ const precomputedStatsSchema = new mongoose.Schema({
     verifiedVoters: { type: Number, default: 0 },
     surveyedVoters: { type: Number, default: 0 },
     avgAge: { type: Number, default: 0 },
-    familyCount: { type: Number, default: 0 }
+    familyCount: { type: Number, default: 0 },
+    // SIR Statistics per booth
+    activeVoters: { type: Number, default: 0 },
+    removedVoters: { type: Number, default: 0 }
   }],
   computedAt: { type: Date, default: Date.now },
   computeDurationMs: Number
@@ -64,6 +77,35 @@ precomputedStatsSchema.index({ computedAt: -1 });
 
 const PrecomputedStats = mongoose.models.PrecomputedStats ||
   mongoose.model('PrecomputedStats', precomputedStatsSchema);
+
+/**
+ * Helper function to select the best booth name from multiple options
+ * Prefers names with booth number prefix (e.g., "1- Corporation...") over Tamil names
+ */
+function selectBestBoothName(boothnames, boothNumber) {
+  if (!boothnames || boothnames.length === 0) {
+    return `Booth ${boothNumber}`;
+  }
+
+  // Filter out null/undefined/empty values
+  const validNames = boothnames.filter(name => name && name.trim());
+  if (validNames.length === 0) {
+    return `Booth ${boothNumber}`;
+  }
+
+  // Prefer names that already have the booth number prefix (e.g., "1- Corporation...")
+  const withNumberPrefix = validNames.find(name => /^\d+[-\s]/.test(name));
+  if (withNumberPrefix) {
+    return withNumberPrefix;
+  }
+
+  // Otherwise, pick the shortest name (usually the English format)
+  const shortestName = validNames.reduce((shortest, current) => {
+    return current.length < shortest.length ? current : shortest;
+  }, validNames[0]);
+
+  return shortestName;
+}
 
 /**
  * Compute statistics for a single AC
@@ -92,6 +134,16 @@ export async function computeStatsForAC(acId) {
         totalSurveysCompleted: 0,
         votersSurveyed: 0,
         surveyBreakdown: [],
+        // SIR Statistics defaults
+        sirStats: {
+          activeVoters: 0,
+          removedVoters: 0,
+          newVoters: 0,
+          activePercentage: 0,
+          removedPercentage: 0,
+          newPercentage: 0,
+          currentRevision: null
+        },
         boothStats: [],
         computedAt: new Date(),
         computeDurationMs: Date.now() - startTime
@@ -111,7 +163,11 @@ export async function computeStatsForAC(acId) {
       acMeta,
       activeSurveys,
       totalSurveysTakenResult,
-      surveyBreakdownResult
+      surveyBreakdownResult,
+      sirActiveCount,
+      sirRemovedCount,
+      sirNewCount,
+      sirRevisionDoc
     ] = await Promise.all([
       // 1. Count total voters
       countVoters(acId, {}),
@@ -127,21 +183,23 @@ export async function computeStatsForAC(acId) {
         { $count: "total" }
       ]),
 
-      // 4. Count unique booths
+      // 4. Count unique booths (only booths with active voters)
       aggregateVoters(acId, [
-        { $match: { booth_id: { $exists: true, $ne: null } } },
+        { $match: { booth_id: { $exists: true, $ne: null }, isActive: { $ne: false } } },
         { $group: { _id: "$booth_id" } },
         { $count: "total" }
       ]),
 
       // 5. Booth-wise stats with demographics (for reports)
+      // Group by booth_id to avoid duplicates when same booth has multiple name formats
       aggregateVoters(acId, [
         { $match: {} },
         {
           $group: {
-            _id: "$boothname",
+            _id: "$booth_id",
             boothno: { $first: "$boothno" },
-            booth_id: { $first: "$booth_id" },
+            // Collect all unique booth names to pick the best one
+            boothnames: { $addToSet: "$boothname" },
             voters: { $sum: 1 },
             // Demographics for reports endpoint
             maleVoters: { $sum: { $cond: [{ $eq: ["$gender", "Male"] }, 1, 0] } },
@@ -155,20 +213,25 @@ export async function computeStatsForAC(acId) {
               { $eq: ["$surveyed", "Yes"] }
             ]}, 1, 0] } },
             avgAge: { $avg: "$age" },
-            uniqueFamilies: { $addToSet: "$familyId" }
+            uniqueFamilies: { $addToSet: "$familyId" },
+            // SIR counts per booth (isActive: true or not set = active, isActive: false = removed)
+            activeVoters: { $sum: { $cond: [{ $or: [{ $eq: ["$isActive", true] }, { $not: { $ifNull: ["$isActive", false] } }] }, 1, 0] } },
+            removedVoters: { $sum: { $cond: [{ $eq: ["$isActive", false] }, 1, 0] } }
           }
         },
         {
           $project: {
             boothno: 1,
-            booth_id: 1,
+            boothnames: 1,
             voters: 1,
             maleVoters: 1,
             femaleVoters: 1,
             verifiedVoters: 1,
             surveyedVoters: 1,
             avgAge: 1,
-            familyCount: { $size: { $filter: { input: "$uniqueFamilies", as: "f", cond: { $and: [{ $ne: ["$$f", null] }, { $ne: ["$$f", ""] }] } } } }
+            familyCount: { $size: { $filter: { input: "$uniqueFamilies", as: "f", cond: { $and: [{ $ne: ["$$f", null] }, { $ne: ["$$f", ""] }] } } } },
+            activeVoters: 1,
+            removedVoters: 1
           }
         },
         { $sort: { boothno: 1 } }
@@ -196,7 +259,19 @@ export async function computeStatsForAC(acId) {
           completedCount: { $sum: 1 }
         }},
         { $sort: { completedCount: -1 } }
-      ])
+      ]),
+
+      // 10. SIR Active voters count (isActive: true or isActive not set)
+      countVoters(acId, { $or: [{ isActive: true }, { isActive: { $exists: false } }] }),
+
+      // 11. SIR Removed voters count (isActive: false)
+      countVoters(acId, { isActive: false }),
+
+      // 12. NEW voters from SIR (isNewFromSir: true)
+      countVoters(acId, { isNewFromSir: true }),
+
+      // 13. Get current SIR revision from any voter
+      VoterModel.findOne({ currentSirRevision: { $exists: true, $ne: null } }, { currentSirRevision: 1 }).lean()
     ]);
 
     // Calculate multi-survey metrics
@@ -213,6 +288,21 @@ export async function computeStatsForAC(acId) {
       completionRate: totalMembers > 0 ? Math.round((s.completedCount / totalMembers) * 10000) / 100 : 0
     }));
 
+    // Calculate SIR statistics
+    const activeVoters = sirActiveCount || 0;
+    const removedVoters = sirRemovedCount || 0;
+    const newVoters = sirNewCount || 0;
+    const currentRevision = sirRevisionDoc?.currentSirRevision || null;
+    const sirStats = {
+      activeVoters,
+      removedVoters,
+      newVoters,
+      activePercentage: totalMembers > 0 ? Math.round((activeVoters / totalMembers) * 10000) / 100 : 0,
+      removedPercentage: totalMembers > 0 ? Math.round((removedVoters / totalMembers) * 10000) / 100 : 0,
+      newPercentage: totalMembers > 0 ? Math.round((newVoters / totalMembers) * 10000) / 100 : 0,
+      currentRevision
+    };
+
     const stats = {
       acId,
       acName: acMeta?.aci_name || null,
@@ -226,19 +316,33 @@ export async function computeStatsForAC(acId) {
       totalSurveysCompleted,
       votersSurveyed,
       surveyBreakdown,
-      boothStats: boothStatsResult.map(booth => ({
-        boothNo: booth.boothno,
-        boothName: booth._id,
-        boothId: booth.booth_id,
-        voters: booth.voters,
-        // Demographics for reports endpoint
-        maleVoters: booth.maleVoters || 0,
-        femaleVoters: booth.femaleVoters || 0,
-        verifiedVoters: booth.verifiedVoters || 0,
-        surveyedVoters: booth.surveyedVoters || 0,
-        avgAge: Math.round(booth.avgAge || 0),
-        familyCount: booth.familyCount || 0
-      })),
+      // SIR Statistics
+      sirStats,
+      boothStats: boothStatsResult.map(booth => {
+        const boothNumber = booth.boothno || 0;
+        // Select the best booth name from available options
+        const selectedName = selectBestBoothName(booth.boothnames, boothNumber);
+        // Check if name already has booth number prefix - if not, add it
+        const hasNumberPrefix = /^\d+[-\s]/.test(selectedName);
+        const displayName = hasNumberPrefix ? selectedName : `${boothNumber}- ${selectedName}`;
+
+        return {
+          boothNo: boothNumber,
+          boothName: displayName,
+          boothId: booth._id, // booth._id is now booth_id since we group by booth_id
+          voters: booth.voters,
+          // Demographics for reports endpoint
+          maleVoters: booth.maleVoters || 0,
+          femaleVoters: booth.femaleVoters || 0,
+          verifiedVoters: booth.verifiedVoters || 0,
+          surveyedVoters: booth.surveyedVoters || 0,
+          avgAge: Math.round(booth.avgAge || 0),
+          familyCount: booth.familyCount || 0,
+          // SIR Statistics per booth
+          activeVoters: booth.activeVoters || 0,
+          removedVoters: booth.removedVoters || 0
+        };
+      }),
       computedAt: new Date(),
       computeDurationMs: Date.now() - startTime
     };

@@ -1,7 +1,7 @@
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { StatCard } from '@/components/StatCard';
 import { Card } from '@/components/ui/card';
-import { Users, Home, FileCheck, TrendingUp, Loader2, BarChart3, PieChart as PieChartIcon, Activity, Calendar } from 'lucide-react';
+import { Users, Home, FileCheck, TrendingUp, Loader2, BarChart3, PieChart as PieChartIcon, Activity, Calendar, UserCheck, UserX } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { ExportButton } from '@/components/ExportButton';
 import { useState, useEffect, useCallback } from 'react';
@@ -53,6 +53,13 @@ interface DashboardStats {
     completedCount: number;
     completionRate: number;
   }>;
+  // SIR Statistics
+  sirStats?: {
+    activeVoters: number;
+    removedVoters: number;
+    activePercentage: number;
+    removedPercentage: number;
+  };
 }
 
 interface AgeGroup {
@@ -308,6 +315,33 @@ export const Reports = () => {
           />
           <StatCard title="Completion Rate" value={`${completionRate}%`} icon={TrendingUp} variant={completionRateNum > 50 ? 'success' : 'warning'} />
         </div>
+
+        {/* SIR Statistics - Show if SIR data exists */}
+        {stats?.sirStats && stats.sirStats.removedVoters > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <StatCard
+              title="SIR Active Voters"
+              value={(stats?.sirStats?.activeVoters || 0).toLocaleString()}
+              subtitle={`${stats?.sirStats?.activePercentage?.toFixed(2) || 100}% of total`}
+              icon={UserCheck}
+              variant="success"
+            />
+            <StatCard
+              title="SIR Removed Voters"
+              value={(stats?.sirStats?.removedVoters || 0).toLocaleString()}
+              subtitle={`${stats?.sirStats?.removedPercentage?.toFixed(2) || 0}% of total`}
+              icon={UserX}
+              variant="destructive"
+            />
+            <StatCard
+              title="SIR Coverage"
+              value={`${((stats?.sirStats?.activeVoters || 0) + (stats?.sirStats?.removedVoters || 0)).toLocaleString()} / ${totalVoters.toLocaleString()}`}
+              subtitle="Voters with SIR status"
+              icon={Users}
+              variant="primary"
+            />
+          </div>
+        )}
 
         {/* Charts Section */}
         <Tabs defaultValue="overview" className="space-y-6">
