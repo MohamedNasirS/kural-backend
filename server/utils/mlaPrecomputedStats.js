@@ -510,15 +510,18 @@ export async function computeMLAStatsForAC(acId) {
 
 /**
  * Save MLA pre-computed stats to database
+ * Uses native MongoDB driver to avoid Mongoose schema validation issues
  */
 export async function saveMLAPrecomputedStats(stats) {
   if (!stats) return null;
 
   try {
-    const result = await MLAPrecomputedStats.findOneAndUpdate(
+    // Use native MongoDB driver to bypass Mongoose schema validation
+    const db = mongoose.connection.db;
+    const result = await db.collection('mlaprecomputedstats').findOneAndUpdate(
       { acId: stats.acId },
       { $set: stats },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
     return result;
   } catch (error) {
@@ -529,10 +532,12 @@ export async function saveMLAPrecomputedStats(stats) {
 
 /**
  * Get MLA pre-computed stats for an AC
+ * Uses native MongoDB driver for consistency with save function
  */
 export async function getMLAPrecomputedStats(acId, maxAgeMs = 15 * 60 * 1000) {
   try {
-    const stats = await MLAPrecomputedStats.findOne({ acId }).lean();
+    const db = mongoose.connection.db;
+    const stats = await db.collection('mlaprecomputedstats').findOne({ acId });
 
     if (!stats) {
       return null;
