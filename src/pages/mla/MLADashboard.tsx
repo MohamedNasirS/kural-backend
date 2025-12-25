@@ -27,12 +27,7 @@ import {
 } from '@/lib/chartColors';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
-  useMLAOverview,
-  useMLAGenderDistribution,
-  useMLAMarginDistribution,
-  useMLABoothSizeDistribution,
-  useMLACurrentVoterStats,
-  useMLAPriorityTargets,
+  useMLADashboardAll,
   useMLAHistoricalTrends,
   useMLAShareOfVoice,
   useMLASentimentBreakdown,
@@ -165,20 +160,23 @@ export default function MLADashboard() {
 
   const acId = user?.assignedAC;
 
-  // React Query hooks - data is cached for 5 minutes
-  const { data: overview, isLoading: overviewLoading, error: overviewError } = useMLAOverview(acId);
-  const { data: priorityTargetsData } = useMLAPriorityTargets(acId, 4);
-  const { data: genderData } = useMLAGenderDistribution(acId);
-  const { data: marginData } = useMLAMarginDistribution(acId);
-  const { data: boothSizeData } = useMLABoothSizeDistribution(acId);
+  // Combined dashboard data - single API call for core data (much faster!)
+  const { data: dashboardData, isLoading: dashboardLoading, error: dashboardError } = useMLADashboardAll(acId);
+
+  // Additional data that's fetched separately (historical trends, social media)
   const { data: historicalData } = useMLAHistoricalTrends(acId);
-  const { data: currentVoterStats } = useMLACurrentVoterStats(acId);
   const { data: shareOfVoice } = useMLAShareOfVoice(acId, socialTimeRange);
   const { data: socialSentiment } = useMLASentimentBreakdown(acId, socialTimeRange);
 
-  const priorityTargets = (priorityTargetsData as any)?.priorityTargets || [];
+  // Extract data from combined response
+  const overview = (dashboardData as any)?.overview;
+  const genderData = (dashboardData as any)?.genderDistribution;
+  const marginData = (dashboardData as any)?.marginDistribution;
+  const boothSizeData = (dashboardData as any)?.boothSizeDistribution;
+  const currentVoterStats = (dashboardData as any)?.currentVoterStats;
+  const priorityTargets = (dashboardData as any)?.priorityTargets || [];
 
-  if (overviewLoading) {
+  if (dashboardLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-lg">Loading dashboard...</div>
@@ -186,10 +184,10 @@ export default function MLADashboard() {
     );
   }
 
-  if (overviewError) {
+  if (dashboardError) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-red-500">Error: {(overviewError as Error).message}</div>
+        <div className="text-red-500">Error: {(dashboardError as Error).message}</div>
       </div>
     );
   }

@@ -15,11 +15,7 @@ const GC_TIME = 30 * 60 * 1000; // 30 minutes - cache garbage collection
 // Query key factory for consistent cache keys
 export const mlaQueryKeys = {
   all: ['mla-dashboard'] as const,
-  overview: (acId: number) => [...mlaQueryKeys.all, 'overview', acId] as const,
-  genderDistribution: (acId: number) => [...mlaQueryKeys.all, 'gender-distribution', acId] as const,
-  boothSizeDistribution: (acId: number) => [...mlaQueryKeys.all, 'booth-size-distribution', acId] as const,
-  marginDistribution: (acId: number) => [...mlaQueryKeys.all, 'margin-distribution', acId] as const,
-  currentVoterStats: (acId: number) => [...mlaQueryKeys.all, 'current-voter-stats', acId] as const,
+  dashboardAll: (acId: number) => [...mlaQueryKeys.all, 'all', acId] as const,
   booths: (acId: number, params: string) => [...mlaQueryKeys.all, 'booths', acId, params] as const,
   boothDetail: (acId: number, boothNo: string) => [...mlaQueryKeys.all, 'booth', acId, boothNo] as const,
   boothsSirStats: (acId: number) => [...mlaQueryKeys.all, 'booths-sir-stats', acId] as const,
@@ -39,62 +35,23 @@ async function fetchMLA<T>(url: string): Promise<T> {
   return res.json();
 }
 
-// Overview hook
-export function useMLAOverview(acId: number | undefined) {
+/**
+ * Combined dashboard data hook - fetches ALL dashboard data in one request
+ * Returns: overview, priorityTargets, genderDistribution, marginDistribution,
+ *          boothSizeDistribution, currentVoterStats
+ * This is the preferred hook for the main dashboard as it reduces API calls from 6 to 1
+ */
+export function useMLADashboardAll(acId: number | undefined) {
   return useQuery({
-    queryKey: mlaQueryKeys.overview(acId!),
-    queryFn: () => fetchMLA(`/api/mla-dashboard/${acId}/overview`),
+    queryKey: mlaQueryKeys.dashboardAll(acId!),
+    queryFn: () => fetchMLA(`/api/mla-dashboard/${acId}/all`),
     enabled: !!acId,
     staleTime: STALE_TIME,
     gcTime: GC_TIME,
   });
 }
 
-// Gender distribution hook
-export function useMLAGenderDistribution(acId: number | undefined) {
-  return useQuery({
-    queryKey: mlaQueryKeys.genderDistribution(acId!),
-    queryFn: () => fetchMLA(`/api/mla-dashboard/${acId}/gender-distribution`),
-    enabled: !!acId,
-    staleTime: STALE_TIME,
-    gcTime: GC_TIME,
-  });
-}
-
-// Booth size distribution hook
-export function useMLABoothSizeDistribution(acId: number | undefined) {
-  return useQuery({
-    queryKey: mlaQueryKeys.boothSizeDistribution(acId!),
-    queryFn: () => fetchMLA(`/api/mla-dashboard/${acId}/booth-size-distribution`),
-    enabled: !!acId,
-    staleTime: STALE_TIME,
-    gcTime: GC_TIME,
-  });
-}
-
-// Margin distribution hook
-export function useMLAMarginDistribution(acId: number | undefined) {
-  return useQuery({
-    queryKey: mlaQueryKeys.marginDistribution(acId!),
-    queryFn: () => fetchMLA(`/api/mla-dashboard/${acId}/margin-distribution`),
-    enabled: !!acId,
-    staleTime: STALE_TIME,
-    gcTime: GC_TIME,
-  });
-}
-
-// Current voter stats hook (SIR data)
-export function useMLACurrentVoterStats(acId: number | undefined) {
-  return useQuery({
-    queryKey: mlaQueryKeys.currentVoterStats(acId!),
-    queryFn: () => fetchMLA(`/api/mla-dashboard/${acId}/current-voter-stats`),
-    enabled: !!acId,
-    staleTime: STALE_TIME,
-    gcTime: GC_TIME,
-  });
-}
-
-// Booths list hook
+// Booths list hook - for booth listing page with filters
 export function useMLABooths(acId: number | undefined, params: URLSearchParams) {
   const paramsString = params.toString();
   return useQuery({
@@ -106,7 +63,7 @@ export function useMLABooths(acId: number | undefined, params: URLSearchParams) 
   });
 }
 
-// Booths SIR stats hook
+// Booths SIR stats hook - for SIR view on booth list page
 export function useMLABoothsSirStats(acId: number | undefined) {
   return useQuery({
     queryKey: mlaQueryKeys.boothsSirStats(acId!),
@@ -117,7 +74,7 @@ export function useMLABoothsSirStats(acId: number | undefined) {
   });
 }
 
-// Booth detail hook
+// Booth detail hook - for individual booth page
 export function useMLABoothDetail(acId: number | undefined, boothNo: string | undefined) {
   return useQuery({
     queryKey: mlaQueryKeys.boothDetail(acId!, boothNo!),
@@ -128,7 +85,7 @@ export function useMLABoothDetail(acId: number | undefined, boothNo: string | un
   });
 }
 
-// Priority targets hook
+// Priority targets hook - for priority targets page (all flippable booths)
 export function useMLAPriorityTargets(acId: number | undefined, limit: number = 100) {
   return useQuery({
     queryKey: mlaQueryKeys.priorityTargets(acId!, limit),
@@ -139,7 +96,7 @@ export function useMLAPriorityTargets(acId: number | undefined, limit: number = 
   });
 }
 
-// Historical trends hook
+// Historical trends hook - for historical trends page
 export function useMLAHistoricalTrends(acId: number | undefined) {
   return useQuery({
     queryKey: mlaQueryKeys.historicalTrends(acId!),
@@ -150,7 +107,7 @@ export function useMLAHistoricalTrends(acId: number | undefined) {
   });
 }
 
-// Competitor analysis hook
+// Competitor analysis hook - for competitor analysis page
 export function useMLACompetitorAnalysis(acId: number | undefined) {
   return useQuery({
     queryKey: mlaQueryKeys.competitorAnalysis(acId!),
@@ -161,7 +118,7 @@ export function useMLACompetitorAnalysis(acId: number | undefined) {
   });
 }
 
-// Share of voice hook
+// Share of voice hook - for social media analytics
 export function useMLAShareOfVoice(acId: number | undefined, timeRange: string = '30d') {
   return useQuery({
     queryKey: mlaQueryKeys.shareOfVoice(acId!, timeRange),
@@ -172,7 +129,7 @@ export function useMLAShareOfVoice(acId: number | undefined, timeRange: string =
   });
 }
 
-// Sentiment breakdown hook
+// Sentiment breakdown hook - for social media analytics
 export function useMLASentimentBreakdown(acId: number | undefined, timeRange: string = '30d') {
   return useQuery({
     queryKey: mlaQueryKeys.sentimentBreakdown(acId!, timeRange),

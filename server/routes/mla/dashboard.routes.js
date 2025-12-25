@@ -59,6 +59,315 @@ const getVoterBoothNumber = (acId, boothNo) => {
 };
 
 /**
+ * GET /api/mla-dashboard/:acId/all
+ * Returns ALL dashboard data in a single response for faster loading
+ * Combines: overview, priorityTargets, genderDistribution, marginDistribution,
+ *           boothSizeDistribution, currentVoterStats
+ * Uses cached data if available (refreshed every 10 minutes)
+ */
+router.get('/:acId/all', async (req, res) => {
+  try {
+    const acId = Number(req.params.acId);
+
+    // Try to get all cached data at once
+    const cached = await getMLAPrecomputedStats(acId);
+
+    if (cached && !cached.isStale) {
+      // Return all cached data in a single response
+      return res.json({
+        success: true,
+        cached: true,
+        computedAt: cached.computedAt,
+        overview: cached.overview || null,
+        priorityTargets: cached.priorityTargets || [],
+        prioritySummary: cached.prioritySummary || null,
+        genderDistribution: cached.genderDistribution ? {
+          genderDistribution: {
+            male: cached.genderDistribution.male,
+            female: cached.genderDistribution.female,
+            transgender: cached.genderDistribution.transgender,
+          },
+          total: cached.genderDistribution.total,
+          note: cached.genderDistribution.note,
+        } : null,
+        marginDistribution: cached.marginDistribution ? {
+          marginDistribution: cached.marginDistribution.distribution,
+          totalBooths: cached.marginDistribution.totalBooths,
+        } : null,
+        boothSizeDistribution: cached.boothSizeDistribution ? {
+          boothSizeDistribution: cached.boothSizeDistribution.distribution,
+          totalBooths: cached.boothSizeDistribution.totalBooths,
+        } : null,
+        currentVoterStats: cached.currentVoterStats ? {
+          available: cached.currentVoterStats.available,
+          currentVoterRoll: cached.currentVoterStats.available ? {
+            totalBooths: cached.currentVoterStats.totalBooths,
+            activeVoters: cached.currentVoterStats.activeVoters,
+            removedVoters: cached.currentVoterStats.removedVoters,
+            newVoters: cached.currentVoterStats.newVoters,
+            totalInDB: cached.currentVoterStats.totalInDB,
+            genderDistribution: cached.currentVoterStats.genderDistribution,
+          } : undefined,
+          note: 'Current voter roll based on latest SIR data (cached)',
+        } : null,
+      });
+    }
+
+    // Fall back to live queries if cache is not available
+    // Run all queries in parallel for better performance
+    const { boothResults, electionSummary } = getCollections();
+    const voterCollection = getVoterCollection(acId);
+
+    // Parallel queries
+    const [
+      summary,
+      boothStats,
+      flippableBoothsData,
+      acNameDoc,
+      allBooths,
+      flippableBooths,
+      totalVoters,
+      voterStats,
+      voterCount,
+      genderStats,
+    ] = await Promise.all([
+      // Overview data
+      electionSummary.findOne({ acId }),
+      boothResults.aggregate([
+        { $match: { acId } },
+        {
+          $group: {
+            _id: '$sentiment',
+            count: { $sum: 1 },
+            totalVotes: { $sum: '$totalVotes' },
+          },
+        },
+      ]).toArray(),
+      boothResults.aggregate([
+        { $match: { acId, sentiment: 'flippable' } },
+        {
+          $group: {
+            _id: null,
+            totalGapToFlip: { $sum: '$gapToFlip' },
+            count: { $sum: 1 },
+          },
+        },
+      ]).toArray(),
+      boothResults.findOne({ acId }),
+      // Margin and booth size data
+      boothResults.find({ acId }).toArray(),
+      // Priority targets
+      boothResults.find({ acId, sentiment: 'flippable' }).sort({ gapToFlip: 1 }).limit(10).toArray(),
+      // Current voter stats
+      voterCollection.countDocuments(),
+      voterCollection.aggregate([
+        {
+          $facet: {
+            active: [{ $match: { isActive: { $ne: false } } }, { $count: 'count' }],
+            removed: [{ $match: { isActive: false } }, { $count: 'count' }],
+            newVoters: [{ $match: { $or: [{ isNewFromSir: true }, { currentSirStatus: 'new' }] } }, { $count: 'count' }],
+            gender: [{ $match: { isActive: { $ne: false } } }, { $group: { _id: '$gender', count: { $sum: 1 } } }],
+            booths: [{ $match: { isActive: { $ne: false } } }, { $group: { _id: '$boothno' } }, { $count: 'count' }],
+          },
+        },
+      ]).toArray(),
+      // Gender distribution from voters
+      voterCollection.countDocuments(),
+      voterCollection.aggregate([
+        { $group: { _id: '$gender', count: { $sum: 1 } } },
+      ]).toArray(),
+    ]);
+
+    // Process overview data
+    const sentimentCounts = { favorable: 0, negative: 0, balanced: 0, flippable: 0 };
+    let totalVotes = 0;
+    boothStats.forEach((s) => {
+      if (sentimentCounts.hasOwnProperty(s._id)) {
+        sentimentCounts[s._id] = s.count;
+      }
+      totalVotes += s.totalVotes || 0;
+    });
+    const totalBooths = Object.values(sentimentCounts).reduce((a, b) => a + b, 0);
+    const flippableStats = flippableBoothsData[0] || { count: 0, totalGapToFlip: 0 };
+
+    const winner2021 = summary?.winner2021 || summary?.electionResults?.[2021]?.[0];
+    const runnerUp2021 = summary?.runnerUp2021 || summary?.electionResults?.[2021]?.[1];
+    const isOurPartyWinner = winner2021?.party === 'AIADMK';
+    const ourParty = isOurPartyWinner ? winner2021 : runnerUp2021;
+    const opponent = isOurPartyWinner ? runnerUp2021 : winner2021;
+    const margin = winner2021 && runnerUp2021 ? winner2021.votes - runnerUp2021.votes : 0;
+    const acName = summary?.acName || acNameDoc?.acName || `AC ${acId}`;
+
+    const overview = {
+      ac: { id: acId, name: acName, district: summary?.district || 'Coimbatore' },
+      stats: {
+        totalBooths,
+        totalVoters: totalVotes,
+        avgVotersPerBooth: totalBooths > 0 ? Math.round(totalVotes / totalBooths) : 0,
+      },
+      lastElection: {
+        result: isOurPartyWinner ? 'won' : 'lost',
+        margin: isOurPartyWinner ? margin : -margin,
+        marginPercent: totalVotes > 0 ? parseFloat((Math.abs(margin) / totalVotes * 100).toFixed(2)) : 0,
+        ourParty: { name: 'AIADMK', votes: ourParty?.votes || 0, voteSharePercent: ourParty?.voteShare || 0 },
+        opponent: { name: opponent?.party || 'DMK', votes: opponent?.votes || 0, voteSharePercent: opponent?.voteShare || 0 },
+      },
+      boothSentiment: {
+        favorable: { count: sentimentCounts.favorable, percentage: totalBooths > 0 ? Math.round((sentimentCounts.favorable / totalBooths) * 100) : 0 },
+        negative: { count: sentimentCounts.negative, percentage: totalBooths > 0 ? Math.round((sentimentCounts.negative / totalBooths) * 100) : 0 },
+        balanced: { count: sentimentCounts.balanced, percentage: totalBooths > 0 ? Math.round((sentimentCounts.balanced / totalBooths) * 100) : 0 },
+        flippable: { count: sentimentCounts.flippable, percentage: totalBooths > 0 ? Math.round((sentimentCounts.flippable / totalBooths) * 100) : 0 },
+      },
+      flippableBooths: {
+        count: flippableStats.count,
+        totalGapToFlip: flippableStats.totalGapToFlip,
+        avgGapPerBooth: flippableStats.count > 0 ? Math.round(flippableStats.totalGapToFlip / flippableStats.count) : 0,
+      },
+      predictedTurnout2026: summary?.predictedTurnout2026 || null,
+    };
+
+    // Process margin distribution
+    const marginDist = {
+      'Lost by 500+': 0, 'Lost by 101-500': 0, 'Lost by 51-100': 0, 'Lost by 0-50': 0,
+      'Won by 0-50': 0, 'Won by 51-100': 0, 'Won by 101-500': 0, 'Won by 500+': 0,
+    };
+    allBooths.forEach((b) => {
+      const m = b.margin || 0;
+      const abs = Math.abs(m);
+      if (m >= 0) {
+        if (abs <= 50) marginDist['Won by 0-50']++;
+        else if (abs <= 100) marginDist['Won by 51-100']++;
+        else if (abs <= 500) marginDist['Won by 101-500']++;
+        else marginDist['Won by 500+']++;
+      } else {
+        if (abs <= 50) marginDist['Lost by 0-50']++;
+        else if (abs <= 100) marginDist['Lost by 51-100']++;
+        else if (abs <= 500) marginDist['Lost by 101-500']++;
+        else marginDist['Lost by 500+']++;
+      }
+    });
+
+    // Process booth size distribution
+    let lessThan500 = 0, from500to1000 = 0, from1000to1500 = 0, moreThan1500 = 0;
+    allBooths.forEach((b) => {
+      const votes = b.totalVotes || 0;
+      if (votes < 500) lessThan500++;
+      else if (votes < 1000) from500to1000++;
+      else if (votes < 1500) from1000to1500++;
+      else moreThan1500++;
+    });
+
+    // Process priority targets
+    const priorityTargets = flippableBooths.map((b) => ({
+      boothNo: b.boothNo,
+      boothName: b.boothName || `Booth ${b.boothNo}`,
+      ourVoteSharePercent: b.ourParty?.voteSharePercent || 0,
+      margin: { votes: Math.abs(b.margin || 0), percent: Math.abs(b.marginPercent || 0) },
+      gapToFlip: b.gapToFlip || 0,
+      totalVoters: b.totalVotes || 0,
+      reason: `Lost by ${Math.abs(b.margin || 0)} votes - need ${b.gapToFlip || 0} more votes to flip`,
+    }));
+
+    // Process current voter stats
+    let currentVoterStatsResponse = { available: false };
+    if (totalVoters > 0) {
+      const result = voterStats[0] || {};
+      const activeCount = result.active?.[0]?.count || 0;
+      const removedCount = result.removed?.[0]?.count || 0;
+      const newCount = result.newVoters?.[0]?.count || 0;
+      const boothCount = result.booths?.[0]?.count || 0;
+
+      const genderMap = { male: 0, female: 0, others: 0 };
+      (result.gender || []).forEach((g) => {
+        const gender = (g._id || '').toLowerCase().trim();
+        if (gender === 'm' || gender === 'male') genderMap.male = g.count;
+        else if (gender === 'f' || gender === 'female') genderMap.female = g.count;
+        else if (gender && gender !== '') genderMap.others += g.count;
+      });
+      const knownGenderTotal = genderMap.male + genderMap.female + genderMap.others;
+
+      currentVoterStatsResponse = {
+        available: true,
+        currentVoterRoll: {
+          totalBooths: boothCount,
+          activeVoters: activeCount,
+          removedVoters: removedCount,
+          newVoters: newCount,
+          totalInDB: totalVoters,
+          genderDistribution: {
+            male: { count: genderMap.male, percentage: knownGenderTotal > 0 ? parseFloat(((genderMap.male / knownGenderTotal) * 100).toFixed(1)) : 0 },
+            female: { count: genderMap.female, percentage: knownGenderTotal > 0 ? parseFloat(((genderMap.female / knownGenderTotal) * 100).toFixed(1)) : 0 },
+            others: { count: genderMap.others, percentage: knownGenderTotal > 0 ? parseFloat(((genderMap.others / knownGenderTotal) * 100).toFixed(2)) : 0 },
+          },
+        },
+        note: 'Current voter roll based on latest SIR data',
+      };
+    }
+
+    // Process gender distribution from all voters
+    let genderDistributionResponse = null;
+    if (voterCount > 0) {
+      const genderMap = { male: 0, female: 0, others: 0 };
+      genderStats.forEach((g) => {
+        const gender = (g._id || '').toLowerCase().trim();
+        if (gender === 'm' || gender === 'male') genderMap.male = g.count;
+        else if (gender === 'f' || gender === 'female') genderMap.female = g.count;
+        else if (gender && gender !== '') genderMap.others += g.count;
+      });
+      const knownGenderTotal = genderMap.male + genderMap.female + genderMap.others;
+      genderDistributionResponse = {
+        genderDistribution: {
+          male: { count: genderMap.male, percentage: knownGenderTotal > 0 ? parseFloat(((genderMap.male / knownGenderTotal) * 100).toFixed(1)) : 0 },
+          female: { count: genderMap.female, percentage: knownGenderTotal > 0 ? parseFloat(((genderMap.female / knownGenderTotal) * 100).toFixed(1)) : 0 },
+          transgender: { count: genderMap.others, percentage: knownGenderTotal > 0 ? parseFloat(((genderMap.others / knownGenderTotal) * 100).toFixed(2)) : 0 },
+        },
+        total: knownGenderTotal,
+        note: 'Based on actual voter data',
+      };
+    }
+
+    res.json({
+      success: true,
+      cached: false,
+      overview,
+      priorityTargets,
+      prioritySummary: {
+        totalFlippable: flippableStats.count,
+        totalGapToFlip: flippableStats.totalGapToFlip,
+        avgGapPerBooth: flippableStats.count > 0 ? Math.round(flippableStats.totalGapToFlip / flippableStats.count) : 0,
+      },
+      genderDistribution: genderDistributionResponse,
+      marginDistribution: {
+        marginDistribution: [
+          { range: 'Lost by 500+', count: marginDist['Lost by 500+'], type: 'lost' },
+          { range: 'Lost by 101-500', count: marginDist['Lost by 101-500'], type: 'lost' },
+          { range: 'Lost by 51-100', count: marginDist['Lost by 51-100'], type: 'lost' },
+          { range: 'Lost by 0-50', count: marginDist['Lost by 0-50'], type: 'lost' },
+          { range: 'Won by 0-50', count: marginDist['Won by 0-50'], type: 'won' },
+          { range: 'Won by 51-100', count: marginDist['Won by 51-100'], type: 'won' },
+          { range: 'Won by 101-500', count: marginDist['Won by 101-500'], type: 'won' },
+          { range: 'Won by 500+', count: marginDist['Won by 500+'], type: 'won' },
+        ],
+        totalBooths: allBooths.length,
+      },
+      boothSizeDistribution: {
+        boothSizeDistribution: [
+          { range: '< 500 voters', count: lessThan500, percentage: allBooths.length > 0 ? Math.round((lessThan500 / allBooths.length) * 100) : 0 },
+          { range: '500-1000 voters', count: from500to1000, percentage: allBooths.length > 0 ? Math.round((from500to1000 / allBooths.length) * 100) : 0 },
+          { range: '1000-1500 voters', count: from1000to1500, percentage: allBooths.length > 0 ? Math.round((from1000to1500 / allBooths.length) * 100) : 0 },
+          { range: '> 1500 voters', count: moreThan1500, percentage: allBooths.length > 0 ? Math.round((moreThan1500 / allBooths.length) * 100) : 0 },
+        ],
+        totalBooths: allBooths.length,
+      },
+      currentVoterStats: currentVoterStatsResponse,
+    });
+  } catch (error) {
+    console.error('Error in combined dashboard API:', error);
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+});
+
+/**
  * GET /api/mla-dashboard/:acId/overview
  * Returns AC overview with stats, last election result, booth sentiment
  * Uses cached data if available (refreshed every 10 minutes)
