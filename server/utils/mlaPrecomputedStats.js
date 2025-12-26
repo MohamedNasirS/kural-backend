@@ -12,6 +12,11 @@
  */
 
 import mongoose from 'mongoose';
+import { createRequire } from 'module';
+
+// Create require for CommonJS modules (logger)
+const require = createRequire(import.meta.url);
+const logger = require('./logger.cjs');
 
 // Schema for MLA pre-computed stats
 const mlaPrecomputedStatsSchema = new mongoose.Schema({
@@ -159,7 +164,7 @@ export async function computeMLAStatsForAC(acId) {
     // Check if we have booth results for this AC
     const boothCount = await boothResults.countDocuments({ acId });
     if (boothCount === 0) {
-      console.log(`[MLAPrecomputed] AC ${acId}: No booth results found, skipping`);
+      logger.info({ acId }, '[MLAPrecomputed] No booth results found, skipping');
       return null;
     }
 
@@ -503,7 +508,7 @@ export async function computeMLAStatsForAC(acId) {
 
     return stats;
   } catch (error) {
-    console.error(`[MLAPrecomputed] Error computing stats for AC ${acId}:`, error.message);
+    logger.error({ acId, error: error.message }, '[MLAPrecomputed] Error computing stats for AC');
     return null;
   }
 }
@@ -525,7 +530,7 @@ export async function saveMLAPrecomputedStats(stats) {
     );
     return result;
   } catch (error) {
-    console.error(`[MLAPrecomputed] Error saving stats for AC ${stats.acId}:`, error.message);
+    logger.error({ acId: stats.acId, error: error.message }, '[MLAPrecomputed] Error saving stats for AC');
     return null;
   }
 }
@@ -551,19 +556,19 @@ export async function getMLAPrecomputedStats(acId, maxAgeMs = 15 * 60 * 1000) {
 
     return { ...stats, isStale: false };
   } catch (error) {
-    console.error(`[MLAPrecomputed] Error getting stats for AC ${acId}:`, error.message);
+    logger.error({ acId, error: error.message }, '[MLAPrecomputed] Error getting stats for AC');
     return null;
   }
 }
 
-// MLA-specific AC IDs (ACs that have polling data imported)
-const MLA_AC_IDS = [116, 118]; // Add more as polling data is imported
+// MLA-specific AC IDs - all ACs (auto-skips ACs without polling data)
+const MLA_AC_IDS = [101, 102, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126];
 
 /**
  * Compute and save MLA stats for all ACs with polling data
  */
 export async function computeAllMLAStats() {
-  console.log('[MLAPrecomputed] Starting MLA stats computation...');
+  logger.info('[MLAPrecomputed] Starting MLA stats computation...');
   const startTime = Date.now();
 
   const results = { success: 0, failed: 0, skipped: 0 };
@@ -573,13 +578,13 @@ export async function computeAllMLAStats() {
       const stats = await computeMLAStatsForAC(acId);
       if (stats) {
         await saveMLAPrecomputedStats(stats);
-        console.log(`[MLAPrecomputed] AC ${acId}: ${stats.overview.stats.totalBooths} booths, ${stats.computeDurationMs}ms`);
+        logger.info({ acId, booths: stats.overview.stats.totalBooths, durationMs: stats.computeDurationMs }, '[MLAPrecomputed] AC stats computed');
         results.success++;
       } else {
         results.skipped++;
       }
     } catch (error) {
-      console.error(`[MLAPrecomputed] AC ${acId} failed:`, error.message);
+      logger.error({ acId, error: error.message }, '[MLAPrecomputed] AC computation failed');
       results.failed++;
     }
 
@@ -588,7 +593,7 @@ export async function computeAllMLAStats() {
   }
 
   const totalDuration = Date.now() - startTime;
-  console.log(`[MLAPrecomputed] Completed: ${results.success} success, ${results.failed} failed, ${results.skipped} skipped in ${Math.round(totalDuration/1000)}s`);
+  logger.info({ success: results.success, failed: results.failed, skipped: results.skipped, durationSec: Math.round(totalDuration/1000) }, '[MLAPrecomputed] Computation completed');
 
   return { ...results, totalDurationMs: totalDuration };
 }
@@ -598,20 +603,20 @@ let mlaStatsInterval = null;
 
 export function startMLAStatsComputeJob(intervalMs = 10 * 60 * 1000) {
   if (mlaStatsInterval) {
-    console.log('[MLAPrecomputed] Job already running');
+    logger.info('[MLAPrecomputed] Job already running');
     return;
   }
 
-  console.log(`[MLAPrecomputed] Starting background job (interval: ${intervalMs / 1000}s)`);
+  logger.info({ intervalSec: intervalMs / 1000 }, '[MLAPrecomputed] Starting background job');
 
   // Run immediately on startup (after 45s delay)
   setTimeout(() => {
-    computeAllMLAStats().catch(err => console.error('[MLAPrecomputed] Initial computation failed:', err.message));
+    computeAllMLAStats().catch(err => logger.error({ error: err.message }, '[MLAPrecomputed] Initial computation failed'));
   }, 45000);
 
   // Then run periodically
   mlaStatsInterval = setInterval(() => {
-    computeAllMLAStats().catch(err => console.error('[MLAPrecomputed] Periodic computation failed:', err.message));
+    computeAllMLAStats().catch(err => logger.error({ error: err.message }, '[MLAPrecomputed] Periodic computation failed'));
   }, intervalMs);
 
   return mlaStatsInterval;
@@ -621,7 +626,7 @@ export function stopMLAStatsComputeJob() {
   if (mlaStatsInterval) {
     clearInterval(mlaStatsInterval);
     mlaStatsInterval = null;
-    console.log('[MLAPrecomputed] Background job stopped');
+    logger.info('[MLAPrecomputed] Background job stopped');
   }
 }
 

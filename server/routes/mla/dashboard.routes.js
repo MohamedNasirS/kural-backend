@@ -1468,41 +1468,18 @@ router.get('/:acId/booth/:boothNo/sir-stats', async (req, res) => {
 /**
  * Analytics API Proxy Configuration
  * Proxies requests to the external analytics service at kural.digital
+ * Requires environment variables: ANALYTICS_API_EMAIL, ANALYTICS_API_PASSWORD
  */
 const ANALYTICS_API_BASE = process.env.ANALYTICS_API_URL || 'https://kural.digital/api/v1';
 const ANALYTICS_CREDENTIALS = {
-  email: process.env.ANALYTICS_API_EMAIL || 'admin@kuralai.com',
-  password: process.env.ANALYTICS_API_PASSWORD || 'kuraladmin@123',
+  email: process.env.ANALYTICS_API_EMAIL,
+  password: process.env.ANALYTICS_API_PASSWORD,
 };
 
-// Mapping from AC IDs to Analytics API location IDs
-const AC_TO_LOCATION_ID = {
-  101: 26,  // Dharapuram
-  102: 28,  // Kangayam
-  108: 32,  // Udhagamandalam
-  109: 27,  // Gudalur
-  110: 34,  // Coonoor
-  111: 41,  // Mettuppalayam
-  112: 31,  // Avanashi
-  113: 33,  // Tiruppur North
-  114: 37,  // Tiruppur South
-  115: 40,  // Palladam
-  116: 39,  // Sulur
-  117: 36,  // Kavundampalayam
-  118: 44,  // Coimbatore North
-  121: 43,  // Singanallur
-  122: 35,  // Kinathukadavu
-  123: 30,  // Pollachi
-  124: 42,  // Valparai
-  125: 29,  // Udumalaipettai
-  126: 38,  // Madathukulam
-};
-
-// All Constituencies location ID (aggregated data)
+// All Constituencies location ID (aggregated data for all ACs)
 const ALL_CONSTITUENCIES_LOCATION_ID = 45;
 
-// Helper to get location_id from acId
-// Currently using All Constituencies (45) as individual AC data is not available
+// Helper to get location_id - uses aggregate data for all ACs
 const getLocationId = (acId) => ALL_CONSTITUENCIES_LOCATION_ID;
 
 // Cache for analytics JWT token

@@ -15,7 +15,12 @@
  */
 
 import mongoose from 'mongoose';
+import { createRequire } from 'module';
 import { getVoterModel, ALL_AC_IDS, countVoters, countSurveyedVoters, aggregateVoters } from './voterCollection.js';
+
+// Create require for CommonJS modules (logger)
+const require = createRequire(import.meta.url);
+const logger = require('./logger.cjs');
 
 // Schema for pre-computed stats
 const precomputedStatsSchema = new mongoose.Schema({
@@ -349,7 +354,7 @@ export async function computeStatsForAC(acId) {
 
     return stats;
   } catch (error) {
-    console.error(`Error computing stats for AC ${acId}:`, error.message);
+    logger.error({ acId, error: error.message }, 'Error computing stats for AC');
     return null;
   }
 }
@@ -368,7 +373,7 @@ export async function savePrecomputedStats(stats) {
     );
     return result;
   } catch (error) {
-    console.error(`Error saving stats for AC ${stats.acId}:`, error.message);
+    logger.error({ acId: stats.acId, error: error.message }, 'Error saving stats for AC');
     return null;
   }
 }
@@ -394,7 +399,7 @@ export async function getPrecomputedStats(acId, maxAgeMs = 10 * 60 * 1000) {
 
     return { ...stats, isStale: false };
   } catch (error) {
-    console.error(`Error getting stats for AC ${acId}:`, error.message);
+    logger.error({ acId, error: error.message }, 'Error getting stats for AC');
     return null;
   }
 }
@@ -407,12 +412,12 @@ async function computeAndSaveSingleAC(acId) {
     const stats = await computeStatsForAC(acId);
     if (stats) {
       await savePrecomputedStats(stats);
-      console.log(`[PrecomputedStats] AC ${acId}: ${stats.totalMembers} voters, ${stats.computeDurationMs}ms`);
+      logger.info({ acId, voters: stats.totalMembers, durationMs: stats.computeDurationMs }, '[PrecomputedStats] AC stats computed');
       return { acId, status: 'success', voters: stats.totalMembers };
     }
     return { acId, status: 'skipped' };
   } catch (error) {
-    console.error(`[PrecomputedStats] AC ${acId} failed:`, error.message);
+    logger.error({ acId, error: error.message }, '[PrecomputedStats] AC computation failed');
     return { acId, status: 'failed', error: error.message };
   }
 }
@@ -423,7 +428,7 @@ async function computeAndSaveSingleAC(acId) {
  * OPTIMIZED: Stagger computation with longer delays to prevent CPU spikes
  */
 export async function computeAllStats() {
-  console.log('[PrecomputedStats] Starting stats computation for all ACs...');
+  logger.info('[PrecomputedStats] Starting stats computation for all ACs...');
   const startTime = Date.now();
 
   const results = {
@@ -452,7 +457,7 @@ export async function computeAllStats() {
   }
 
   const totalDuration = Date.now() - startTime;
-  console.log(`[PrecomputedStats] Completed: ${results.success} success, ${results.failed} failed, ${results.skipped} skipped in ${Math.round(totalDuration/1000)}s`);
+  logger.info({ success: results.success, failed: results.failed, skipped: results.skipped, durationSec: Math.round(totalDuration/1000) }, '[PrecomputedStats] Computation completed');
 
   return {
     ...results,
@@ -470,12 +475,12 @@ let isComputationRunning = false;
 
 export function startStatsComputeJob(intervalMs = 10 * 60 * 1000) {
   if (statsInterval) {
-    console.log('[PrecomputedStats] Job already running');
+    logger.info('[PrecomputedStats] Job already running');
     return;
   }
 
-  console.log(`[PrecomputedStats] Starting background job (interval: ${intervalMs / 1000}s)`);
-  console.log('[PrecomputedStats] Computation is staggered: 15s delay between each AC');
+  logger.info({ intervalSec: intervalMs / 1000 }, '[PrecomputedStats] Starting background job');
+  logger.info('[PrecomputedStats] Computation is staggered: 15s delay between each AC');
 
   // Run immediately on startup (after 30s delay to let server stabilize)
   setTimeout(() => {
@@ -492,7 +497,7 @@ export function startStatsComputeJob(intervalMs = 10 * 60 * 1000) {
 
 async function runComputationIfNotBusy() {
   if (isComputationRunning) {
-    console.log('[PrecomputedStats] Skipping - previous computation still running');
+    logger.info('[PrecomputedStats] Skipping - previous computation still running');
     return;
   }
 
@@ -500,7 +505,7 @@ async function runComputationIfNotBusy() {
   try {
     await computeAllStats();
   } catch (err) {
-    console.error('[PrecomputedStats] Computation failed:', err.message);
+    logger.error({ error: err.message }, '[PrecomputedStats] Computation failed');
   } finally {
     isComputationRunning = false;
   }
@@ -510,7 +515,7 @@ export function stopStatsComputeJob() {
   if (statsInterval) {
     clearInterval(statsInterval);
     statsInterval = null;
-    console.log('[PrecomputedStats] Background job stopped');
+    logger.info('[PrecomputedStats] Background job stopped');
   }
 }
 
@@ -523,7 +528,7 @@ export async function getAllPrecomputedStats() {
     const allStats = await PrecomputedStats.find({}).lean();
     return allStats || [];
   } catch (error) {
-    console.error('[PrecomputedStats] Error getting all stats:', error.message);
+    logger.error({ error: error.message }, '[PrecomputedStats] Error getting all stats');
     return [];
   }
 }
