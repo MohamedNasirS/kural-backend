@@ -2,7 +2,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { Users, Home, FileCheck, User, Calendar, UserCircle, ClipboardList } from 'lucide-react';
+import { FileCheck, User, Calendar, UserCircle, ClipboardList, MapPin } from 'lucide-react';
 
 interface SurveyAnswer {
   question?: string;
@@ -21,8 +21,15 @@ interface SurveyDetailDrawerProps {
     respondent_name?: string;
     voter_id?: string;
     voterId?: string;
+    // Booth information
     booth?: string;
     booth_id?: string | null;
+    boothno?: string | number | null;
+    boothname?: string | null;
+    // AC information
+    ac_id?: number | null;
+    aci_id?: number | null;
+    aci_name?: string | null;
     survey_date?: string;
     status?: string;
     answers?: SurveyAnswer[];
@@ -41,7 +48,6 @@ export const SurveyDetailDrawer = ({ open, onClose, surveyData }: SurveyDetailDr
   // Normalize data to support both old and new formats
   const voterName = surveyData.respondent_name || surveyData.voter || 'Unknown';
   const voterId = surveyData.voterId || surveyData.voter_id || 'N/A';
-  const booth = surveyData.booth || 'N/A';
   const date = surveyData.survey_date || surveyData.date || 'N/A';
   const status = surveyData.status || 'Completed';
   const answers = surveyData.answers || (surveyData.question && surveyData.answer ? [{
@@ -49,6 +55,15 @@ export const SurveyDetailDrawer = ({ open, onClose, surveyData }: SurveyDetailDr
     answer: surveyData.answer
   }] : []);
   const agent = surveyData.agent || 'N/A';
+
+  // Booth information - normalized
+  const boothNo = surveyData.boothno || null;
+  const boothName = surveyData.boothname || surveyData.booth || null;
+  const boothId = surveyData.booth_id || null;
+
+  // AC information - normalized
+  const acId = surveyData.ac_id || surveyData.aci_id || null;
+  const acName = surveyData.aci_name || null;
 
   // Format date for display
   const formatDate = (dateString: string) => {
@@ -100,13 +115,6 @@ export const SurveyDetailDrawer = ({ open, onClose, surveyData }: SurveyDetailDr
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Home className="h-4 w-4 text-muted-foreground" />
-                <div>
-                  <p className="text-xs text-muted-foreground">Booth</p>
-                  <p className="text-sm font-medium">{booth}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
                 <Calendar className="h-4 w-4 text-muted-foreground" />
                 <div>
                   <p className="text-xs text-muted-foreground">Survey Date</p>
@@ -120,6 +128,44 @@ export const SurveyDetailDrawer = ({ open, onClose, surveyData }: SurveyDetailDr
                     <p className="text-xs text-muted-foreground">Agent</p>
                     <p className="text-sm font-medium">{agent}</p>
                   </div>
+                </div>
+              )}
+            </div>
+          </Card>
+
+          {/* Booth & Location Information */}
+          <Card className="p-4">
+            <h3 className="font-semibold mb-3 flex items-center gap-2">
+              <MapPin className="h-4 w-4" />
+              Booth & Location Information
+            </h3>
+            <div className="grid grid-cols-2 gap-3">
+              {/* Polling Station Name */}
+              {boothName && (
+                <div className="p-2 bg-muted rounded col-span-2">
+                  <p className="text-xs text-muted-foreground">Polling Station</p>
+                  <p className="text-sm font-medium">{boothName}</p>
+                </div>
+              )}
+              {/* Booth Number */}
+              <div className="p-2 bg-muted rounded">
+                <p className="text-xs text-muted-foreground">Booth No</p>
+                <p className="text-sm font-medium">{boothNo || 'N/A'}</p>
+              </div>
+              {/* Booth ID */}
+              {boothId && (
+                <div className="p-2 bg-muted rounded">
+                  <p className="text-xs text-muted-foreground">Booth ID</p>
+                  <p className="text-sm font-medium font-mono text-xs">{boothId}</p>
+                </div>
+              )}
+              {/* Assembly Constituency */}
+              {(acId || acName) && (
+                <div className="p-2 bg-muted rounded col-span-2">
+                  <p className="text-xs text-muted-foreground">Assembly Constituency</p>
+                  <p className="text-sm font-medium">
+                    {acName ? `${acName}${acId ? ` (${acId})` : ''}` : `AC ${acId}`}
+                  </p>
                 </div>
               )}
             </div>
@@ -179,12 +225,6 @@ export const SurveyDetailDrawer = ({ open, onClose, surveyData }: SurveyDetailDr
                 <span className="text-sm font-medium">Total Questions</span>
                 <span className="text-sm">{answers.length}</span>
               </div>
-              {surveyData.booth_id && (
-                <div className="flex justify-between items-center p-3 bg-muted rounded-lg">
-                  <span className="text-sm font-medium">Booth ID</span>
-                  <span className="text-sm font-mono">{surveyData.booth_id}</span>
-                </div>
-              )}
             </div>
           </Card>
         </div>
