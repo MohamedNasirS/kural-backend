@@ -141,7 +141,7 @@ userSchema.index(
 userSchema.index({ role: 1 });
 userSchema.index({ assignedAC: 1 });
 userSchema.index({ role: 1, assignedAC: 1 });
-userSchema.index({ isActive: 1 });
+// Note: isActive index is added by softDeletePlugin below
 userSchema.index({ phone: 1 });
 
 // Apply soft delete plugin (uses isActive field)

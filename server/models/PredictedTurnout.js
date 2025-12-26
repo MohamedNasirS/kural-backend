@@ -13,7 +13,7 @@ const predictedTurnoutSchema = new mongoose.Schema(
     },
     acId: {
       type: Number,
-      index: true,
+      // Note: acId is indexed via compound index { acId: 1, year: 1 } below
     },
     district: {
       type: String,

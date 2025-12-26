@@ -18,7 +18,7 @@ const electionResultSchema = new mongoose.Schema(
     acId: {
       type: Number,
       required: true,
-      index: true,
+      // Note: acId is indexed via compound indexes below
     },
     acName: {
       type: String,
