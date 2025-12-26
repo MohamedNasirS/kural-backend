@@ -27,6 +27,55 @@ router.use(isAuthenticated);
 const surveyFormCache = new Map();
 const SURVEY_FORM_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 
+// Booth lookup cache - maps booth_id to { boothname, boothno }
+const boothLookupCache = new Map();
+const BOOTH_LOOKUP_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// Build booths lookup map from voter data for an AC
+const buildBoothsLookup = async (acId) => {
+  if (!acId) return {};
+
+  const cacheKey = `booths_${acId}`;
+  const cached = boothLookupCache.get(cacheKey);
+  const now = Date.now();
+
+  if (cached && (now - cached.timestamp) < BOOTH_LOOKUP_CACHE_TTL) {
+    return cached.lookup;
+  }
+
+  try {
+    const voterBooths = await aggregateVoters(acId, [
+      { $match: {} },
+      { $group: {
+          _id: "$booth_id",
+          boothno: { $first: "$boothno" },
+          boothnames: { $addToSet: "$boothname" }
+        }
+      },
+      { $sort: { boothno: 1 } }
+    ]);
+
+    const lookup = {};
+    for (const b of voterBooths) {
+      if (!b._id) continue;
+      const validNames = (b.boothnames || []).filter(n => n && n.trim());
+      // Prefer names with booth number prefix (e.g., "1- Corporation...")
+      const withPrefix = validNames.find(n => /^\d+[-\s]/.test(n));
+      const boothname = withPrefix || validNames[0] || null;
+      lookup[b._id] = {
+        boothname,
+        boothno: b.boothno || null
+      };
+    }
+
+    boothLookupCache.set(cacheKey, { lookup, timestamp: now });
+    return lookup;
+  } catch (err) {
+    console.error(`Error building booths lookup for AC ${acId}:`, err.message);
+    return {};
+  }
+};
+
 // Batch fetch survey forms - called once per request with all unique surveyIds
 const batchFetchSurveyForms = async (surveyIds) => {
   const uniqueIds = [...new Set(surveyIds.filter(Boolean).map(String))];
@@ -297,8 +346,21 @@ router.get("/", async (req, res) => {
       responses = responses.slice(skip, skip + limitNum);
     }
 
+    // Build booths lookup for enrichment (use acId if specified, otherwise build from response ACs)
+    let boothsLookup = {};
+    if (acId) {
+      boothsLookup = await buildBoothsLookup(acId);
+    } else {
+      // For L0 without AC filter, build lookup for each unique AC in responses
+      const uniqueAcIds = [...new Set(responses.map(r => r.aci_id || r.acId).filter(Boolean))];
+      for (const responseAcId of uniqueAcIds) {
+        const acLookup = await buildBoothsLookup(responseAcId);
+        Object.assign(boothsLookup, acLookup);
+      }
+    }
+
     // Batch fetch all survey forms ONCE (fixes N+1 query problem)
-    const normalizedResponses = responses.map(r => normalizeSurveyResponse(r, { enrichAc: true, enrichBooth: true }));
+    const normalizedResponses = responses.map(r => normalizeSurveyResponse(r, { enrichAc: true, enrichBooth: true, boothsLookup }));
     const surveyIds = normalizedResponses.map(r => r.formId).filter(Boolean);
     const surveyFormsMap = await batchFetchSurveyForms(surveyIds);
 
@@ -440,8 +502,11 @@ router.get("/:acId", async (req, res) => {
     const totalResponses = await countSurveyResponses(acId, query);
     console.log(`[L1 SurveyResponses] Found ${responses.length} responses, total: ${totalResponses}`);
 
+    // Build booths lookup for enrichment
+    const boothsLookup = await buildBoothsLookup(acId);
+
     // Batch fetch all survey forms ONCE (fixes N+1 query problem)
-    const normalizedResponses = responses.map(r => normalizeSurveyResponse(r, { enrichAc: true, enrichBooth: true }));
+    const normalizedResponses = responses.map(r => normalizeSurveyResponse(r, { enrichAc: true, enrichBooth: true, boothsLookup }));
     const surveyIds = normalizedResponses.map(r => r.formId).filter(Boolean);
     const surveyFormsMap = await batchFetchSurveyForms(surveyIds);
 
