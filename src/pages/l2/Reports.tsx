@@ -158,7 +158,11 @@ export const Reports = () => {
   // Calculate totals from demographics when filtering, fallback to booth reports
   const totalMale = demographics?.genderDistribution?.male || boothReports.reduce((sum, b) => sum + b.male_voters, 0);
   const totalFemale = demographics?.genderDistribution?.female || boothReports.reduce((sum, b) => sum + b.female_voters, 0);
-  const totalVoters = totalMale + totalFemale;
+  // When filtering by booth, use booth-specific voter count; otherwise use stats.totalMembers for accurate count
+  // (stats.totalMembers includes all voters regardless of gender field, avoiding undercounting)
+  const totalVoters = boothFilter !== 'all'
+    ? filteredBoothPerformance.reduce((sum, b) => sum + b.total_voters, 0)
+    : (stats?.totalMembers || (totalMale + totalFemale));
   // When filtering by booth, use booth-specific family count; otherwise use global stats
   const totalFamilies = boothFilter !== 'all'
     ? filteredBoothPerformance.reduce((sum, b) => sum + b.total_families, 0)
