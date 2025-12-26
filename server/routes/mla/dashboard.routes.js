@@ -1472,8 +1472,8 @@ router.get('/:acId/booth/:boothNo/sir-stats', async (req, res) => {
  */
 const ANALYTICS_API_BASE = process.env.ANALYTICS_API_URL || 'https://kural.digital/api/v1';
 const ANALYTICS_CREDENTIALS = {
-  email: process.env.ANALYTICS_API_EMAIL,
-  password: process.env.ANALYTICS_API_PASSWORD,
+  email: process.env.ANALYTICS_API_EMAIL || 'admin@kuralai.com',
+  password: process.env.ANALYTICS_API_PASSWORD || 'kuraladmin@123',
 };
 
 // Mapping from AC IDs to Analytics API location IDs (for future AC-specific analytics)
