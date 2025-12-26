@@ -51,10 +51,29 @@ if (cluster.isPrimary) {
   // Track worker restart history
   const restartHistory = new Map();
 
-  // Fork initial workers
+  // Track which worker runs background jobs (first worker spawned)
+  let backgroundJobWorkerId = null;
+
+  // Fork initial workers with NODE_CLUSTER_ID env variable
   for (let i = 0; i < WORKERS; i++) {
-    const worker = cluster.fork();
-    primaryLogger.info({ workerId: worker.id, pid: worker.process.pid }, 'Forking worker');
+    const workerId = i + 1;
+    const isBackgroundJobWorker = i === 0; // First worker handles background jobs
+
+    const worker = cluster.fork({
+      NODE_CLUSTER_ID: String(workerId),
+      IS_BACKGROUND_JOB_WORKER: isBackgroundJobWorker ? '1' : '0'
+    });
+
+    if (isBackgroundJobWorker) {
+      backgroundJobWorkerId = worker.id;
+    }
+
+    primaryLogger.info({
+      workerId: worker.id,
+      pid: worker.process.pid,
+      nodeClusterId: workerId,
+      backgroundJobWorker: isBackgroundJobWorker
+    }, 'Forking worker');
   }
 
   // Handle worker coming online
@@ -99,11 +118,23 @@ if (cluster.isPrimary) {
     recentRestarts.push(now);
     restartHistory.set(workerId, recentRestarts);
 
-    primaryLogger.info({ workerId, delayMs: RESTART_DELAY_MS }, 'Scheduling worker restart');
+    // Check if the dead worker was the background job worker
+    const wasBackgroundJobWorker = workerId === backgroundJobWorkerId;
+
+    primaryLogger.info({ workerId, delayMs: RESTART_DELAY_MS, wasBackgroundJobWorker }, 'Scheduling worker restart');
     setTimeout(() => {
-      const newWorker = cluster.fork();
+      // If background job worker died, the new worker becomes the background job worker
+      const newWorker = cluster.fork({
+        NODE_CLUSTER_ID: String(workerId),
+        IS_BACKGROUND_JOB_WORKER: wasBackgroundJobWorker ? '1' : '0'
+      });
+
+      if (wasBackgroundJobWorker) {
+        backgroundJobWorkerId = newWorker.id;
+      }
+
       primaryLogger.info(
-        { newWorkerId: newWorker.id, pid: newWorker.process.pid },
+        { newWorkerId: newWorker.id, pid: newWorker.process.pid, backgroundJobWorker: wasBackgroundJobWorker },
         'New worker spawned'
       );
     }, RESTART_DELAY_MS);

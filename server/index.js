@@ -239,26 +239,26 @@ logger.info({ pid: process.pid }, 'Server initialization complete');
 
 // Start background job to pre-compute dashboard stats every 5 minutes
 // This dramatically reduces MongoDB CPU load by avoiding heavy aggregations on each request
-// Only start in primary worker (or non-cluster mode) to avoid duplicate computation
-const isClusterWorker = process.env.NODE_CLUSTER_ID !== undefined;
-const isPrimaryWorker = !isClusterWorker || process.env.NODE_CLUSTER_ID === '1';
+// Only start in designated background job worker (or non-cluster mode) to avoid duplicate computation
+const isClusterMode = process.env.NODE_CLUSTER_ID !== undefined;
+const isBackgroundJobWorker = !isClusterMode || process.env.IS_BACKGROUND_JOB_WORKER === '1';
 
-if (isPrimaryWorker) {
+if (isBackgroundJobWorker) {
   // Delay stats computation to allow server to fully initialize
   setTimeout(async () => {
     try {
       // Ensure database connection is established before starting stats job
       await connectToDatabase();
-      logger.info({ pid: process.pid }, 'Starting pre-computed stats background job');
+      logger.info({ pid: process.pid, clusterId: process.env.NODE_CLUSTER_ID || 'standalone' }, 'Starting pre-computed stats background job');
       startStatsComputeJob(5 * 60 * 1000); // Every 5 minutes
 
       // Start MLA dashboard stats job
-      logger.info({ pid: process.pid }, 'Starting MLA pre-computed stats background job');
+      logger.info({ pid: process.pid, clusterId: process.env.NODE_CLUSTER_ID || 'standalone' }, 'Starting MLA pre-computed stats background job');
       startMLAStatsComputeJob(10 * 60 * 1000); // Every 10 minutes
     } catch (err) {
       logger.error({ error: err.message }, 'Failed to start stats background job');
     }
   }, 10000); // Wait 10 seconds after startup
 } else {
-  logger.info({ pid: process.pid }, 'Skipping stats job (not primary worker)');
+  logger.info({ pid: process.pid, clusterId: process.env.NODE_CLUSTER_ID }, 'Skipping background jobs (not designated worker)');
 }
