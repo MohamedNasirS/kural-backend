@@ -1476,11 +1476,40 @@ const ANALYTICS_CREDENTIALS = {
   password: process.env.ANALYTICS_API_PASSWORD,
 };
 
+// Mapping from AC IDs to Analytics API location IDs (for future AC-specific analytics)
+const AC_TO_LOCATION_ID = {
+  101: 26,  // Dharapuram
+  102: 28,  // Kangayam
+  108: 32,  // Udhagamandalam
+  109: 27,  // Gudalur
+  110: 34,  // Coonoor
+  111: 41,  // Mettuppalayam
+  112: 31,  // Avanashi
+  113: 33,  // Tiruppur North
+  114: 37,  // Tiruppur South
+  115: 40,  // Palladam
+  116: 39,  // Sulur
+  117: 36,  // Kavundampalayam
+  118: 44,  // Coimbatore North
+  119: 47,  // Thondamuthur
+  120: 46,  // Coimbatore South
+  121: 43,  // Singanallur
+  122: 35,  // Kinathukadavu
+  123: 30,  // Pollachi
+  124: 42,  // Valparai
+  125: 29,  // Udumalaipettai
+  126: 38,  // Madathukulam
+};
+
 // All Constituencies location ID (aggregated data for all ACs)
 const ALL_CONSTITUENCIES_LOCATION_ID = 45;
 
-// Helper to get location_id - uses aggregate data for all ACs
-const getLocationId = (acId) => ALL_CONSTITUENCIES_LOCATION_ID;
+// Helper to get location_id - currently uses aggregate data, can switch to AC-specific later
+const getLocationId = (acId) => {
+  // TODO: When AC-specific social analytics data is available, use:
+  // return AC_TO_LOCATION_ID[acId] || ALL_CONSTITUENCIES_LOCATION_ID;
+  return ALL_CONSTITUENCIES_LOCATION_ID;
+};
 
 // Cache for analytics JWT token
 let analyticsToken = null;
