@@ -87,6 +87,14 @@ export default function MLACompetitorAnalysis() {
 
   return (
     <div className="space-y-6">
+      {/* Page Header with Year Indicator */}
+      <div className="flex flex-col gap-1">
+        <h1 className="text-2xl font-bold dark:text-foreground">Competitor Analysis</h1>
+        <p className="text-muted-foreground">
+          2021 Assembly Election Results • AC {acId}
+        </p>
+      </div>
+
       {/* Head-to-Head Comparison */}
       {data.ourParty && data.mainOpponent && (
         <Card className="dark:bg-card">
