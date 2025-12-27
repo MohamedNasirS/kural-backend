@@ -186,7 +186,7 @@ export const NotificationCenter = () => {
         <SheetHeader>
           <SheetTitle className="flex items-center justify-between flex-wrap gap-2">
             <span>Notifications</span>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-3 mr-6">
               {unreadCount > 0 && (
                 <Button variant="ghost" size="sm" onClick={markAllAsRead} className="h-8 text-xs">
                   <Check className="h-4 w-4 mr-1" />
@@ -214,8 +214,11 @@ export const NotificationCenter = () => {
             </Button>
           </SheetDescription>
         </SheetHeader>
-        <Separator className="my-4" />
-        <ScrollArea className="h-[calc(100vh-14rem)]">
+        <Button variant="outline" size="sm" className="w-full mt-3" onClick={() => { setIsOpen(false); navigate('/shared/notifications'); }}>
+          View All Notifications
+        </Button>
+        <Separator className="my-3" />
+        <ScrollArea className="h-[calc(100vh-16rem)]">
           {loading && notifications.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-center">
               <RefreshCw className="h-8 w-8 text-muted-foreground mb-2 animate-spin" />
@@ -277,10 +280,6 @@ export const NotificationCenter = () => {
             </div>
           )}
         </ScrollArea>
-        <Separator className="my-4" />
-        <Button variant="outline" className="w-full" onClick={() => { setIsOpen(false); navigate('/shared/notifications'); }}>
-          View All Notifications
-        </Button>
       </SheetContent>
     </Sheet>
   );
