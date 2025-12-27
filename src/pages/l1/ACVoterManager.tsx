@@ -145,6 +145,8 @@ export const ACVoterManager = () => {
       } else if (sirFilter === 'removed') {
         params.append('includeRemoved', 'true');
         params.append('sirStatus', 'removed');
+      } else if (sirFilter === 'new') {
+        params.append('sirStatus', 'new');
       }
       // 'active' is default - no param needed
 
@@ -268,6 +270,7 @@ export const ACVoterManager = () => {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="active">Active (SIR Passed)</SelectItem>
+                <SelectItem value="new">New Voters (SIR)</SelectItem>
                 <SelectItem value="removed">Removed from SIR</SelectItem>
                 <SelectItem value="all">All Voters</SelectItem>
               </SelectContent>

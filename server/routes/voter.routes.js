@@ -798,9 +798,13 @@ router.get("/:acId", async (req, res) => {
     // SIR FILTER: By default, exclude removed voters (isActive = false)
     // Pass includeRemoved=true to see all voters including removed ones
     // Pass sirStatus=removed to show ONLY removed voters
+    // Pass sirStatus=new to show ONLY newly added voters from SIR
     if (sirStatus === 'removed') {
       // Show only removed voters
       queryClauses.push({ isActive: false });
+    } else if (sirStatus === 'new') {
+      // Show only newly added voters from SIR
+      queryClauses.push({ currentSirStatus: 'new' });
     } else if (includeRemoved !== 'true') {
       // Default: exclude removed voters
       queryClauses.push({
