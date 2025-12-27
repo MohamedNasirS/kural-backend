@@ -6,8 +6,10 @@ import { FileCheck, User, Calendar, UserCircle, ClipboardList, MapPin } from 'lu
 
 interface SurveyAnswer {
   question?: string;
+  questionText?: string;
   questionId?: string;
   answer?: string;
+  answerText?: string;
   value?: string;
   prompt?: string;
 }
@@ -193,8 +195,8 @@ export const SurveyDetailDrawer = ({ open, onClose, surveyData }: SurveyDetailDr
             {answers.length > 0 ? (
               <div className="space-y-4">
                 {answers.map((item, index) => {
-                  const questionText = item.question || item.prompt || item.questionId || `Question ${index + 1}`;
-                  const answerText = item.answer || item.value || 'No answer provided';
+                  const questionText = item.question || item.questionText || item.prompt || item.questionId || `Question ${index + 1}`;
+                  const answerText = item.answer || item.answerText || item.value || 'No answer provided';
 
                   return (
                     <div key={index} className="p-3 bg-muted rounded-lg">
